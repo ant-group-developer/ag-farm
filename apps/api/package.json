@@ -1,0 +1,40 @@
+{
+  "name": "@ag-farm/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ag-farm hub: danh sách máy, hàng việc, lease, vé job, API quản trị",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:dev": "ts-node --files src/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "jest",
+    "test:db": "node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --config jest.db.config.js --runInBand",
+    "migration:run": "node --require ts-node/register ./node_modules/typeorm/cli.js migration:run -d src/database/data-source.ts",
+    "migration:revert": "node --require ts-node/register ./node_modules/typeorm/cli.js migration:revert -d src/database/data-source.ts",
+    "keys:generate": "ts-node --files src/scripts/generate-ticket-keys.ts",
+    "owner:key": "ts-node --files src/scripts/create-owner-key.ts"
+  },
+  "dependencies": {
+    "@ag-farm/protocol": "0.1.0",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "@nestjs/typeorm": "^12.0.1",
+    "dotenv": "^18.0.1",
+    "pg": "^8.23.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "typeorm": "^1.1.1",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.0.0",
+    "@types/express": "^5.0.0",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "ts-node": "^10.9.2"
+  }
+}

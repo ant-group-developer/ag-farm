@@ -1,0 +1,19 @@
+version: '3.9'
+
+services:
+  postgres-test:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: farm_test
+      POSTGRES_PASSWORD: farm_test
+      POSTGRES_DB: ag_farm_test
+    ports:
+      - '55433:5432'
+    # Không persist volume trong test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U farm_test']
+      interval: 2s
+      timeout: 5s
+      retries: 10
