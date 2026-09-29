@@ -1,0 +1,27 @@
+{
+  "name": "@ag-farm/owner-client",
+  "version": "0.1.0",
+  "description": "Client cho chủ job (ag-go-api, ag-studio): gửi job, poll kết quả, ack, kiểm vé khi ký URL",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@ag-farm/protocol": "0.1.0",
+    "zod": "^4.1.0"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "rootDir": "src"
+  }
+}
