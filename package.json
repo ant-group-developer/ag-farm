@@ -1,0 +1,27 @@
+{
+  "name": "ag-farm",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "yarn@1.22.22",
+  "description": "AG farm: hub điều phối việc nặng (quét, TTS, render) cho các máy cấu hình cao",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "yarn workspace @ag-farm/protocol build && yarn workspace @ag-farm/owner-client build && yarn workspace @ag-farm/worker-sdk build && yarn workspace @ag-farm/api build && yarn workspace @ag-farm/web build",
+    "test": "yarn workspace @ag-farm/protocol test && yarn workspace @ag-farm/owner-client test && yarn workspace @ag-farm/worker-sdk test && yarn workspace @ag-farm/api test && yarn workspace @ag-farm/web test",
+    "typecheck": "yarn workspaces run typecheck",
+    "format": "prettier --write \"{packages,apps}/*/src/**/*.ts\" \"*.{json,yml,yaml,md}\"",
+    "format:check": "prettier --check \"{packages,apps}/*/src/**/*.ts\" \"*.{json,yml,yaml,md}\""
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.0.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.6.2",
+    "prettier-plugin-organize-imports": "^4.3.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.7.0"
+  }
+}
