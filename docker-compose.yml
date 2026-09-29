@@ -1,0 +1,39 @@
+# ag-farm trên VPS: hub (api) + web quản lý. Database Postgres nằm ngoài (DATABASE_URL trong .env).
+# Chạy: cp .env.example .env && sửa .env && bash deploy.sh
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-50m}
+    max-file: '${LOG_MAX_FILE:-5}'
+
+services:
+  api:
+    image: ag-farm-api:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env
+    environment:
+      PORT: '3010'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '${FARM_API_PORT:-3010}:3010'
+    logging: *logging
+    restart: unless-stopped
+
+  web:
+    image: ag-farm-web:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_AUTH0_DOMAIN: ${VITE_AUTH0_DOMAIN}
+        VITE_AUTH0_CLIENT_ID: ${VITE_AUTH0_CLIENT_ID}
+        VITE_AUTH0_AUDIENCE: ${VITE_AUTH0_AUDIENCE}
+    ports:
+      - '${FARM_WEB_PORT:-3011}:80'
+    logging: *logging
+    restart: unless-stopped
