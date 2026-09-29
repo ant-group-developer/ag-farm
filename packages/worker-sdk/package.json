@@ -1,0 +1,28 @@
+{
+  "name": "@ag-farm/worker-sdk",
+  "version": "0.1.0",
+  "description": "Phần chung của ag-scan-worker và ag-render-worker: vòng lặp worker, slot cấp máy, khoá GPU, tải/ghi file qua vé",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@ag-farm/protocol": "0.1.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.1.0"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "rootDir": "src"
+  }
+}
