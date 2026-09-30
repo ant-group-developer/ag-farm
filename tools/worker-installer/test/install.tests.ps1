@@ -33,7 +33,9 @@ Assert-Equal 'GPU is never reserved (1-GPU machines must still scan)' $p.reserve
 
 $p = Get-AgSlotPlan -Cores 12 -Gpus $gpu4 -Roles @('scan')
 Assert-Equal '12 threads: 2 CPU slots' $p.cpu_slots 2
-Assert-Equal '4 GB card is not a GPU slot' $p.gpu_slots 0
+Assert-Equal '4 GB card is a GPU slot (3b model fits)' $p.gpu_slots 1
+$p = Get-AgSlotPlan -Cores 12 -Gpus @([ordered]@{ name = 'GT 1030'; vram_mb = 2048 }) -Roles @('scan')
+Assert-Equal '2 GB card is not a GPU slot' $p.gpu_slots 0
 Assert-Equal 'scan only: nothing reserved' $p.reserve_cpu 0
 
 $p = Get-AgSlotPlan -Cores 4 -Gpus @() -Roles @('render')

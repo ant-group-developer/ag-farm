@@ -33,12 +33,12 @@ function Get-AgMachineInfo {
 }
 
 # Số slot của máy. CPU: mỗi slot là một ffmpeg dùng nhiều luồng, nên khoảng 6 luồng một slot, 1-6 slot.
-# GPU: số card NVIDIA có >= 6 GB. Máy có vai trò render thì giữ 1 slot CPU cho render; GPU không giữ riêng
+# GPU: số card NVIDIA có >= 3,5 GB (qwen2.5vl:3b chạy được trên card 4 GB). Máy có vai trò render thì giữ 1 slot CPU cho render; GPU không giữ riêng
 # (máy 1 GPU sẽ không quét được) mà job quét nhường GPU khi render cần.
 function Get-AgSlotPlan {
   param([int]$Cores, [object[]]$Gpus, [string[]]$Roles)
   $cpu = [Math]::Max(1, [Math]::Min(6, [Math]::Floor($Cores / 6)))
-  $gpu = @($Gpus | Where-Object { $_.vram_mb -ge 6000 }).Count
+  $gpu = @($Gpus | Where-Object { $_.vram_mb -ge 3500 }).Count
   $reserveCpu = 0
   if (($Roles -contains 'render') -and $cpu -gt 1) { $reserveCpu = 1 }
   return [ordered]@{ cpu_slots = [int]$cpu; gpu_slots = [int]$gpu; reserve_cpu = [int]$reserveCpu; reserve_gpu = 0 }
