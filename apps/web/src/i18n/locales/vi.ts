@@ -31,8 +31,13 @@ export const vi = {
   },
   auth: {
     authenticating: 'Đang xác thực...',
-    tagline: 'Hệ thống quản lý máy worker và hàng việc — chỉ dành cho ADMIN.',
+    tagline: 'Quản lý máy worker và hàng việc của hệ thống dựng video AG.',
     login: 'Đăng nhập',
+    welcome: 'Chào mừng trở lại',
+    loginPrompt: 'Đăng nhập bằng tài khoản công ty để tiếp tục.',
+    pointSecure: 'Xác thực bảo mật qua Auth0',
+    pointInternal: 'Chỉ dành cho quản trị viên hệ thống',
+    secureNote: 'Bạn sẽ được chuyển đến trang đăng nhập an toàn.',
     missingConfig: 'Thiếu cấu hình Auth0',
     missingConfigDesc:
       'Kiểm tra các biến môi trường VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID, VITE_AUTH0_AUDIENCE.',

@@ -33,8 +33,13 @@ export const en: LocaleMessages = {
   },
   auth: {
     authenticating: 'Authenticating...',
-    tagline: 'Manage worker machines and the job queue — ADMIN only.',
+    tagline: 'Manage the worker machines and job queue of the AG video platform.',
     login: 'Log in',
+    welcome: 'Welcome back',
+    loginPrompt: 'Sign in with your company account to continue.',
+    pointSecure: 'Secure sign-in with Auth0',
+    pointInternal: 'For system administrators only',
+    secureNote: 'You will be taken to a secure sign-in page.',
     missingConfig: 'Auth0 is not configured',
     missingConfigDesc:
       'Check the VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID and VITE_AUTH0_AUDIENCE environment variables.',

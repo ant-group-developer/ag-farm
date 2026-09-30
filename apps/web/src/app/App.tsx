@@ -1,18 +1,11 @@
 import { ProLayout } from '@ant-design/pro-components';
 import { useAuth0 } from '@auth0/auth0-react';
-import { theme as antdTheme, Button, Dropdown, Select, Spin, Typography } from 'antd';
-import type { MenuProps } from 'antd';
-import { Activity, BarChart3, LogOut, Server, Workflow } from 'lucide-react';
+import { theme as antdTheme, Button, Dropdown, Spin, Typography } from 'antd';
+import { Activity, BarChart3, Server, Workflow } from 'lucide-react';
 import { Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import {
-  APP_LANGUAGES,
-  LANGUAGE_NAMES,
-  changeLanguage,
-  currentLanguage,
-  type AppLanguage,
-} from '../i18n/language';
+import { useUserMenu } from '../shared/components/user-menu';
 
 const NodesPage = lazy(() =>
   import('../modules/nodes/NodesPage').then(({ NodesPage }) => ({ default: NodesPage })),
@@ -42,31 +35,13 @@ export function App() {
     void logout({ logoutParams: { returnTo: window.location.origin } });
   };
 
-  const avatarMenu: MenuProps = {
-    items: [
-      {
-        key: 'user',
-        label: (
-          <div style={{ padding: '4px 0' }}>
-            <Typography.Text strong>{nickname}</Typography.Text>
-            <br />
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {userEmail}
-            </Typography.Text>
-          </div>
-        ),
-        disabled: true,
-      },
-      { type: 'divider' },
-      {
-        key: 'logout',
-        icon: <LogOut size={14} />,
-        label: t('app.logout'),
-        onClick: handleLogout,
-        danger: true,
-      },
-    ],
-  };
+  const avatarMenu = useUserMenu({
+    nickname,
+    email: userEmail,
+    avatarUrl: user?.picture,
+    initials: userInitials,
+    onLogout: handleLogout,
+  });
 
   const route = {
     path: '/',
@@ -124,6 +99,7 @@ export function App() {
             menu={avatarMenu}
             trigger={['click']}
             placement="bottomRight"
+            className="user-dropdown"
           >
             <span style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
               {dom}
@@ -131,20 +107,6 @@ export function App() {
           </Dropdown>
         ),
       }}
-      actionsRender={() => [
-        <Select<AppLanguage>
-          key="language"
-          size="small"
-          aria-label={t('common.language')}
-          value={currentLanguage()}
-          style={{ width: 120 }}
-          options={APP_LANGUAGES.map((lng) => ({ value: lng, label: LANGUAGE_NAMES[lng] }))}
-          onChange={(lng) => void changeLanguage(lng)}
-        />,
-        <Button key="logout" size="small" onClick={handleLogout} icon={<LogOut size={14} />}>
-          {t('app.logout')}
-        </Button>,
-      ]}
     >
       <Suspense fallback={<Spin fullscreen />}>
         <Routes>

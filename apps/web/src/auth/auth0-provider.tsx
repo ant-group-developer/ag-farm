@@ -1,8 +1,9 @@
 import { Auth0Provider, useAuth0 } from '@auth0/auth0-react';
-import { Alert, Button, Spin, Typography } from 'antd';
+import { Alert, Spin } from 'antd';
 import type { PropsWithChildren } from 'react';
 import { useEffect } from 'react';
 import { clearAccessTokenGetter, setAccessTokenGetter } from './auth-client';
+import { LoginScreen } from './login-screen';
 import { useTranslation } from 'react-i18next';
 
 const domain = import.meta.env.VITE_AUTH0_DOMAIN as string | undefined;
@@ -33,26 +34,7 @@ function AuthenticatedApp({ children }: PropsWithChildren) {
   }
 
   if (!isAuthenticated) {
-    return (
-      <div
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 16,
-        }}
-      >
-        <Typography.Title level={3}>{t('app.title')}</Typography.Title>
-        <Typography.Text type="secondary">
-          {t('auth.tagline')}
-        </Typography.Text>
-        <Button type="primary" size="large" onClick={() => void loginWithRedirect()}>
-          {t('auth.login')}
-        </Button>
-      </div>
-    );
+    return <LoginScreen onLogin={() => void loginWithRedirect()} />;
   }
 
   return <>{children}</>;
