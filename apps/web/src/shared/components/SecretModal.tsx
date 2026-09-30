@@ -1,6 +1,7 @@
 import { CopyOutlined } from '@ant-design/icons';
 import { Alert, Button, Modal, Space, Typography } from 'antd';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface SecretModalProps {
   open: boolean;
@@ -15,6 +16,7 @@ interface SecretModalProps {
  * Khi đóng không thể xem lại.
  */
 export function SecretModal({ open, title, label, secret, onClose }: SecretModalProps) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -30,7 +32,7 @@ export function SecretModal({ open, title, label, secret, onClose }: SecretModal
       onCancel={onClose}
       footer={
         <Button type="primary" onClick={onClose} data-testid="secret-modal-close">
-          Tôi đã sao chép, đóng
+          {t('secret.close')}
         </Button>
       }
       closable={false}
@@ -40,7 +42,7 @@ export function SecretModal({ open, title, label, secret, onClose }: SecretModal
         <Alert
           type="warning"
           showIcon
-          message="Luu y: Sau khi dong modal nay, ban khong the xem lai gia tri nay."
+          message={t('secret.warning')}
         />
         <Typography.Text strong>{label}:</Typography.Text>
         <Space.Compact style={{ width: '100%' }}>
@@ -65,7 +67,7 @@ export function SecretModal({ open, title, label, secret, onClose }: SecretModal
             onClick={() => void handleCopy()}
             style={{ borderRadius: '0 4px 4px 0' }}
           >
-            {copied ? 'Sao chep!' : 'Sao chep'}
+            {copied ? t('secret.copied') : t('secret.copy')}
           </Button>
         </Space.Compact>
       </Space>

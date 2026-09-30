@@ -21,6 +21,8 @@ import { createOwner, listOwners, patchOwner } from '../../api/admin';
 import { SecretModal } from '../../shared/components/SecretModal';
 import type { JobType, Lane, OwnerView, PatchOwnerRequest } from '../../types/api';
 import { JOB_TYPES } from '../../types/api';
+import { formatDateTime } from '../../i18n/language';
+import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
@@ -30,6 +32,7 @@ const LANE_OPTIONS: { value: Lane; label: string }[] = [
 ];
 
 export function OwnersPage() {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
   const [createOpen, setCreateOpen] = useState(false);
@@ -88,7 +91,7 @@ export function OwnersPage() {
       ),
     },
     {
-      title: 'Loai viec duoc phep',
+      title: t('owners.allowedTypes'),
       key: 'allowed_types',
       render: (_: unknown, r: OwnerView) => (
         <Space wrap size={4}>
@@ -101,7 +104,7 @@ export function OwnersPage() {
       ),
     },
     {
-      title: 'Lane mac dinh',
+      title: t('owners.defaultLane'),
       dataIndex: 'default_lane',
       key: 'default_lane',
       render: (v: string) => (
@@ -109,20 +112,20 @@ export function OwnersPage() {
       ),
     },
     {
-      title: 'Tao luc',
+      title: t('common.createdAt'),
       dataIndex: 'created_at',
       key: 'created_at',
       width: 140,
       render: (v: string) => (
-        <Text style={{ fontSize: 11 }}>{new Date(v).toLocaleString('vi-VN')}</Text>
+        <Text style={{ fontSize: 11 }}>{formatDateTime(v)}</Text>
       ),
     },
     {
-      title: 'Thao tac',
+      title: t('common.actions'),
       key: 'actions',
       width: 80,
       render: (_: unknown, r: OwnerView) => (
-        <Tooltip title="Sua">
+        <Tooltip title={t('common.edit')}>
           <Button
             size="small"
             icon={<EditOutlined />}
@@ -146,7 +149,7 @@ export function OwnersPage() {
       <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
         <Col>
           <Typography.Title level={4} style={{ margin: 0 }}>
-            Chu job
+            {t('owners.title')}
           </Typography.Title>
         </Col>
         <Col>
@@ -158,7 +161,7 @@ export function OwnersPage() {
               setCreateOpen(true);
             }}
           >
-            Them chu job
+            {t('owners.add')}
           </Button>
         </Col>
       </Row>
@@ -174,47 +177,47 @@ export function OwnersPage() {
 
       {/* Create modal */}
       <Modal
-        title="Them chu job moi"
+        title={t('owners.addTitle')}
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         onOk={() => form.submit()}
         confirmLoading={createMut.isPending}
-        okText="Tao"
-        cancelText="Huy"
+        okText={t('common.create')}
+        cancelText={t('common.cancel')}
       >
         <Form form={form} layout="vertical" onFinish={(values) => createMut.mutate(values)}>
           <Form.Item
             name="id"
-            label="ID chu job (vd: ag-go, studio)"
+            label={t('owners.idLabel')}
             rules={[
-              { required: true, message: 'Nhap ID' },
+              { required: true, message: t('owners.idRequired') },
               {
                 pattern: /^[a-z][a-z0-9-]*$/,
-                message: 'Chi ky tu thuong, chu so va gach ngang',
+                message: t('owners.idPattern'),
               },
             ]}
           >
-            <Input placeholder="vd: ag-go" />
+            <Input placeholder={t('owners.idPlaceholder')} />
           </Form.Item>
           <Form.Item
             name="sign_url"
             label="Sign URL"
-            rules={[{ required: true, type: 'url', message: 'Nhap URL hop le' }]}
+            rules={[{ required: true, type: 'url', message: t('owners.signUrlInvalid') }]}
           >
             <Input placeholder="https://api.example.com/farm/sign" />
           </Form.Item>
           <Form.Item
             name="allowed_types"
-            label="Loai viec duoc phep"
-            rules={[{ required: true, type: 'array', min: 1, message: 'Chon it nhat 1 loai' }]}
+            label={t('owners.allowedTypes')}
+            rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}
           >
             <Select
               mode="multiple"
               options={JOB_TYPES.map((t) => ({ value: t, label: t }))}
-              placeholder="Chon loai viec"
+              placeholder={t('common.pickJobTypes')}
             />
           </Form.Item>
-          <Form.Item name="default_lane" label="Lane mac dinh" initialValue="batch">
+          <Form.Item name="default_lane" label={t('owners.defaultLane')} initialValue="batch">
             <Select options={LANE_OPTIONS} />
           </Form.Item>
         </Form>
@@ -222,13 +225,13 @@ export function OwnersPage() {
 
       {/* Edit modal */}
       <Modal
-        title={`Sua chu job: ${editOwner?.id ?? ''}`}
+        title={t('owners.editTitle', { id: editOwner?.id ?? '' })}
         open={editOwner !== null}
         onCancel={() => setEditOwner(null)}
         onOk={() => editForm.submit()}
         confirmLoading={patchMut.isPending}
-        okText="Luu"
-        cancelText="Huy"
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
       >
         <Form
           form={editForm}
@@ -241,21 +244,21 @@ export function OwnersPage() {
           <Form.Item
             name="sign_url"
             label="Sign URL"
-            rules={[{ required: true, type: 'url', message: 'Nhap URL hop le' }]}
+            rules={[{ required: true, type: 'url', message: t('owners.signUrlInvalid') }]}
           >
             <Input />
           </Form.Item>
           <Form.Item
             name="allowed_types"
-            label="Loai viec duoc phep"
-            rules={[{ required: true, type: 'array', min: 1, message: 'Chon it nhat 1 loai' }]}
+            label={t('owners.allowedTypes')}
+            rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}
           >
             <Select
               mode="multiple"
               options={JOB_TYPES.map((t) => ({ value: t, label: t }))}
             />
           </Form.Item>
-          <Form.Item name="default_lane" label="Lane mac dinh">
+          <Form.Item name="default_lane" label={t('owners.defaultLane')}>
             <Select options={LANE_OPTIONS} />
           </Form.Item>
         </Form>
@@ -265,8 +268,8 @@ export function OwnersPage() {
       {secret !== null && (
         <SecretModal
           open
-          title="Khoa chu job"
-          label="Key (luu ngay bay gio)"
+          title={t('owners.keyTitle')}
+          label={t('owners.keyLabel')}
           secret={secret}
           onClose={() => setSecret(null)}
         />

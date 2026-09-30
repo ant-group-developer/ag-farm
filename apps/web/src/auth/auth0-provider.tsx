@@ -3,6 +3,7 @@ import { Alert, Button, Spin, Typography } from 'antd';
 import type { PropsWithChildren } from 'react';
 import { useEffect } from 'react';
 import { clearAccessTokenGetter, setAccessTokenGetter } from './auth-client';
+import { useTranslation } from 'react-i18next';
 
 const domain = import.meta.env.VITE_AUTH0_DOMAIN as string | undefined;
 const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID as string | undefined;
@@ -24,10 +25,11 @@ function TokenBridge({ children }: PropsWithChildren) {
 }
 
 function AuthenticatedApp({ children }: PropsWithChildren) {
+  const { t } = useTranslation();
   const { isLoading, isAuthenticated, loginWithRedirect } = useAuth0();
 
   if (isLoading) {
-    return <Spin fullscreen tip="Đang xác thực..." />;
+    return <Spin fullscreen tip={t('auth.authenticating')} />;
   }
 
   if (!isAuthenticated) {
@@ -42,12 +44,12 @@ function AuthenticatedApp({ children }: PropsWithChildren) {
           gap: 16,
         }}
       >
-        <Typography.Title level={3}>AG Farm Admin</Typography.Title>
+        <Typography.Title level={3}>{t('app.title')}</Typography.Title>
         <Typography.Text type="secondary">
-          Hệ thống quản lý máy worker và hàng việc — chỉ dành cho ADMIN.
+          {t('auth.tagline')}
         </Typography.Text>
         <Button type="primary" size="large" onClick={() => void loginWithRedirect()}>
-          Đăng nhập
+          {t('auth.login')}
         </Button>
       </div>
     );
@@ -57,13 +59,14 @@ function AuthenticatedApp({ children }: PropsWithChildren) {
 }
 
 export function Auth0AppProvider({ children }: PropsWithChildren) {
+  const { t } = useTranslation();
   if (!domain || !clientId || !audience) {
     return (
       <Alert
         type="error"
         showIcon
-        message="Thiếu cấu hình Auth0"
-        description="Kiểm tra các biến môi trường VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID, VITE_AUTH0_AUDIENCE."
+        message={t('auth.missingConfig')}
+        description={t('auth.missingConfigDesc')}
         style={{ maxWidth: 640, margin: '15vh auto' }}
       />
     );

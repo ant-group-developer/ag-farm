@@ -4,8 +4,10 @@ import type { ColumnsType } from 'antd/es/table';
 import { getStats } from '../../api/admin';
 import { statusColor, statusLabel } from '../../shared/lib/status';
 import type { JobStatus, JobType } from '../../types/api';
+import { useTranslation } from 'react-i18next';
 
 export function StatsPage() {
+  const { t } = useTranslation();
   const stats = useQuery({
     queryKey: ['stats'],
     queryFn: getStats,
@@ -16,7 +18,7 @@ export function StatsPage() {
 
   const columns: ColumnsType<{ status: JobStatus; type: JobType; count: number }> = [
     {
-      title: 'Trang thai',
+      title: t('stats.status'),
       dataIndex: 'status',
       key: 'status',
       render: (v: JobStatus) => (
@@ -36,13 +38,13 @@ export function StatsPage() {
       ),
     },
     {
-      title: 'Loai viec',
+      title: t('common.jobType'),
       dataIndex: 'type',
       key: 'type',
       render: (v: JobType) => <Tag color="cyan">{v}</Tag>,
     },
     {
-      title: 'So luong',
+      title: t('stats.count'),
       dataIndex: 'count',
       key: 'count',
       align: 'right',
@@ -52,14 +54,14 @@ export function StatsPage() {
   return (
     <>
       <Typography.Title level={4} style={{ marginBottom: 16 }}>
-        Thong ke
+        {t('stats.title')}
       </Typography.Title>
 
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col xs={12} sm={6}>
           <Card loading={stats.isLoading}>
             <Statistic
-              title="May online"
+              title={t('stats.nodesOnline')}
               value={data?.nodes.online ?? 0}
               suffix={`/ ${data?.nodes.total ?? 0}`}
             />
@@ -68,7 +70,7 @@ export function StatsPage() {
         <Col xs={12} sm={6}>
           <Card loading={stats.isLoading}>
             <Statistic
-              title="Viec dang chay"
+              title={t('stats.running')}
               value={data?.jobs.filter((j) => j.status === 'leased').reduce((s, j) => s + j.count, 0) ?? 0}
             />
           </Card>
@@ -76,7 +78,7 @@ export function StatsPage() {
         <Col xs={12} sm={6}>
           <Card loading={stats.isLoading}>
             <Statistic
-              title="Viec dang cho"
+              title={t('stats.queued')}
               value={data?.jobs.filter((j) => j.status === 'queued').reduce((s, j) => s + j.count, 0) ?? 0}
             />
           </Card>
@@ -84,7 +86,7 @@ export function StatsPage() {
         <Col xs={12} sm={6}>
           <Card loading={stats.isLoading}>
             <Statistic
-              title="Viec that bai"
+              title={t('stats.failed')}
               value={data?.jobs.filter((j) => j.status === 'failed').reduce((s, j) => s + j.count, 0) ?? 0}
               valueStyle={{ color: '#cf1322' }}
             />
@@ -92,7 +94,7 @@ export function StatsPage() {
         </Col>
       </Row>
 
-      <Card title="Chi tiet theo trang thai va loai viec" loading={stats.isLoading}>
+      <Card title={t('stats.breakdown')} loading={stats.isLoading}>
         <Table
           rowKey={(r) => `${r.status}-${r.type}`}
           dataSource={data?.jobs ?? []}

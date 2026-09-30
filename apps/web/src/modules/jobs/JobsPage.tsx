@@ -26,6 +26,8 @@ import { pollInterval } from '../../shared/lib/poll';
 import { statusColor, statusLabel } from '../../shared/lib/status';
 import type { AdminListJobsQuery, JobStatus, JobType, JobView } from '../../types/api';
 import { JOB_TYPES, TERMINAL_JOB_STATUSES } from '../../types/api';
+import { formatDateTime } from '../../i18n/language';
+import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
@@ -37,6 +39,7 @@ const OWNER_OPTIONS = [
 ];
 
 export function JobsPage() {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
   const [filters, setFilters] = useState<AdminListJobsQuery>({ limit: 100 });
@@ -67,7 +70,7 @@ export function JobsPage() {
     mutationFn: retryJob,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['jobs'] });
-      void messageApi.success('Da dat lai viec');
+      void messageApi.success(t('jobs.retried'));
     },
     onError: (e) => void messageApi.error(String(e)),
   });
@@ -76,7 +79,7 @@ export function JobsPage() {
     mutationFn: cancelJob,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['jobs'] });
-      void messageApi.success('Da huy viec');
+      void messageApi.success(t('jobs.cancelled'));
     },
     onError: (e) => void messageApi.error(String(e)),
   });
@@ -99,13 +102,13 @@ export function JobsPage() {
       ),
     },
     {
-      title: 'Chu job',
+      title: t('jobs.owner'),
       dataIndex: 'owner',
       key: 'owner',
       width: 80,
     },
     {
-      title: 'Loai',
+      title: t('jobs.type'),
       dataIndex: 'type',
       key: 'type',
       width: 150,
@@ -121,7 +124,7 @@ export function JobsPage() {
       ),
     },
     {
-      title: 'Trang thai',
+      title: t('jobs.status'),
       dataIndex: 'status',
       key: 'status',
       width: 110,
@@ -133,19 +136,19 @@ export function JobsPage() {
       ),
     },
     {
-      title: 'Uu tien',
+      title: t('jobs.priority'),
       dataIndex: 'priority',
       key: 'priority',
       width: 80,
     },
     {
-      title: 'Thu',
+      title: t('jobs.attempts'),
       key: 'attempts',
       width: 80,
       render: (_: unknown, r: JobView) => `${r.attempt_count}/${r.max_attempts}`,
     },
     {
-      title: 'May',
+      title: t('jobs.node'),
       dataIndex: 'node_id',
       key: 'node_id',
       width: 100,
@@ -159,7 +162,7 @@ export function JobsPage() {
         ),
     },
     {
-      title: 'Tien do',
+      title: t('jobs.progress'),
       key: 'progress',
       width: 120,
       render: (_: unknown, r: JobView) => {
@@ -176,18 +179,18 @@ export function JobsPage() {
       },
     },
     {
-      title: 'Tao luc',
+      title: t('common.createdAt'),
       dataIndex: 'created_at',
       key: 'created_at',
       width: 140,
       render: (v: string) => (
         <Tooltip title={v}>
-          <Text style={{ fontSize: 11 }}>{new Date(v).toLocaleString('vi-VN')}</Text>
+          <Text style={{ fontSize: 11 }}>{formatDateTime(v)}</Text>
         </Tooltip>
       ),
     },
     {
-      title: 'Thao tac',
+      title: t('common.actions'),
       key: 'actions',
       width: 140,
       render: (_: unknown, r: JobView) => {
@@ -196,30 +199,30 @@ export function JobsPage() {
         return (
           <Space size={4}>
             <Button size="small" onClick={() => setSelectedJobId(r.id)}>
-              Chi tiet
+              {t('jobs.details')}
             </Button>
             {canRetry && (
               <Popconfirm
-                title="Dat lai viec nay?"
+                title={t('jobs.retryConfirm')}
                 onConfirm={() => retryMut.mutate(r.id)}
-                okText="Dat lai"
-                cancelText="Huy"
+                okText={t('jobs.retry')}
+                cancelText={t('common.cancel')}
               >
                 <Button size="small" type="primary">
-                  Dat lai
+                  {t('jobs.retry')}
                 </Button>
               </Popconfirm>
             )}
             {canCancel && (
               <Popconfirm
-                title="Huy viec nay?"
+                title={t('jobs.cancelConfirm')}
                 onConfirm={() => cancelMut.mutate(r.id)}
-                okText="Huy viec"
-                cancelText="Khong"
+                okText={t('jobs.cancelJob')}
+                cancelText={t('common.no')}
                 okButtonProps={{ danger: true }}
               >
                 <Button size="small" danger>
-                  Huy
+                  {t('jobs.cancel')}
                 </Button>
               </Popconfirm>
             )}
@@ -235,7 +238,7 @@ export function JobsPage() {
       <Row justify="space-between" align="middle" style={{ marginBottom: 16 }} gutter={8}>
         <Col>
           <Typography.Title level={4} style={{ margin: 0 }}>
-            Hang viec
+            {t('jobs.title')}
           </Typography.Title>
         </Col>
         <Col>
@@ -243,7 +246,7 @@ export function JobsPage() {
             <Select
               mode="multiple"
               allowClear
-              placeholder="Trang thai"
+              placeholder={t('jobs.status')}
               style={{ minWidth: 160 }}
               options={ALL_STATUSES.map((s) => ({ value: s, label: statusLabel(s) }))}
               onChange={(vals: JobStatus[]) =>
@@ -253,7 +256,7 @@ export function JobsPage() {
             <Select
               mode="multiple"
               allowClear
-              placeholder="Loai viec"
+              placeholder={t('common.jobType')}
               style={{ minWidth: 180 }}
               options={JOB_TYPES.map((t) => ({ value: t, label: t }))}
               onChange={(vals: JobType[]) =>
@@ -262,14 +265,14 @@ export function JobsPage() {
             />
             <Select
               allowClear
-              placeholder="Chu job"
+              placeholder={t('jobs.owner')}
               style={{ minWidth: 100 }}
               options={OWNER_OPTIONS}
               onChange={(val: string | undefined) =>
                 setFilters((f) => ({ ...f, owner: val ?? undefined, after: undefined }))
               }
             />
-            <Button onClick={() => void refetch()}>Tai lai</Button>
+            <Button onClick={() => void refetch()}>{t('common.reload')}</Button>
           </Space>
         </Col>
       </Row>
@@ -289,7 +292,7 @@ export function JobsPage() {
               onClick={() => void fetchNextPage()}
               block
             >
-              Tai them
+              {t('common.loadMore')}
             </Button>
           ) : null
         }
@@ -297,7 +300,7 @@ export function JobsPage() {
 
       {/* Job detail drawer */}
       <Drawer
-        title={`Chi tiet job ${selectedJobId?.slice(0, 8) ?? ''}...`}
+        title={t('jobs.detailTitle', { id: selectedJobId?.slice(0, 8) ?? '' })}
         open={selectedJobId !== null}
         onClose={() => setSelectedJobId(null)}
         width={640}
@@ -307,30 +310,30 @@ export function JobsPage() {
               {(selectedJobQuery.data.status === 'failed' ||
                 selectedJobQuery.data.status === 'cancelled') && (
                 <Popconfirm
-                  title="Dat lai viec nay?"
+                  title={t('jobs.retryConfirm')}
                   onConfirm={() => {
                     if (selectedJobId) retryMut.mutate(selectedJobId);
                   }}
-                  okText="Dat lai"
-                  cancelText="Huy"
+                  okText={t('jobs.retry')}
+                  cancelText={t('common.cancel')}
                 >
                   <Button type="primary" size="small">
-                    Dat lai
+                    {t('jobs.retry')}
                   </Button>
                 </Popconfirm>
               )}
               {!TERMINAL_JOB_STATUSES.includes(selectedJobQuery.data.status) && (
                 <Popconfirm
-                  title="Huy viec nay?"
+                  title={t('jobs.cancelConfirm')}
                   onConfirm={() => {
                     if (selectedJobId) cancelMut.mutate(selectedJobId);
                   }}
-                  okText="Huy viec"
-                  cancelText="Khong"
+                  okText={t('jobs.cancelJob')}
+                  cancelText={t('common.no')}
                   okButtonProps={{ danger: true }}
                 >
                   <Button danger size="small">
-                    Huy
+                    {t('jobs.cancel')}
                   </Button>
                 </Popconfirm>
               )}
@@ -338,10 +341,10 @@ export function JobsPage() {
           )
         }
       >
-        {selectedJobQuery.isLoading && <Typography.Text>Dang tai...</Typography.Text>}
+        {selectedJobQuery.isLoading && <Typography.Text>{t('common.loading')}</Typography.Text>}
         {selectedJobQuery.data && (
           <Space direction="vertical" style={{ width: '100%' }}>
-            <JobDetailSection title="Thong tin chung" job={selectedJobQuery.data} />
+            <JobDetailSection title={t('jobs.general')} job={selectedJobQuery.data} />
             {selectedJobQuery.data.payload !== undefined && (
               <>
                 <Typography.Text strong>Payload:</Typography.Text>
@@ -360,7 +363,7 @@ export function JobsPage() {
             )}
             {selectedJobQuery.data.result && (
               <>
-                <Typography.Text strong>Ket qua:</Typography.Text>
+                <Typography.Text strong>{t('jobs.result')}</Typography.Text>
                 <pre
                   style={{
                     background: '#f0fff0',
@@ -377,7 +380,7 @@ export function JobsPage() {
             {selectedJobQuery.data.error && (
               <>
                 <Typography.Text strong type="danger">
-                  Loi:
+                  {t('jobs.error')}
                 </Typography.Text>
                 <pre
                   style={{
@@ -400,23 +403,24 @@ export function JobsPage() {
 }
 
 function JobDetailSection({ title, job }: { title: string; job: JobView }) {
+  const { t } = useTranslation();
   const rows = [
     ['ID', job.id],
-    ['Chu job', job.owner],
-    ['Loai', job.type],
+    [t('jobs.owner'), job.owner],
+    [t('jobs.type'), job.type],
     ['Lane', job.lane],
-    ['Trang thai', statusLabel(job.status)],
-    ['Uu tien', job.priority],
+    [t('jobs.status'), statusLabel(job.status)],
+    [t('jobs.priority'), job.priority],
     ['Correlation ID', job.correlation_id],
     ['Affinity key', job.affinity_key ?? '—'],
-    ['Thu', `${job.attempt_count}/${job.max_attempts}`],
-    ['May', job.node_id ?? '—'],
-    ['Tien do', job.progress_percent != null ? `${Math.round(job.progress_percent)}%` : '—'],
-    ['Giai doan', job.progress_stage ?? '—'],
-    ['Tao luc', job.created_at],
-    ['Cap nhat', job.updated_at],
-    ['Xong luc', job.finished_at ?? '—'],
-    ['ACK luc', job.acked_at ?? '—'],
+    [t('jobs.attempts'), `${job.attempt_count}/${job.max_attempts}`],
+    [t('jobs.node'), job.node_id ?? '—'],
+    [t('jobs.progress'), job.progress_percent != null ? `${Math.round(job.progress_percent)}%` : '—'],
+    [t('jobs.stage'), job.progress_stage ?? '—'],
+    [t('common.createdAt'), job.created_at],
+    [t('jobs.updatedAt'), job.updated_at],
+    [t('jobs.finishedAt'), job.finished_at ?? '—'],
+    [t('jobs.ackedAt'), job.acked_at ?? '—'],
   ];
 
   return (

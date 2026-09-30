@@ -1,3 +1,4 @@
+import i18n from 'i18next';
 import type { JobStatus } from '../../types/api';
 
 /** Map trạng thái job sang màu badge Ant Design. */
@@ -18,20 +19,9 @@ export function statusColor(status: JobStatus): string {
   }
 }
 
-/** Nhãn tiếng Việt của trạng thái job. */
+const KNOWN_STATUSES: readonly string[] = ['queued', 'leased', 'completed', 'failed', 'cancelled'];
+
+/** Nhãn của trạng thái job theo ngôn ngữ đang dùng; trạng thái lạ thì trả nguyên giá trị. */
 export function statusLabel(status: JobStatus): string {
-  switch (status) {
-    case 'queued':
-      return 'Chờ';
-    case 'leased':
-      return 'Đang chạy';
-    case 'completed':
-      return 'Hoàn tất';
-    case 'failed':
-      return 'Thất bại';
-    case 'cancelled':
-      return 'Đã hủy';
-    default:
-      return status;
-  }
+  return KNOWN_STATUSES.includes(status) ? i18n.t(`status.${status}`) : status;
 }

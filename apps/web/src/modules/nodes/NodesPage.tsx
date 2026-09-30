@@ -29,6 +29,8 @@ import { createNode, deleteNode, listNodes, patchNode } from '../../api/admin';
 import { SecretModal } from '../../shared/components/SecretModal';
 import type { JobType, NodeView } from '../../types/api';
 import { JOB_TYPES } from '../../types/api';
+import { formatDateTime } from '../../i18n/language';
+import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
@@ -59,6 +61,7 @@ function CapabilitiesSummary({ node }: { node: NodeView }) {
 }
 
 export function NodesPage() {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
   const [createOpen, setCreateOpen] = useState(false);
@@ -81,7 +84,7 @@ export function NodesPage() {
       void qc.invalidateQueries({ queryKey: ['nodes'] });
       setCreateOpen(false);
       form.resetFields();
-      setSecret({ title: 'Token node', label: 'Token (luu ngay bay gio)', value: data.token });
+      setSecret({ title: t('nodes.tokenTitle'), label: t('nodes.tokenLabel'), value: data.token });
     },
     onError: (e) => void messageApi.error(String(e)),
   });
@@ -101,18 +104,18 @@ export function NodesPage() {
 
   const columns: ColumnsType<NodeView> = [
     {
-      title: 'Trang thai',
+      title: t('nodes.connection'),
       key: 'online',
       width: 90,
       render: (_: unknown, r: NodeView) => (
         <Badge
           status={r.online ? 'success' : 'default'}
-          text={r.online ? 'Online' : 'Offline'}
+          text={r.online ? t('nodes.online') : t('nodes.offline')}
         />
       ),
     },
     {
-      title: 'Ten',
+      title: t('nodes.name'),
       dataIndex: 'name',
       key: 'name',
       render: (v: string, r: NodeView) => (
@@ -125,14 +128,14 @@ export function NodesPage() {
       ),
     },
     {
-      title: 'Kich hoat',
+      title: t('nodes.enabled'),
       key: 'status',
       width: 110,
       render: (_: unknown, r: NodeView) => (
         <Switch
           checked={r.status === 'active'}
-          checkedChildren="Active"
-          unCheckedChildren="Off"
+          checkedChildren={t('nodes.active')}
+          unCheckedChildren={t('nodes.off')}
           loading={patchMut.isPending}
           onChange={(checked) =>
             patchMut.mutate({ id: r.id, body: { status: checked ? 'active' : 'disabled' } })
@@ -141,7 +144,7 @@ export function NodesPage() {
       ),
     },
     {
-      title: 'Loai viec',
+      title: t('common.jobTypes'),
       key: 'kinds',
       render: (_: unknown, r: NodeView) => (
         <Space wrap size={4}>
@@ -154,12 +157,12 @@ export function NodesPage() {
       ),
     },
     {
-      title: 'Nang luc',
+      title: t('nodes.capabilities'),
       key: 'caps',
       render: (_: unknown, r: NodeView) => <CapabilitiesSummary node={r} />,
     },
     {
-      title: 'Slot trong',
+      title: t('nodes.freeSlots'),
       key: 'slots',
       width: 100,
       render: (_: unknown, r: NodeView) =>
@@ -172,7 +175,7 @@ export function NodesPage() {
         ),
     },
     {
-      title: 'Viec dang chay',
+      title: t('nodes.running'),
       key: 'running',
       width: 110,
       render: (_: unknown, r: NodeView) => (
@@ -180,32 +183,32 @@ export function NodesPage() {
       ),
     },
     {
-      title: 'Lan cuoi seen',
+      title: t('nodes.lastSeen'),
       key: 'last_seen',
       width: 160,
       render: (_: unknown, r: NodeView) =>
         r.last_seen_at ? (
           <Tooltip title={r.last_seen_at}>
-            <Text>{new Date(r.last_seen_at).toLocaleString('vi-VN')}</Text>
+            <Text>{formatDateTime(r.last_seen_at)}</Text>
           </Tooltip>
         ) : (
           <Text type="secondary">—</Text>
         ),
     },
     {
-      title: 'Phien ban',
+      title: t('nodes.version'),
       dataIndex: 'agent_version',
       key: 'version',
       width: 90,
       render: (v: string | null) => <Text style={{ fontSize: 11 }}>{v ?? '—'}</Text>,
     },
     {
-      title: 'Thao tac',
+      title: t('common.actions'),
       key: 'actions',
       width: 120,
       render: (_: unknown, r: NodeView) => (
         <Space size={4}>
-          <Tooltip title="Sua">
+          <Tooltip title={t('common.edit')}>
             <Button
               size="small"
               icon={<EditOutlined />}
@@ -215,7 +218,7 @@ export function NodesPage() {
               }}
             />
           </Tooltip>
-          <Tooltip title={r.status === 'active' ? 'Vo hieu hoa' : 'Kich hoat'}>
+          <Tooltip title={r.status === 'active' ? t('nodes.disable') : t('nodes.enable')}>
             <Button
               size="small"
               icon={r.status === 'active' ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
@@ -228,14 +231,14 @@ export function NodesPage() {
             />
           </Tooltip>
           <Popconfirm
-            title="Xoa may nay?"
-            description="Khong the hoan tac."
+            title={t('nodes.deleteConfirm')}
+            description={t('nodes.deleteConfirmDesc')}
             onConfirm={() => deleteMut.mutate(r.id)}
-            okText="Xoa"
-            cancelText="Huy"
+            okText={t('common.delete')}
+            cancelText={t('common.cancel')}
             okButtonProps={{ danger: true }}
           >
-            <Tooltip title="Xoa">
+            <Tooltip title={t('common.delete')}>
               <Button size="small" danger icon={<DeleteOutlined />} />
             </Tooltip>
           </Popconfirm>
@@ -250,7 +253,7 @@ export function NodesPage() {
       <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
         <Col>
           <Typography.Title level={4} style={{ margin: 0 }}>
-            May worker
+            {t('nodes.title')}
           </Typography.Title>
         </Col>
         <Col>
@@ -262,7 +265,7 @@ export function NodesPage() {
               setCreateOpen(true);
             }}
           >
-            Them may
+            {t('nodes.add')}
           </Button>
         </Col>
       </Row>
@@ -278,13 +281,13 @@ export function NodesPage() {
 
       {/* Create modal */}
       <Modal
-        title="Them may moi"
+        title={t('nodes.addTitle')}
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         onOk={() => form.submit()}
         confirmLoading={createMut.isPending}
-        okText="Tao"
-        cancelText="Huy"
+        okText={t('common.create')}
+        cancelText={t('common.cancel')}
       >
         <Form
           form={form}
@@ -293,23 +296,23 @@ export function NodesPage() {
         >
           <Form.Item
             name="name"
-            label="Ten may"
-            rules={[{ required: true, message: 'Nhap ten may' }]}
+            label={t('nodes.nameLabel')}
+            rules={[{ required: true, message: t('nodes.nameRequired') }]}
           >
-            <input className="ant-input" placeholder="vd: scan-01" />
+            <input className="ant-input" placeholder={t('nodes.namePlaceholder')} />
           </Form.Item>
-          <Form.Item name="machine" label="May chu (hostname)">
-            <input className="ant-input" placeholder="vd: WIN-PC-01" />
+          <Form.Item name="machine" label={t('nodes.machineLabel')}>
+            <input className="ant-input" placeholder={t('nodes.machinePlaceholder')} />
           </Form.Item>
           <Form.Item
             name="kinds"
-            label="Loai viec"
-            rules={[{ required: true, type: 'array', min: 1, message: 'Chon it nhat 1 loai' }]}
+            label={t('common.jobTypes')}
+            rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}
           >
             <Select
               mode="multiple"
               options={JOB_TYPES.map((t) => ({ value: t, label: t }))}
-              placeholder="Chon loai viec"
+              placeholder={t('common.pickJobTypes')}
             />
           </Form.Item>
         </Form>
@@ -317,13 +320,13 @@ export function NodesPage() {
 
       {/* Edit modal */}
       <Modal
-        title="Sua may"
+        title={t('nodes.editTitle')}
         open={editNode !== null}
         onCancel={() => setEditNode(null)}
         onOk={() => editForm.submit()}
         confirmLoading={patchMut.isPending}
-        okText="Luu"
-        cancelText="Huy"
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
       >
         <Form
           form={editForm}
@@ -338,20 +341,20 @@ export function NodesPage() {
         >
           <Form.Item
             name="name"
-            label="Ten may"
-            rules={[{ required: true, message: 'Nhap ten may' }]}
+            label={t('nodes.nameLabel')}
+            rules={[{ required: true, message: t('nodes.nameRequired') }]}
           >
-            <input className="ant-input" placeholder="vd: scan-01" />
+            <input className="ant-input" placeholder={t('nodes.namePlaceholder')} />
           </Form.Item>
           <Form.Item
             name="kinds"
-            label="Loai viec"
-            rules={[{ required: true, type: 'array', min: 1, message: 'Chon it nhat 1 loai' }]}
+            label={t('common.jobTypes')}
+            rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}
           >
             <Select
               mode="multiple"
               options={JOB_TYPES.map((t) => ({ value: t, label: t }))}
-              placeholder="Chon loai viec"
+              placeholder={t('common.pickJobTypes')}
             />
           </Form.Item>
         </Form>

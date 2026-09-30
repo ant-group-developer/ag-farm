@@ -1,10 +1,18 @@
 import { ProLayout } from '@ant-design/pro-components';
 import { useAuth0 } from '@auth0/auth0-react';
-import { theme as antdTheme, Button, Dropdown, Spin, Typography } from 'antd';
+import { theme as antdTheme, Button, Dropdown, Select, Spin, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import { Activity, BarChart3, LogOut, Server, Workflow } from 'lucide-react';
 import { Suspense, lazy } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import {
+  APP_LANGUAGES,
+  LANGUAGE_NAMES,
+  changeLanguage,
+  currentLanguage,
+  type AppLanguage,
+} from '../i18n/language';
 
 const NodesPage = lazy(() =>
   import('../modules/nodes/NodesPage').then(({ NodesPage }) => ({ default: NodesPage })),
@@ -24,6 +32,7 @@ export function App() {
   const navigate = useNavigate();
   const { user, logout } = useAuth0();
   const { token } = antdTheme.useToken();
+  const { t } = useTranslation();
 
   const userEmail = user?.email ?? '';
   const userInitials = userEmail.slice(0, 2).toUpperCase();
@@ -52,7 +61,7 @@ export function App() {
       {
         key: 'logout',
         icon: <LogOut size={14} />,
-        label: 'Dang xuat',
+        label: t('app.logout'),
         onClick: handleLogout,
         danger: true,
       },
@@ -64,22 +73,22 @@ export function App() {
     routes: [
       {
         path: '/stats',
-        name: 'Thong ke',
+        name: t('menu.stats'),
         icon: <BarChart3 size={16} />,
       },
       {
         path: '/nodes',
-        name: 'May',
+        name: t('menu.nodes'),
         icon: <Server size={16} />,
       },
       {
         path: '/jobs',
-        name: 'Viec',
+        name: t('menu.jobs'),
         icon: <Workflow size={16} />,
       },
       {
         path: '/owners',
-        name: 'Chu job',
+        name: t('menu.owners'),
         icon: <Activity size={16} />,
       },
     ],
@@ -87,7 +96,7 @@ export function App() {
 
   return (
     <ProLayout
-      title="AG Farm Admin"
+      title={t('app.title')}
       siderWidth={200}
       layout="mix"
       fixSiderbar
@@ -123,8 +132,17 @@ export function App() {
         ),
       }}
       actionsRender={() => [
+        <Select<AppLanguage>
+          key="language"
+          size="small"
+          aria-label={t('common.language')}
+          value={currentLanguage()}
+          style={{ width: 120 }}
+          options={APP_LANGUAGES.map((lng) => ({ value: lng, label: LANGUAGE_NAMES[lng] }))}
+          onChange={(lng) => void changeLanguage(lng)}
+        />,
         <Button key="logout" size="small" onClick={handleLogout} icon={<LogOut size={14} />}>
-          Dang xuat
+          {t('app.logout')}
         </Button>,
       ]}
     >
@@ -139,8 +157,8 @@ export function App() {
             path="*"
             element={
               <div style={{ textAlign: 'center', padding: 48 }}>
-                <Typography.Title level={3}>Khong tim thay trang</Typography.Title>
-                <Button onClick={() => navigate('/stats')}>Ve trang chu</Button>
+                <Typography.Title level={3}>{t('app.notFound')}</Typography.Title>
+                <Button onClick={() => navigate('/stats')}>{t('app.backHome')}</Button>
               </div>
             }
           />
