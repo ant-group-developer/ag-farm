@@ -2,7 +2,7 @@
  * Vòng lặp worker chính: heartbeat → claim → handler → progress → complete/fail.
  * Tắt nhẹ nhàng: SIGINT/SIGTERM → ngừng claim, chờ job đang chạy xong.
  */
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
+import { copyFileSync, linkSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   JOB_TYPE_SPECS,
@@ -29,6 +29,20 @@ import type { SlotHandle } from './machine';
 import { SignClient } from './sign-client';
 import type { UploadOutputOptions } from './transfer';
 import { downloadToFile, uploadJson, uploadOutput } from './transfer';
+
+/**
+ * Đưa file từ cache vào thư mục job: hard link (tức thì, không tốn thêm đĩa — file gốc 4K có thể vài GB),
+ * chép khi không link được (khác ổ đĩa, hệ file không hỗ trợ). Cache có dọn file thì bản link vẫn còn tới khi
+ * thư mục job bị xoá.
+ */
+export function linkOrCopy(src: string, dest: string): void {
+  rmSync(dest, { force: true });
+  try {
+    linkSync(src, dest);
+  } catch {
+    copyFileSync(src, dest);
+  }
+}
 
 // ---- Lỗi không thể thử lại ----
 
@@ -424,7 +438,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
             await downloadToFile(url, tmpDest, { signal: abortCtrl.signal });
           });
           mkdirSync(dirname(dest), { recursive: true });
-          copyFileSync(cached, dest);
+          linkOrCopy(cached, dest);
         } else {
           await downloadToFile(url, dest, { signal: abortCtrl.signal });
         }
