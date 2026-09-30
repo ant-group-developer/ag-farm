@@ -49,6 +49,8 @@ export interface NodeView {
   name: string;
   machine: string;
   kinds: JobType[];
+  /** Admin-set allowed kinds; null = all reported kinds are allowed */
+  allowed_kinds: JobType[] | null;
   status: 'active' | 'disabled';
   os: string | null;
   cpu_cores: number | null;
@@ -92,21 +94,67 @@ export interface JobView {
   attempt_count: number;
   max_attempts: number;
   node_id: string | null;
+  /** Node name — populated in admin endpoints */
+  node_name?: string | null;
   progress_percent: number | null;
   progress_stage: string | null;
   result: JobResult | null;
   error: JobError | null;
   created_at: string;
   updated_at: string;
+  started_at?: string | null;
   finished_at: string | null;
   acked_at: string | null;
-  /** Payload from detail endpoint */
+  /** Payload — returned by admin endpoints */
   payload?: unknown;
+  /** Requirements — returned by admin GET /jobs/:id */
+  requirements?: Record<string, unknown>;
+  /** not_before — returned by admin GET /jobs/:id */
+  not_before?: string | null;
+  /** lease_expires_at — returned by admin GET /jobs/:id and list */
+  lease_expires_at?: string | null;
 }
 
-export interface JobListResponse {
-  jobs: JobView[];
-  next_cursor: string | null;
+/** Paged response envelope used by admin list endpoints (jobs, nodes, owners). */
+export interface PagedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export type JobSortBy = 'createdAt' | 'updatedAt' | 'priority' | 'status' | 'type';
+export type NodeSortBy = 'name' | 'lastSeenAt' | 'createdAt';
+export type OwnerSortBy = 'name' | 'createdAt';
+export type SortOrder = 'asc' | 'desc';
+
+export interface AdminListJobsQuery {
+  page?: number;
+  pageSize?: number;
+  sortBy?: JobSortBy;
+  sortOrder?: SortOrder;
+  status?: string;
+  type?: string;
+  owner?: string;
+  node?: string;
+  q?: string;
+}
+
+export interface AdminListNodesQuery {
+  page?: number;
+  pageSize?: number;
+  sortBy?: NodeSortBy;
+  sortOrder?: SortOrder;
+  status?: 'active' | 'disabled';
+  q?: string;
+}
+
+export interface AdminListOwnersQuery {
+  page?: number;
+  pageSize?: number;
+  sortBy?: OwnerSortBy;
+  sortOrder?: SortOrder;
+  q?: string;
 }
 
 export interface StatsResponse {
@@ -132,6 +180,7 @@ export interface CreateNodeRequest {
 export interface PatchNodeRequest {
   name?: string;
   kinds?: JobType[];
+  allowed_kinds?: JobType[] | null;
   status?: 'active' | 'disabled';
 }
 
@@ -146,14 +195,6 @@ export interface PatchOwnerRequest {
   sign_url?: string;
   allowed_types?: JobType[];
   default_lane?: Lane;
-}
-
-export interface AdminListJobsQuery {
-  status?: string;
-  type?: string;
-  owner?: string;
-  limit?: number;
-  after?: string;
 }
 
 // ---- Cài máy worker bằng mã (xem ag-farm/packages/protocol/src/enroll.ts) ----

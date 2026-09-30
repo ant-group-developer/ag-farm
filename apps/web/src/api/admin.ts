@@ -1,23 +1,37 @@
 import { api } from '../shared/lib/api-client';
 import type {
   AdminListJobsQuery,
+  AdminListNodesQuery,
+  AdminListOwnersQuery,
   CreateEnrollmentRequest,
   CreateEnrollmentResponse,
   CreateNodeRequest,
   CreateOwnerRequest,
-  JobListResponse,
   JobView,
   NodeView,
   OwnerView,
+  PagedResponse,
   PatchNodeRequest,
   PatchOwnerRequest,
   StatsResponse,
 } from '../types/api';
 
+/** Serialize a plain object as URLSearchParams, omitting undefined/null values. */
+function toParams(obj: Record<string, string | number | boolean | undefined | null>): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined && value !== null) {
+      params.set(key, String(value));
+    }
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
 // ---- Nodes ----
 
-export function listNodes(): Promise<NodeView[]> {
-  return api.get<NodeView[]>('/v1/admin/nodes');
+export function listNodes(query: AdminListNodesQuery = {}): Promise<PagedResponse<NodeView>> {
+  return api.get<PagedResponse<NodeView>>(`/v1/admin/nodes${toParams(query as Record<string, string | number | boolean | undefined | null>)}`);
 }
 
 export function createNode(body: CreateNodeRequest): Promise<NodeView & { token: string }> {
@@ -38,15 +52,8 @@ export function deleteNode(id: string): Promise<void> {
 
 // ---- Jobs ----
 
-export function listJobs(query: AdminListJobsQuery): Promise<JobListResponse> {
-  const params = new URLSearchParams();
-  if (query.status) params.set('status', query.status);
-  if (query.type) params.set('type', query.type);
-  if (query.owner) params.set('owner', query.owner);
-  if (query.limit) params.set('limit', String(query.limit));
-  if (query.after) params.set('after', query.after);
-  const qs = params.toString();
-  return api.get<JobListResponse>(`/v1/admin/jobs${qs ? `?${qs}` : ''}`);
+export function listJobs(query: AdminListJobsQuery = {}): Promise<PagedResponse<JobView>> {
+  return api.get<PagedResponse<JobView>>(`/v1/admin/jobs${toParams(query as Record<string, string | number | boolean | undefined | null>)}`);
 }
 
 export function getJob(id: string): Promise<JobView> {
@@ -61,6 +68,18 @@ export function cancelJob(id: string): Promise<JobView> {
   return api.post<JobView>(`/v1/admin/jobs/${id}/cancel`);
 }
 
+export function pauseJobs(body: Record<string, unknown>): Promise<{ affected: number }> {
+  return api.post<{ affected: number }>('/v1/admin/jobs/pause', body);
+}
+
+export function resumeJobs(body: Record<string, unknown>): Promise<{ affected: number }> {
+  return api.post<{ affected: number }>('/v1/admin/jobs/resume', body);
+}
+
+export function cancelJobs(body: Record<string, unknown>): Promise<{ affected: number }> {
+  return api.post<{ affected: number }>('/v1/admin/jobs/cancel', body);
+}
+
 // ---- Stats ----
 
 export function getStats(): Promise<StatsResponse> {
@@ -69,8 +88,8 @@ export function getStats(): Promise<StatsResponse> {
 
 // ---- Owners ----
 
-export function listOwners(): Promise<OwnerView[]> {
-  return api.get<OwnerView[]>('/v1/admin/owners');
+export function listOwners(query: AdminListOwnersQuery = {}): Promise<PagedResponse<OwnerView>> {
+  return api.get<PagedResponse<OwnerView>>(`/v1/admin/owners${toParams(query as Record<string, string | number | boolean | undefined | null>)}`);
 }
 
 export function createOwner(body: CreateOwnerRequest): Promise<OwnerView & { key: string }> {
