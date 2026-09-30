@@ -19,6 +19,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { createOwner, listOwners, patchOwner } from '../../api/admin';
 import { SecretModal } from '../../shared/components/SecretModal';
+import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import type { JobType, Lane, OwnerView, PatchOwnerRequest } from '../../types/api';
 import { JOB_TYPES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
@@ -173,6 +174,7 @@ export function OwnersPage() {
         loading={owners.isLoading}
         pagination={false}
         size="small"
+        sticky={PAGE_TABLE_STICKY}
       />
 
       {/* Create modal */}

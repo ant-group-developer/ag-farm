@@ -11,6 +11,7 @@ import {
   Button,
   Col,
   Form,
+  Input,
   Modal,
   Popconfirm,
   Row,
@@ -27,6 +28,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { createNode, deleteNode, listNodes, patchNode } from '../../api/admin';
 import { SecretModal } from '../../shared/components/SecretModal';
+import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import type { JobType, NodeView } from '../../types/api';
 import { JOB_TYPES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
@@ -277,6 +279,7 @@ export function NodesPage() {
         loading={nodes.isLoading}
         pagination={false}
         size="small"
+        sticky={PAGE_TABLE_STICKY}
       />
 
       {/* Create modal */}
@@ -299,10 +302,10 @@ export function NodesPage() {
             label={t('nodes.nameLabel')}
             rules={[{ required: true, message: t('nodes.nameRequired') }]}
           >
-            <input className="ant-input" placeholder={t('nodes.namePlaceholder')} />
+            <Input placeholder={t('nodes.namePlaceholder')} />
           </Form.Item>
           <Form.Item name="machine" label={t('nodes.machineLabel')}>
-            <input className="ant-input" placeholder={t('nodes.machinePlaceholder')} />
+            <Input placeholder={t('nodes.machinePlaceholder')} />
           </Form.Item>
           <Form.Item
             name="kinds"
@@ -344,7 +347,7 @@ export function NodesPage() {
             label={t('nodes.nameLabel')}
             rules={[{ required: true, message: t('nodes.nameRequired') }]}
           >
-            <input className="ant-input" placeholder={t('nodes.namePlaceholder')} />
+            <Input placeholder={t('nodes.namePlaceholder')} />
           </Form.Item>
           <Form.Item
             name="kinds"

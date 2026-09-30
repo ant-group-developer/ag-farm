@@ -24,6 +24,7 @@ import { useState } from 'react';
 import { cancelJob, getJob, listJobs, retryJob } from '../../api/admin';
 import { pollInterval } from '../../shared/lib/poll';
 import { statusColor, statusLabel } from '../../shared/lib/status';
+import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import type { AdminListJobsQuery, JobStatus, JobType, JobView } from '../../types/api';
 import { JOB_TYPES, TERMINAL_JOB_STATUSES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
@@ -284,6 +285,7 @@ export function JobsPage() {
         loading={isLoading}
         pagination={false}
         size="small"
+        sticky={PAGE_TABLE_STICKY}
         scroll={{ x: 1200 }}
         footer={() =>
           hasNextPage ? (

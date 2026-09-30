@@ -3,6 +3,7 @@ import { Card, Col, Row, Statistic, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { getStats } from '../../api/admin';
 import { statusColor, statusLabel } from '../../shared/lib/status';
+import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import type { JobStatus, JobType } from '../../types/api';
 import { useTranslation } from 'react-i18next';
 
@@ -101,6 +102,7 @@ export function StatsPage() {
           columns={columns}
           pagination={false}
           size="small"
+          sticky={PAGE_TABLE_STICKY}
         />
       </Card>
     </>
