@@ -18,6 +18,10 @@ import type {
   PatchNodeDto,
   PatchOwnerDto,
 } from './admin.dto';
+import { toNodeView, toOwnerView } from './admin.views';
+
+type NodeView = ReturnType<typeof toNodeView>;
+type OwnerView = ReturnType<typeof toOwnerView>;
 
 function decodeCursor(cursor: string): { updatedAt: string; id: string } | null {
   try {
@@ -52,16 +56,17 @@ export class AdminService {
   // ---- Nodes ----
 
   async listNodes() {
-    const offlineSeconds = this.config.get<number>('NODE_OFFLINE_AFTER_SECONDS') ?? 90;
-    const threshold = new Date(Date.now() - offlineSeconds * 1000);
     const nodes = await this.nodeRepo.find({ order: { createdAt: 'ASC' } });
-    return nodes.map((n) => ({
-      ...n,
-      online: n.lastSeenAt != null && n.lastSeenAt >= threshold,
-    }));
+    return nodes.map((n) => toNodeView(n, this.isOnline(n)));
   }
 
-  async createNode(dto: CreateNodeDto): Promise<{ node: FarmNodeEntity; token: string }> {
+  private isOnline(node: FarmNodeEntity): boolean {
+    const offlineSeconds = this.config.get<number>('NODE_OFFLINE_AFTER_SECONDS') ?? 90;
+    const threshold = new Date(Date.now() - offlineSeconds * 1000);
+    return node.lastSeenAt != null && node.lastSeenAt >= threshold;
+  }
+
+  async createNode(dto: CreateNodeDto): Promise<{ node: NodeView; token: string }> {
     const token = randomBytes(32).toString('base64url');
     const tokenHash = createHash('sha256').update(token).digest('hex');
     const node = this.nodeRepo.create({
@@ -72,17 +77,18 @@ export class AdminService {
       status: 'active',
     });
     const saved = await this.nodeRepo.save(node);
-    return { node: saved, token };
+    return { node: toNodeView(saved, false), token };
   }
 
-  async patchNode(id: string, dto: PatchNodeDto): Promise<FarmNodeEntity> {
+  async patchNode(id: string, dto: PatchNodeDto): Promise<NodeView> {
     const node = await this.nodeRepo.findOne({ where: { id } });
     if (!node) throw new NotFoundException('Node not found');
     if (dto.name !== undefined) node.name = dto.name;
     if (dto.kinds !== undefined) node.kinds = dto.kinds;
     if (dto.status !== undefined) node.status = dto.status as 'active' | 'disabled';
     if (dto.schedule !== undefined) node.schedule = dto.schedule;
-    return this.nodeRepo.save(node);
+    const saved = await this.nodeRepo.save(node);
+    return toNodeView(saved, this.isOnline(saved));
   }
 
   async deleteNode(id: string): Promise<void> {
@@ -243,10 +249,11 @@ export class AdminService {
   // ---- Owners ----
 
   async listOwners() {
-    return this.ownerRepo.find({ order: { id: 'ASC' } });
+    const owners = await this.ownerRepo.find({ order: { id: 'ASC' } });
+    return owners.map(toOwnerView);
   }
 
-  async createOwner(dto: CreateOwnerDto): Promise<{ owner: FarmOwnerEntity; key: string }> {
+  async createOwner(dto: CreateOwnerDto): Promise<{ owner: OwnerView; key: string }> {
     const key = randomBytes(32).toString('base64url');
     const keyHash = createHash('sha256').update(key).digest('hex');
 
@@ -263,15 +270,15 @@ export class AdminService {
       defaultLane: dto.default_lane ?? 'batch',
     });
     const saved = await this.ownerRepo.save(owner);
-    return { owner: saved, key };
+    return { owner: toOwnerView(saved), key };
   }
 
-  async patchOwner(id: string, dto: PatchOwnerDto): Promise<FarmOwnerEntity> {
+  async patchOwner(id: string, dto: PatchOwnerDto): Promise<OwnerView> {
     const owner = await this.ownerRepo.findOne({ where: { id } });
     if (!owner) throw new NotFoundException('Owner not found');
     if (dto.sign_url !== undefined) owner.signUrl = dto.sign_url;
     if (dto.allowed_types !== undefined) owner.allowedTypes = dto.allowed_types;
     if (dto.default_lane !== undefined) owner.defaultLane = dto.default_lane;
-    return this.ownerRepo.save(owner);
+    return toOwnerView(await this.ownerRepo.save(owner));
   }
 }
