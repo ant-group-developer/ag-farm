@@ -77,10 +77,24 @@ export const StudioRenderPayloadSchema = z.strictObject({
    */
   composition: InputNameSchema,
   canvas: z.strictObject({ width: z.int().min(160).max(7680), height: z.int().min(160).max(7680) }),
-  /** Chừa dư mỗi đầu khi cắt đoạn nguồn (giây), để chuyển cảnh có đủ hình. */
+  /**
+   * Chừa dư mỗi đầu khi cắt đoạn nguồn (giây), để chuyển cảnh có đủ hình.
+   * Không còn dùng khi composition chỉ dùng `asset:` inputs (GĐ2+), nhưng vẫn giữ để payload cũ còn parse được.
+   */
   handle_seconds: z.number().min(0).max(5).default(1),
   /** File video kết quả, ví dụ `renders/12/final.mp4`. */
   output: RelativePathSchema,
+  /**
+   * Thumbnail cần dựng sau khi render_final xong.
+   * Mỗi entry: lấy frame tại `t_s` giây trong video kết quả, đốt `text` vào, lưu JPEG.
+   * Đường dẫn output: thumbnailOutputPath(payload.output, i) (i = 1..n).
+   */
+  thumbnails: z.array(
+    z.strictObject({
+      t_s: z.number().min(0),
+      text: z.string().min(1).max(40),
+    }),
+  ).max(3).default([]),
 });
 export type StudioRenderPayload = z.infer<typeof StudioRenderPayloadSchema>;
 
@@ -106,5 +120,23 @@ export const RenderManifestSchema = z.strictObject({
     }),
   ),
   warnings: z.array(z.string()).default([]),
+  /** Thumbnail đã dựng sau render_final. Rỗng nếu không có thumbnail nào được yêu cầu. */
+  thumbnails: z.array(
+    z.strictObject({
+      output: RelativePathSchema,
+      t_s: z.number().min(0),
+      width: z.int().positive(),
+      height: z.int().positive(),
+    }),
+  ).default([]),
 });
 export type RenderManifest = z.infer<typeof RenderManifestSchema>;
+
+/**
+ * Tạo đường dẫn output cho thumbnail thứ `n` (1-based) của video `output`.
+ * Ví dụ: `renders/ep1/final-att.mp4` → `renders/ep1/final-att.thumb-1.jpg`
+ * Đây là hợp đồng đặt tên giữa protocol và Studio (Studio map tên này thành stage output).
+ */
+export function thumbnailOutputPath(output: string, n: number): string {
+  return output.replace(/\.mp4$/, `.thumb-${n}.jpg`);
+}

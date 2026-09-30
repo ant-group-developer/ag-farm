@@ -13,6 +13,10 @@ import {
   SCAN_AI_MAX_KEYFRAMES,
   signTicket,
   SignRequestSchema,
+  StudioRenderPayloadSchema,
+  RenderManifestSchema,
+  RENDER_MANIFEST_SCHEMA,
+  thumbnailOutputPath,
   SubmitJobRequestSchema,
   TicketError,
   verifyTicket,
@@ -206,6 +210,113 @@ describe('payloads', () => {
     expect(AssetDescriptionSchema.safeParse(description).success).toBe(true);
     const tooLong = { ...description, summary_en: Array(91).fill('word').join(' ') };
     expect(AssetDescriptionSchema.safeParse(tooLong).success).toBe(false);
+  });
+
+  it('StudioRenderPayloadSchema: fills thumbnails default', () => {
+    const payload = StudioRenderPayloadSchema.parse({
+      production_id: 'p1',
+      revision: 1,
+      composition: 'stage:comp.json',
+      canvas: { width: 1920, height: 1080 },
+      output: 'renders/1/final.mp4',
+    });
+    expect(payload.thumbnails).toEqual([]);
+    expect(payload.handle_seconds).toBe(1);
+  });
+
+  it('StudioRenderPayloadSchema: accepts valid thumbnails', () => {
+    const payload = StudioRenderPayloadSchema.parse({
+      production_id: 'p1',
+      revision: 1,
+      composition: 'stage:comp.json',
+      canvas: { width: 1920, height: 1080 },
+      output: 'renders/1/final.mp4',
+      thumbnails: [
+        { t_s: 3.5, text: 'Tiêu đề tập 1' },
+        { t_s: 10, text: 'Cảnh đẹp nhất' },
+      ],
+    });
+    expect(payload.thumbnails).toHaveLength(2);
+    expect(payload.thumbnails[0]!.text).toBe('Tiêu đề tập 1');
+  });
+
+  it('StudioRenderPayloadSchema: rejects thumbnails with text too long', () => {
+    expect(
+      StudioRenderPayloadSchema.safeParse({
+        production_id: 'p1',
+        revision: 1,
+        composition: 'stage:comp.json',
+        canvas: { width: 1920, height: 1080 },
+        output: 'renders/1/final.mp4',
+        thumbnails: [{ t_s: 1, text: 'a'.repeat(41) }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('StudioRenderPayloadSchema: rejects more than 3 thumbnails', () => {
+    expect(
+      StudioRenderPayloadSchema.safeParse({
+        production_id: 'p1',
+        revision: 1,
+        composition: 'stage:comp.json',
+        canvas: { width: 1920, height: 1080 },
+        output: 'renders/1/final.mp4',
+        thumbnails: [
+          { t_s: 1, text: 'A' },
+          { t_s: 2, text: 'B' },
+          { t_s: 3, text: 'C' },
+          { t_s: 4, text: 'D' },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('RenderManifestSchema: fills thumbnails default', () => {
+    const manifest = RenderManifestSchema.parse({
+      schema: RENDER_MANIFEST_SCHEMA,
+      production_id: 'p1',
+      revision: 1,
+      output: 'renders/1/final.mp4',
+      width: 1920,
+      height: 1080,
+      duration_s: 30,
+      size_bytes: 50_000_000,
+      watermarked: false,
+      sources: [],
+    });
+    expect(manifest.thumbnails).toEqual([]);
+  });
+
+  it('RenderManifestSchema: accepts thumbnails', () => {
+    const manifest = RenderManifestSchema.parse({
+      schema: RENDER_MANIFEST_SCHEMA,
+      production_id: 'p1',
+      revision: 1,
+      output: 'renders/1/final.mp4',
+      width: 1920,
+      height: 1080,
+      duration_s: 30,
+      size_bytes: 50_000_000,
+      watermarked: false,
+      sources: [],
+      thumbnails: [{ output: 'renders/1/final.thumb-1.jpg', t_s: 3.5, width: 1280, height: 720 }],
+    });
+    expect(manifest.thumbnails).toHaveLength(1);
+    expect(manifest.thumbnails[0]!.output).toBe('renders/1/final.thumb-1.jpg');
+  });
+
+  it('thumbnailOutputPath: replaces .mp4 with .thumb-N.jpg', () => {
+    expect(thumbnailOutputPath('renders/ep1/final-att.mp4', 1)).toBe('renders/ep1/final-att.thumb-1.jpg');
+    expect(thumbnailOutputPath('renders/ep1/final-att.mp4', 2)).toBe('renders/ep1/final-att.thumb-2.jpg');
+    expect(thumbnailOutputPath('renders/ep1/final-att.mp4', 3)).toBe('renders/ep1/final-att.thumb-3.jpg');
+  });
+
+  it('InputNameSchema: accepts asset: prefix', () => {
+    expect(InputNameSchema.safeParse('asset:abc-123').success).toBe(true);
+    expect(InputNameSchema.safeParse('asset:uuid-abcd-1234').success).toBe(true);
+    expect(InputNameSchema.safeParse('segment:seg-001').success).toBe(true);
+    expect(InputNameSchema.safeParse('stage:renders/comp.json').success).toBe(true);
+    expect(InputNameSchema.safeParse('library:music/track.mp3').success).toBe(true);
   });
 
   it('job control takes ids or a group, not both', () => {
