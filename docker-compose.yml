@@ -20,6 +20,10 @@ services:
       - 'host.docker.internal:host-gateway'
     ports:
       - '${FARM_API_PORT:-3010}:3010'
+    volumes:
+      # Gói cài worker (zip + latest.json), phục vụ ở /dist/. `node scripts/release.mjs --publish <thư mục này>`
+      # ở repo worker ghi vào đây.
+      - ${FARM_RELEASES_DIR_HOST:-./releases}:/app/releases:ro
     logging: *logging
     restart: unless-stopped
 

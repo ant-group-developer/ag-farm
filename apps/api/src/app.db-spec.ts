@@ -1,4 +1,4 @@
-﻿/**
+/**
  * DB integration tests cho ag-farm.
  * Yêu cầu Postgres đang chạy ở port 55433 (docker compose -f docker-compose.test.yml up -d).
  * Chạy: yarn workspace @ag-farm/api test:db
@@ -17,6 +17,9 @@ import { FarmJobEntity } from './database/entities/farm-job.entity';
 import { FarmNodeEntity } from './database/entities/farm-node.entity';
 import { FarmOwnerEntity } from './database/entities/farm-owner.entity';
 import { Initial1000000000000 } from './database/migrations/1000000000000-initial';
+import { Enrollments1100000000000 } from './database/migrations/1100000000000-enrollments';
+import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
+import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
 import { ApiExceptionFilter } from './common/api-exception.filter';
 import { ApiResponseInterceptor } from './common/api-response.interceptor';
@@ -72,8 +75,8 @@ async function buildApp(): Promise<INestApplication> {
       TypeOrmModule.forRoot({
         type: 'postgres',
         url: TEST_DB_URL,
-        entities: [FarmOwnerEntity, FarmNodeEntity, FarmJobEntity],
-        migrations: [Initial1000000000000],
+        entities: [FarmOwnerEntity, FarmNodeEntity, FarmJobEntity, FarmEnrollmentEntity],
+        migrations: [Initial1000000000000, Enrollments1100000000000],
         migrationsRun: true,
         synchronize: false,
         dropSchema: true, // reset DB mỗi lần test
@@ -173,7 +176,7 @@ describe('ag-farm DB integration', () => {
 
   beforeEach(async () => {
     // Xoá dữ liệu giữa các test (TRUNCATE an toàn hơn delete({}) trong TypeORM 1.1)
-    await ds.query('TRUNCATE TABLE farm_jobs, farm_nodes, farm_owners RESTART IDENTITY CASCADE');
+    await ds.query('TRUNCATE TABLE farm_jobs, farm_nodes, farm_owners, farm_enrollments RESTART IDENTITY CASCADE');
   });
 
   // ---- Migration up/down/up ----
@@ -184,6 +187,7 @@ describe('ag-farm DB integration', () => {
       await runner.query(`DROP TABLE IF EXISTS farm_jobs`);
       await runner.query(`DROP TABLE IF EXISTS farm_nodes`);
       await runner.query(`DROP TABLE IF EXISTS farm_owners`);
+      await runner.query(`DROP TABLE IF EXISTS farm_enrollments`);
       await runner.query(`DELETE FROM migrations`);
       // up lại
       await ds.runMigrations();
@@ -588,6 +592,53 @@ describe('ag-farm DB integration', () => {
       });
     const blocked = await claim();
     expect(blocked.body.data).toEqual({ job: null, waiting_interactive: { cpu: 1, gpu: 0 } });
+  });
+
+  // ---- Mã cài đặt máy worker ----
+  it('enrollment code gives one token per role, once, and re-enrolling a machine rotates its tokens', async () => {
+    const enroll = app.get(EnrollService);
+    const caps = { os: 'windows', cpu_cores: 28, ram_mb: 65536, gpus: [{ name: 'RTX 4060 Ti', vram_mb: 16380 }] };
+
+    const first = await enroll.create({ machine: 'lan-4060ti', roles: ['scan', 'render'] });
+    const res = await request(app.getHttpServer()).post('/v1/enroll').send({ code: first.code, ...caps });
+    expect(res.status).toBe(200);
+    const nodes = res.body.data.nodes as Array<{ role: string; name: string; kinds: string[]; token: string; package: string }>;
+    expect(nodes.map((n) => [n.role, n.name, n.package])).toEqual([
+      ['scan', 'lan-4060ti-scan', 'ag-scan-worker'],
+      ['render', 'lan-4060ti-render', 'ag-render-worker'],
+    ]);
+    expect(nodes[0]!.kinds).toEqual(['scan.extract', 'scan.ai']);
+
+    // Token dùng được ngay với API worker
+    const me = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${nodes[0]!.token}`);
+    expect(me.status).toBe(200);
+    expect(me.body.data).toMatchObject({ name: 'lan-4060ti-scan', status: 'active', last_seen_at: null });
+
+    // Mã chỉ dùng một lần
+    const again = await request(app.getHttpServer()).post('/v1/enroll').send({ code: first.code, ...caps });
+    expect(again.status).toBe(403);
+
+    // Cài lại máy: cùng node, token mới, token cũ hết hiệu lực
+    const second = await enroll.create({ machine: 'lan-4060ti', roles: ['scan'] });
+    const res2 = await request(app.getHttpServer()).post('/v1/enroll').send({ code: second.code, ...caps });
+    expect(res2.status).toBe(200);
+    expect(res2.body.data.nodes[0].node_id).toBe(res.body.data.nodes[0].node_id);
+    const oldToken = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${nodes[0]!.token}`);
+    expect(oldToken.status).toBe(401);
+    expect(await ds.getRepository(FarmNodeEntity).count()).toBe(2);
+  });
+
+  it('rejects unknown and expired enrollment codes the same way', async () => {
+    const enroll = app.get(EnrollService);
+    const caps = { os: 'windows', cpu_cores: 8, ram_mb: 16384 };
+    const unknown = await request(app.getHttpServer()).post('/v1/enroll').send({ code: 'agf_not-a-real-code-000000000', ...caps });
+    expect(unknown.status).toBe(403);
+
+    const created = await enroll.create({ machine: 'old-box', roles: ['render'] });
+    await ds.query(`UPDATE farm_enrollments SET expires_at = now() - interval '1 minute' WHERE id = $1`, [created.id]);
+    const expired = await request(app.getHttpServer()).post('/v1/enroll').send({ code: created.code, ...caps });
+    expect(expired.status).toBe(403);
+    expect(await ds.getRepository(FarmNodeEntity).count()).toBe(0);
   });
 
   // ---- Owner không thấy job của owner khác ----

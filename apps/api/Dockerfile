@@ -43,6 +43,8 @@ COPY --from=production-dependencies /app/packages/protocol/package.json ./packag
 COPY --from=build /app/packages/protocol/dist ./packages/protocol/dist
 COPY apps/api/package.json ./apps/api/
 COPY --from=build /app/apps/api/dist ./apps/api/dist
+# Bộ cài máy worker, phục vụ ở /dist/install.ps1 (gói zip nằm ở volume releases/)
+COPY tools/worker-installer/install.ps1 tools/worker-installer/uninstall.ps1 ./tools/worker-installer/
 
 USER node
 WORKDIR /app/apps/api

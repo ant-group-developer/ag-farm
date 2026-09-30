@@ -1,6 +1,8 @@
 import { api } from '../shared/lib/api-client';
 import type {
   AdminListJobsQuery,
+  CreateEnrollmentRequest,
+  CreateEnrollmentResponse,
   CreateNodeRequest,
   CreateOwnerRequest,
   JobListResponse,
@@ -20,6 +22,10 @@ export function listNodes(): Promise<NodeView[]> {
 
 export function createNode(body: CreateNodeRequest): Promise<NodeView & { token: string }> {
   return api.post<NodeView & { token: string }>('/v1/admin/nodes', body);
+}
+
+export function createEnrollment(body: CreateEnrollmentRequest): Promise<CreateEnrollmentResponse> {
+  return api.post<CreateEnrollmentResponse>('/v1/admin/enrollments', body);
 }
 
 export function patchNode(id: string, body: PatchNodeRequest): Promise<NodeView> {

@@ -20,11 +20,24 @@ import {
   PatchOwnerSchema,
 } from './admin.dto';
 import { AdminService } from './admin.service';
+import { CreateEnrollmentRequestSchema } from '@ag-farm/protocol';
+import { EnrollService } from '../enroll/enroll.service';
 
 @UseGuards(AdminGuard)
 @Controller('v1/admin')
 export class AdminController {
-  constructor(private readonly svc: AdminService) {}
+  constructor(
+    private readonly svc: AdminService,
+    private readonly enroll: EnrollService,
+  ) {}
+
+  // ---- Mã cài đặt máy worker ----
+
+  @Post('enrollments')
+  @HttpCode(201)
+  async createEnrollment(@Body(new ZodValidationPipe(CreateEnrollmentRequestSchema)) body: any) {
+    return this.enroll.create(body);
+  }
 
   // ---- Nodes ----
 

@@ -11,3 +11,9 @@ body {
 .user-dropdown:hover {
   background-color: rgba(230, 227, 227, 0.466);
 }
+
+/* Icon lucide (svg) trong nút antd: căn giữa như icon antd */
+.ant-btn-icon {
+  display: inline-flex;
+  align-items: center;
+}

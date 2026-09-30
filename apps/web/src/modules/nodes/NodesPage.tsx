@@ -3,13 +3,13 @@ import {
   EditOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
-  PlusOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Badge,
   Button,
   Col,
+  Dropdown,
   Form,
   Input,
   Modal,
@@ -33,6 +33,8 @@ import type { JobType, NodeView } from '../../types/api';
 import { JOB_TYPES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
+import { ChevronDown, KeyRound, Plus, TerminalSquare } from 'lucide-react';
+import { EnrollModal } from './EnrollModal';
 
 const { Text } = Typography;
 
@@ -67,6 +69,7 @@ export function NodesPage() {
   const qc = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
   const [createOpen, setCreateOpen] = useState(false);
+  const [enrollOpen, setEnrollOpen] = useState(false);
   const [editNode, setEditNode] = useState<NodeView | null>(null);
   const [secret, setSecret] = useState<{ title: string; label: string; value: string } | null>(
     null,
@@ -259,16 +262,27 @@ export function NodesPage() {
           </Typography.Title>
         </Col>
         <Col>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              form.resetFields();
-              setCreateOpen(true);
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                { key: 'install', icon: <TerminalSquare size={16} />, label: t('enroll.menuInstall') },
+                { key: 'manual', icon: <KeyRound size={16} />, label: t('enroll.menuManual') },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'install') {
+                  setEnrollOpen(true);
+                } else {
+                  form.resetFields();
+                  setCreateOpen(true);
+                }
+              },
             }}
           >
-            {t('nodes.add')}
-          </Button>
+            <Button type="primary" icon={<Plus size={16} />}>
+              {t('nodes.add')} <ChevronDown size={14} />
+            </Button>
+          </Dropdown>
         </Col>
       </Row>
 
@@ -362,6 +376,14 @@ export function NodesPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <EnrollModal
+        open={enrollOpen}
+        onClose={() => {
+          setEnrollOpen(false);
+          void qc.invalidateQueries({ queryKey: ['nodes'] });
+        }}
+      />
 
       {/* Secret modal */}
       {secret && (

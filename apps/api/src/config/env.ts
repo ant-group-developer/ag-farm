@@ -31,6 +31,13 @@ export const EnvSchema = z.object({
   NODE_OFFLINE_AFTER_SECONDS: z.coerce.number().int().min(10).default(90),
 
   FRONTEND_ORIGIN: z.string().default('*'),
+
+  /** Địa chỉ hub mà máy worker gọi tới, hiện trong lệnh cài máy (vd. https://farm-api-dev.ant-group.net). */
+  FARM_PUBLIC_URL: z.string().url().optional(),
+  /** Thư mục gói phát hành worker (zip + latest.json), phục vụ ở `/dist/`. */
+  FARM_RELEASES_DIR: z.string().optional(),
+  /** Thư mục chứa install.ps1/uninstall.ps1, phục vụ ở `/dist/`. */
+  FARM_INSTALLER_DIR: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

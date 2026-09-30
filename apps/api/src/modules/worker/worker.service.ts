@@ -18,6 +18,7 @@ import {
   ProgressRequest,
   ProgressResponse,
   TICKET_GRACE_SECONDS,
+  WorkerMeResponse,
   meetsRequirements,
   signTicket,
   JOB_TYPE_SPECS,
@@ -63,6 +64,17 @@ export class WorkerService {
     private readonly dataSource: DataSource,
     private readonly config: ConfigService,
   ) {}
+
+  async me(node: FarmNodeEntity): Promise<WorkerMeResponse> {
+    const fresh = await this.nodeRepo.findOneByOrFail({ id: node.id });
+    return {
+      node_id: fresh.id,
+      name: fresh.name,
+      status: fresh.status,
+      agent_version: fresh.agentVersion ?? null,
+      last_seen_at: fresh.lastSeenAt ? fresh.lastSeenAt.toISOString() : null,
+    };
+  }
 
   async heartbeat(node: FarmNodeEntity, req: HeartbeatRequest): Promise<HeartbeatResponse> {
     await this.nodeRepo.update(node.id, {

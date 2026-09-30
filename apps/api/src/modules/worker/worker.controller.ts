@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   Param,
   Post,
@@ -25,6 +26,12 @@ import { WorkerService } from './worker.service';
 @Controller()
 export class WorkerController {
   constructor(private readonly svc: WorkerService) {}
+
+  /** Script cài máy worker chờ tới khi node vừa cài gửi heartbeat. */
+  @Get('v1/worker/me')
+  async me(@Req() req: Request) {
+    return this.svc.me(req.nodeContext!.node);
+  }
 
   @Post('v1/worker/heartbeat')
   @HttpCode(200)

@@ -154,3 +154,23 @@ export interface AdminListJobsQuery {
   limit?: number;
   after?: string;
 }
+
+// ---- Cài máy worker bằng mã (xem ag-farm/packages/protocol/src/enroll.ts) ----
+
+export type WorkerRole = 'scan' | 'render';
+
+export interface CreateEnrollmentRequest {
+  machine: string;
+  roles: WorkerRole[];
+}
+
+export interface CreateEnrollmentResponse {
+  id: string;
+  machine: string;
+  roles: WorkerRole[];
+  /** Chỉ trả một lần. */
+  code: string;
+  expires_at: string;
+  /** Địa chỉ hub cho máy worker (FARM_PUBLIC_URL), null nếu hub chưa cấu hình. */
+  public_url: string | null;
+}
