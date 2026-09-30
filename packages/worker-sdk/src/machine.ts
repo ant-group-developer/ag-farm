@@ -92,6 +92,25 @@ export class SlotAllocator {
     return null;
   }
 
+  /**
+   * Slot trống mà job của `lane` được lấy: job batch không tính các slot giữ cho interactive (cùng quy tắc
+   * với `acquire`). Worker xin việc theo con số này nên job nhận về luôn chiếm được slot.
+   */
+  freeSlotsFor(lane: ClaimLane): { cpu: number; gpu: number } {
+    const count = (kind: SlotKind): number => {
+      const total = kind === 'cpu' ? this.machineConfig.cpu_slots : this.machineConfig.gpu_slots;
+      const reserve =
+        kind === 'cpu' ? this.machineConfig.reserve_interactive.cpu : this.machineConfig.reserve_interactive.gpu;
+      const limit = lane === 'batch' ? Math.max(0, total - reserve) : total;
+      let free = 0;
+      for (let i = 0; i < limit; i++) {
+        if (!this.isLocked(join(this.lockDir, `${kind}-${i}.lock`))) free++;
+      }
+      return free;
+    };
+    return { cpu: count('cpu'), gpu: count('gpu') };
+  }
+
   /** Giải phóng slot đã chiếm. */
   release(handle: SlotHandle): void {
     try {

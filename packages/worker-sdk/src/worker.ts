@@ -169,41 +169,30 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
       continue;
     }
 
-    // Thử claim
-    const free = allocator.freeSlots();
+    // Thử claim, từng lane với đúng số slot lane đó được lấy: interactive trước (dùng mọi slot trống),
+    // rồi batch (không đụng slot giữ cho interactive). Hub chỉ trả job có loại slot còn trống trong
+    // `free_slots`, nên job nhận về luôn chiếm được slot. Trước đây batch được xin với cả slot dự trữ
+    // của GPU/CPU khác loại: job CPU nhận về không có slot, bị bỏ rơi tới khi lease hết hạn.
     const kinds = config.kinds.filter((k) => handlers[k]);
     if (kinds.length === 0) { await sleep(5_000); continue; }
 
-    // Lane logic: batch chỉ được dùng non-reserved slots
-    const lanes: Array<'interactive' | 'batch'> = [];
-    const cpuFreeForBatch = free.cpu - machineConfig.reserve_interactive.cpu;
-    const gpuFreeForBatch = free.gpu - machineConfig.reserve_interactive.gpu;
-    if (cpuFreeForBatch > 0 || gpuFreeForBatch > 0) {
-      // Không giới hạn lane
-    } else if (free.cpu > 0 || free.gpu > 0) {
-      lanes.push('interactive');
+    let claimed: Awaited<ReturnType<typeof hub.claim>> | null = null;
+    let claimFailed = false;
+    for (const lane of ['interactive', 'batch'] as const) {
+      const free = allocator.freeSlotsFor(lane);
+      if (free.cpu === 0 && free.gpu === 0) continue;
+      try {
+        claimed = await hub.claim({ kinds, free_slots: free, lanes: [lane] });
+      } catch (err) {
+        log.warn('Claim failed', { err: String(err) });
+        claimFailed = true;
+        break;
+      }
+      if (claimed.job) break;
     }
+    if (claimFailed) { await sleep(3_000); continue; }
 
-    // Nếu không còn slot nào
-    if (free.cpu === 0 && free.gpu === 0) {
-      await sleep(1_000);
-      continue;
-    }
-
-    let claimed;
-    try {
-      claimed = await hub.claim({
-        kinds,
-        free_slots: free,
-        lanes: lanes.length > 0 ? lanes : undefined,
-      });
-    } catch (err) {
-      log.warn('Claim failed', { err: String(err) });
-      await sleep(3_000);
-      continue;
-    }
-
-    if (!claimed.job) {
+    if (!claimed?.job) {
       await sleep(1_000);
       continue;
     }
@@ -218,17 +207,49 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
 
     const spec = JOB_TYPE_SPECS[job.type];
     const slotLane: 'batch' | 'interactive' = job.lane === 'interactive' ? 'interactive' : 'batch';
-    const slot = allocator.acquire(spec.slot, { lane: slotLane });
-    if (!slot) {
-      await sleep(500);
-      continue;
-    }
+    // Một worker khác trên cùng máy có thể vừa lấy slot đó: chờ slot, giữ lease, không bỏ rơi job.
+    const slot = allocator.acquire(spec.slot, { lane: slotLane }) ?? (await waitForSlot(job, spec.slot, slotLane));
+    if (!slot) continue;
 
     // Chạy job trong background
     void runJob(job, handler, slot, progressMs);
   }
 
   log.info('Worker stopped');
+
+  // ---- Chờ slot cho job đã nhận ----
+
+  async function waitForSlot(
+    job: ClaimedJob,
+    kind: 'cpu' | 'gpu',
+    lane: 'batch' | 'interactive',
+  ): Promise<SlotHandle | null> {
+    const deadline = Date.now() + 90_000;
+    let lastProgress = Date.now();
+    while (Date.now() < deadline && !options.stopSignal?.aborted) {
+      await sleep(1_000);
+      const slot = allocator.acquire(kind, { lane });
+      if (slot) return slot;
+      if (Date.now() - lastProgress >= Math.min(progressMs, 30_000)) {
+        lastProgress = Date.now();
+        try {
+          await hub.progress(job.id, { lease_token: job.lease_token, stage: 'waiting_for_slot' });
+        } catch (err) {
+          if (err instanceof LeaseLostError) return null;
+        }
+      }
+    }
+    log.warn('No slot for claimed job, giving it back', { jobId: job.id, kind, lane });
+    try {
+      await hub.fail(job.id, {
+        lease_token: job.lease_token,
+        error: { code: 'no_slot', message: `No free ${kind} slot on this machine`, retryable: true },
+      });
+    } catch {
+      // lease sẽ hết hạn, reaper trả job về hàng đợi
+    }
+    return null;
+  }
 
   // ---- Job runner ----
 

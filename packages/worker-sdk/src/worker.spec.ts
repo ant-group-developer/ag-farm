@@ -348,3 +348,83 @@ describe('Cache - LRU eviction', () => {
     }
   }, 15_000);
 });
+
+describe('runWorker - never claims a job it has no slot for', () => {
+  it('with 2 CPU slots and 1 kept for interactive, holds at most 1 batch job at a time', async () => {
+    const tmpDir = makeTmpDir();
+    const stopCtrl = new AbortController();
+    let handedOut = 0;
+    let running = 0;
+    let maxRunning = 0;
+    const leased = new Set<string>();
+    let maxLeased = 0;
+
+    const { server, url } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const path = req.url ?? '';
+        res.setHeader('Content-Type', 'application/json');
+        const body = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>) : {};
+        if (path.includes('heartbeat')) {
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path.includes('claim')) {
+          // Like the hub: a batch CPU job only for a batch claim that reports a free CPU slot.
+          const lanes = body['lanes'] as string[] | undefined;
+          const free = body['free_slots'] as { cpu: number };
+          const give = handedOut < 4 && (!lanes || lanes.includes('batch')) && free.cpu >= 1;
+          if (give) {
+            handedOut++;
+            const job = { ...makeJob(`${url}/sign`), id: `123e4567-e89b-42d3-a456-00000000010${handedOut}` };
+            leased.add(job.id);
+            maxLeased = Math.max(maxLeased, leased.size);
+            res.writeHead(200); res.end(JSON.stringify({ job }));
+          } else {
+            res.writeHead(200); res.end(JSON.stringify({ job: null }));
+          }
+        } else if (path.includes('progress')) {
+          res.writeHead(200);
+          res.end(JSON.stringify({ lease_expires_at: new Date(Date.now() + 120_000).toISOString(), ticket: 't' }));
+        } else if (path.includes('complete') || path.includes('fail')) {
+          const id = path.split('/').slice(-2, -1)[0] ?? '';
+          leased.delete(id);
+          if (handedOut >= 2 && leased.size === 0) stopCtrl.abort();
+          res.writeHead(200); res.end('{}');
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+
+    try {
+      const config = makeConfig(tmpDir, url);
+      writeFileSync(config.machine_file, 'cpu_slots: 2\ngpu_slots: 1\nreserve_interactive:\n  cpu: 1\n  gpu: 0');
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.0.1',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        progressIntervalMs: 50,
+        stopSignal: stopCtrl.signal,
+        handlers: {
+          'scan.extract': async () => {
+            running++;
+            maxRunning = Math.max(maxRunning, running);
+            await sleep(300);
+            running--;
+            return { manifest: 'extract.json', summary: {} };
+          },
+        },
+      });
+      expect(handedOut).toBeGreaterThanOrEqual(2);
+      // the slot kept for interactive is never used by batch, and no job sits leased without a slot
+      expect(maxRunning).toBe(1);
+      expect(maxLeased).toBe(1);
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 15_000);
+});
