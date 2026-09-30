@@ -1,4 +1,4 @@
-import { CopyOutlined } from '@ant-design/icons';
+import { Copy } from 'lucide-react';
 import { Alert, Button, Modal, Space, Typography } from 'antd';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -63,7 +63,7 @@ export function SecretModal({ open, title, label, secret, onClose }: SecretModal
             {secret}
           </Typography.Text>
           <Button
-            icon={<CopyOutlined />}
+            icon={<Copy size={16} />}
             onClick={() => void handleCopy()}
             style={{ borderRadius: '0 4px 4px 0' }}
           >
