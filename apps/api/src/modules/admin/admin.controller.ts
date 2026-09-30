@@ -15,6 +15,8 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import {
   AdminJobControlSchema,
   AdminListJobsQuerySchema,
+  AdminListNodesQuerySchema,
+  AdminListOwnersQuerySchema,
   CreateNodeSchema,
   CreateOwnerSchema,
   PatchNodeSchema,
@@ -55,8 +57,8 @@ export class AdminController {
   // ---- Nodes ----
 
   @Get('nodes')
-  async listNodes() {
-    return this.svc.listNodes();
+  async listNodes(@Query(new ZodValidationPipe(AdminListNodesQuerySchema)) query: any) {
+    return this.svc.listNodes(query);
   }
 
   @Post('nodes')
@@ -130,8 +132,8 @@ export class AdminController {
   // ---- Owners ----
 
   @Get('owners')
-  async listOwners() {
-    return this.svc.listOwners();
+  async listOwners(@Query(new ZodValidationPipe(AdminListOwnersQuerySchema)) query: any) {
+    return this.svc.listOwners(query);
   }
 
   @Post('owners')

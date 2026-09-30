@@ -1,5 +1,4 @@
 import {
-  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -9,7 +8,10 @@ import {
   Button,
   Col,
   Drawer,
+  Dropdown,
+  Input,
   Popconfirm,
+  Progress,
   Row,
   Select,
   Space,
@@ -19,16 +21,27 @@ import {
   Typography,
   message,
 } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
+import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
+import { parseAsInteger, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import { useState } from 'react';
-import { cancelJob, getJob, listJobs, retryJob } from '../../api/admin';
-import { pollInterval } from '../../shared/lib/poll';
+import {
+  cancelJob,
+  cancelJobs,
+  getJob,
+  listJobs,
+  pauseJobs,
+  resumeJobs,
+  retryJob,
+} from '../../api/admin';
+import { SortDropdown } from '../../shared/components/SortDropdown';
+import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
 import { statusColor, statusLabel } from '../../shared/lib/status';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
-import type { AdminListJobsQuery, JobStatus, JobType, JobView } from '../../types/api';
+import type { JobSortBy, JobStatus, JobType, JobView, SortOrder } from '../../types/api';
 import { JOB_TYPES, TERMINAL_JOB_STATUSES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
+import { ChevronDown } from 'lucide-react';
 
 const { Text } = Typography;
 
@@ -39,27 +52,61 @@ const OWNER_OPTIONS = [
   { value: 'studio', label: 'studio' },
 ];
 
+type JobSortField = JobSortBy;
+const JOB_SORT_FIELDS: readonly { value: JobSortField; label: string }[] = [
+  { value: 'createdAt', label: 'Tạo lúc' },
+  { value: 'updatedAt', label: 'Cập nhật' },
+  { value: 'priority', label: 'Ưu tiên' },
+  { value: 'status', label: 'Trạng thái' },
+  { value: 'type', label: 'Loại' },
+];
+
+/** Trả true khi trạng thái job cần auto-refresh (đang chờ / đang chạy / tạm dừng nhưng có lease). */
+function needsRefresh(jobs: JobView[]): boolean {
+  return jobs.some((j) => j.status === 'queued' || j.status === 'leased');
+}
+
 export function JobsPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
-  const [filters, setFilters] = useState<AdminListJobsQuery>({ limit: 100 });
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, refetch } =
-    useInfiniteQuery({
-      queryKey: ['jobs', filters],
-      queryFn: ({ pageParam }) => listJobs({ ...filters, after: pageParam as string | undefined }),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
-      refetchInterval: (query) => {
-        const pages = (query.state.data?.pages ?? []) as Array<{ jobs: JobView[] }>;
-        const statuses = pages.flatMap((p) => p.jobs).map((j: JobView) => j.status);
-        return pollInterval(statuses, 5_000);
-      },
-    });
+  // URL state via nuqs
+  const [query, setQuery] = useQueryStates({
+    page: parseAsInteger.withDefault(1),
+    pageSize: parseAsInteger.withDefault(20),
+    sortBy: parseAsStringEnum<JobSortBy>(['createdAt', 'updatedAt', 'priority', 'status', 'type']).withDefault('createdAt'),
+    sortOrder: parseAsStringEnum<SortOrder>(['asc', 'desc']).withDefault('desc'),
+    status: parseAsString.withDefault(''),
+    type: parseAsString.withDefault(''),
+    owner: parseAsString.withDefault(''),
+    q: parseAsString.withDefault(''),
+  });
 
-  const allJobs: JobView[] = data?.pages.flatMap((p) => p.jobs) ?? [];
+  const apiQuery = {
+    page: query.page,
+    pageSize: query.pageSize,
+    sortBy: query.sortBy,
+    sortOrder: query.sortOrder,
+    status: query.status || undefined,
+    type: query.type || undefined,
+    owner: query.owner || undefined,
+    q: query.q || undefined,
+  };
+
+  const { data, isLoading, isFetching, refetch } = useQuery({
+    queryKey: ['jobs', apiQuery],
+    queryFn: () => listJobs(apiQuery),
+    refetchInterval: (q) => {
+      const items = q.state.data?.items ?? [];
+      return needsRefresh(items) ? 5_000 : false;
+    },
+  });
+
+  const jobs = data?.items ?? [];
+  const total = data?.total ?? 0;
 
   const selectedJobQuery = useQuery({
     queryKey: ['jobs', 'detail', selectedJobId],
@@ -85,12 +132,82 @@ export function JobsPage() {
     onError: (e) => void messageApi.error(String(e)),
   });
 
+  const pauseMut = useMutation({
+    mutationFn: (id: string) => pauseJobs({ ids: [id] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['jobs'] });
+      void messageApi.success(t('jobs.paused'));
+    },
+    onError: (e) => void messageApi.error(String(e)),
+  });
+
+  const resumeMut = useMutation({
+    mutationFn: (id: string) => resumeJobs({ ids: [id] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['jobs'] });
+      void messageApi.success(t('jobs.resumed'));
+    },
+    onError: (e) => void messageApi.error(String(e)),
+  });
+
+  // Bulk actions
+  const bulkPauseMut = useMutation({
+    mutationFn: () => pauseJobs({ ids: selectedRowKeys }),
+    onSuccess: (r) => {
+      setSelectedRowKeys([]);
+      void qc.invalidateQueries({ queryKey: ['jobs'] });
+      void messageApi.success(t('jobs.bulkPaused', { count: r.affected }));
+    },
+    onError: (e) => void messageApi.error(String(e)),
+  });
+
+  const bulkResumeMut = useMutation({
+    mutationFn: () => resumeJobs({ ids: selectedRowKeys }),
+    onSuccess: (r) => {
+      setSelectedRowKeys([]);
+      void qc.invalidateQueries({ queryKey: ['jobs'] });
+      void messageApi.success(t('jobs.bulkResumed', { count: r.affected }));
+    },
+    onError: (e) => void messageApi.error(String(e)),
+  });
+
+  const bulkCancelMut = useMutation({
+    mutationFn: () => cancelJobs({ ids: selectedRowKeys }),
+    onSuccess: (r) => {
+      setSelectedRowKeys([]);
+      void qc.invalidateQueries({ queryKey: ['jobs'] });
+      void messageApi.success(t('jobs.bulkCancelled', { count: r.affected }));
+    },
+    onError: (e) => void messageApi.error(String(e)),
+  });
+
+  // Pause all matching current filters
+  const pauseAllMut = useMutation({
+    mutationFn: () => {
+      const body: Record<string, unknown> = {};
+      if (query.status) body.statuses = query.status.split(',').filter(Boolean);
+      if (query.type) body.types = query.type.split(',').filter(Boolean);
+      if (query.owner) body.owner = query.owner;
+      // Fallback: if nothing specific, use statuses queued+leased
+      if (!body.statuses && !body.types && !body.owner) {
+        body.statuses = ['queued', 'leased'];
+      }
+      return pauseJobs(body);
+    },
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ['jobs'] });
+      void messageApi.success(t('jobs.pauseAllSuccess', { count: r.affected }));
+    },
+    onError: (e) => void messageApi.error(String(e)),
+  });
+
   const columns: ColumnsType<JobView> = [
     {
       title: 'ID',
       dataIndex: 'id',
       key: 'id',
-      width: 100,
+      width: 110,
+      ellipsis: true,
       render: (v: string) => (
         <Tooltip title={v}>
           <Text
@@ -107,19 +224,28 @@ export function JobsPage() {
       dataIndex: 'owner',
       key: 'owner',
       width: 80,
+      ellipsis: true,
     },
     {
       title: t('jobs.type'),
       dataIndex: 'type',
       key: 'type',
-      width: 150,
-      render: (v: JobType) => <Tag color="cyan">{v}</Tag>,
+      width: 160,
+      ellipsis: true,
+      render: (v: JobType) => (
+        <Tooltip title={v}>
+          <Tag color="cyan" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {v}
+          </Tag>
+        </Tooltip>
+      ),
     },
     {
       title: 'Lane',
       dataIndex: 'lane',
       key: 'lane',
       width: 90,
+      ellipsis: true,
       render: (v: string) => (
         <Tag color={v === 'interactive' ? 'purple' : 'default'}>{v}</Tag>
       ),
@@ -128,7 +254,8 @@ export function JobsPage() {
       title: t('jobs.status'),
       dataIndex: 'status',
       key: 'status',
-      width: 110,
+      width: 120,
+      ellipsis: true,
       render: (v: JobStatus) => (
         <Badge
           status={statusColor(v) as 'success' | 'error' | 'warning' | 'default' | 'processing'}
@@ -140,41 +267,43 @@ export function JobsPage() {
       title: t('jobs.priority'),
       dataIndex: 'priority',
       key: 'priority',
-      width: 80,
+      width: 70,
+      ellipsis: true,
     },
     {
       title: t('jobs.attempts'),
       key: 'attempts',
       width: 80,
+      ellipsis: true,
       render: (_: unknown, r: JobView) => `${r.attempt_count}/${r.max_attempts}`,
     },
     {
       title: t('jobs.node'),
-      dataIndex: 'node_id',
-      key: 'node_id',
-      width: 100,
-      render: (v: string | null) =>
-        v ? (
-          <Tooltip title={v}>
-            <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v.slice(0, 8)}…</Text>
+      key: 'node',
+      width: 120,
+      ellipsis: true,
+      render: (_: unknown, r: JobView) => {
+        const name = r.node_name ?? (r.node_id ? r.node_id.slice(0, 8) + '…' : null);
+        return name ? (
+          <Tooltip title={r.node_id ?? name}>
+            <Text style={{ fontSize: 11 }}>{name}</Text>
           </Tooltip>
         ) : (
           <Text type="secondary">—</Text>
-        ),
+        );
+      },
     },
     {
       title: t('jobs.progress'),
       key: 'progress',
-      width: 120,
+      width: 130,
+      ellipsis: true,
       render: (_: unknown, r: JobView) => {
         if (r.progress_percent == null && !r.progress_stage) return <Text type="secondary">—</Text>;
-        const pct = r.progress_percent != null ? `${Math.round(r.progress_percent)}%` : '';
-        const stage = r.progress_stage ?? '';
+        const pct = r.progress_percent ?? 0;
         return (
-          <Tooltip title={`${pct} ${stage}`}>
-            <Text ellipsis style={{ maxWidth: 110, fontSize: 11 }}>
-              {[pct, stage].filter(Boolean).join(' ')}
-            </Text>
+          <Tooltip title={`${Math.round(pct)}% ${r.progress_stage ?? ''}`}>
+            <Progress percent={Math.round(pct)} size="small" style={{ marginBottom: 0 }} />
           </Tooltip>
         );
       },
@@ -184,6 +313,7 @@ export function JobsPage() {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 140,
+      ellipsis: true,
       render: (v: string) => (
         <Tooltip title={v}>
           <Text style={{ fontSize: 11 }}>{formatDateTime(v)}</Text>
@@ -193,10 +323,13 @@ export function JobsPage() {
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 140,
+      width: 160,
+      fixed: 'right' as const,
       render: (_: unknown, r: JobView) => {
         const canRetry = r.status === 'failed' || r.status === 'cancelled';
         const canCancel = r.status === 'queued' || r.status === 'leased';
+        const canPause = r.status === 'queued' || r.status === 'leased';
+        const canResume = r.status === 'paused';
         return (
           <Space size={4}>
             <Button size="small" onClick={() => setSelectedJobId(r.id)}>
@@ -212,6 +345,26 @@ export function JobsPage() {
                 <Button size="small" type="primary">
                   {t('jobs.retry')}
                 </Button>
+              </Popconfirm>
+            )}
+            {canPause && (
+              <Popconfirm
+                title={t('jobs.pauseConfirm')}
+                onConfirm={() => pauseMut.mutate(r.id)}
+                okText={t('jobs.pause')}
+                cancelText={t('common.cancel')}
+              >
+                <Button size="small">{t('jobs.pause')}</Button>
+              </Popconfirm>
+            )}
+            {canResume && (
+              <Popconfirm
+                title={t('jobs.resumeConfirm')}
+                onConfirm={() => resumeMut.mutate(r.id)}
+                okText={t('jobs.resume')}
+                cancelText={t('common.cancel')}
+              >
+                <Button size="small">{t('jobs.resume')}</Button>
               </Popconfirm>
             )}
             {canCancel && (
@@ -233,10 +386,21 @@ export function JobsPage() {
     },
   ];
 
+  const pagination: TablePaginationConfig = {
+    current: query.page,
+    pageSize: query.pageSize,
+    total,
+    showSizeChanger: true,
+    pageSizeOptions: ['10', '20', '50', '100', '200'],
+    onChange: (p, ps) => {
+      void setQuery({ page: p, pageSize: ps });
+    },
+  };
+
   return (
     <>
       {contextHolder}
-      <Row justify="space-between" align="middle" style={{ marginBottom: 16 }} gutter={8}>
+      <Row justify="space-between" align="middle" style={{ marginBottom: 16 }} gutter={[8, 8]}>
         <Col>
           <Typography.Title level={4} style={{ margin: 0 }}>
             {t('jobs.title')}
@@ -244,14 +408,22 @@ export function JobsPage() {
         </Col>
         <Col>
           <Space wrap>
+            <Input.Search
+              placeholder={t('common.search')}
+              allowClear
+              value={query.q ?? ''}
+              onChange={(e) => void setQuery({ q: e.target.value || '', page: 1 })}
+              style={{ width: 200 }}
+            />
             <Select
               mode="multiple"
               allowClear
               placeholder={t('jobs.status')}
               style={{ minWidth: 160 }}
+              value={query.status ? query.status.split(',').filter(Boolean) : []}
               options={ALL_STATUSES.map((s) => ({ value: s, label: statusLabel(s) }))}
-              onChange={(vals: JobStatus[]) =>
-                setFilters((f) => ({ ...f, status: vals.join(',') || undefined, after: undefined }))
+              onChange={(vals: string[]) =>
+                void setQuery({ status: vals.join(',') || '', page: 1 })
               }
             />
             <Select
@@ -259,45 +431,94 @@ export function JobsPage() {
               allowClear
               placeholder={t('common.jobType')}
               style={{ minWidth: 180 }}
-              options={JOB_TYPES.map((t) => ({ value: t, label: t }))}
-              onChange={(vals: JobType[]) =>
-                setFilters((f) => ({ ...f, type: vals.join(',') || undefined, after: undefined }))
+              value={query.type ? query.type.split(',').filter(Boolean) : []}
+              options={JOB_TYPES.map((tp) => ({ value: tp, label: tp }))}
+              onChange={(vals: string[]) =>
+                void setQuery({ type: vals.join(',') || '', page: 1 })
               }
             />
             <Select
               allowClear
               placeholder={t('jobs.owner')}
               style={{ minWidth: 100 }}
+              value={query.owner || undefined}
               options={OWNER_OPTIONS}
               onChange={(val: string | undefined) =>
-                setFilters((f) => ({ ...f, owner: val ?? undefined, after: undefined }))
+                void setQuery({ owner: val ?? '', page: 1 })
               }
             />
-            <Button onClick={() => void refetch()}>{t('common.reload')}</Button>
+            <SortDropdown
+              fields={JOB_SORT_FIELDS}
+              sortBy={query.sortBy}
+              sortOrder={query.sortOrder}
+              onChange={(change) => void setQuery({ ...change, page: 1 })}
+            />
+            <TableRefreshButton onRefresh={() => void refetch()} refreshing={isFetching} />
+            <Popconfirm
+              title={t('jobs.pauseAllConfirm')}
+              onConfirm={() => pauseAllMut.mutate()}
+              okText={t('jobs.pauseAll')}
+              cancelText={t('common.cancel')}
+            >
+              <Button loading={pauseAllMut.isPending}>{t('jobs.pauseAll')}</Button>
+            </Popconfirm>
           </Space>
         </Col>
       </Row>
 
+      {/* Bulk action bar */}
+      {selectedRowKeys.length > 0 && (
+        <Row style={{ marginBottom: 8 }}>
+          <Col>
+            <Space>
+              <Text>{t('common.selected', { count: selectedRowKeys.length })}</Text>
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  items: [
+                    {
+                      key: 'pause',
+                      label: t('jobs.bulkPause'),
+                      onClick: () => bulkPauseMut.mutate(),
+                    },
+                    {
+                      key: 'resume',
+                      label: t('jobs.bulkResume'),
+                      onClick: () => bulkResumeMut.mutate(),
+                    },
+                    {
+                      key: 'cancel',
+                      label: t('jobs.bulkCancel'),
+                      danger: true,
+                      onClick: () => bulkCancelMut.mutate(),
+                    },
+                  ],
+                }}
+              >
+                <Button>
+                  {t('common.bulkActions')} <ChevronDown size={14} />
+                </Button>
+              </Dropdown>
+              <Button size="small" onClick={() => setSelectedRowKeys([])}>
+                {t('common.cancel')}
+              </Button>
+            </Space>
+          </Col>
+        </Row>
+      )}
+
       <Table
         rowKey="id"
-        dataSource={allJobs}
+        dataSource={jobs}
         columns={columns}
         loading={isLoading}
-        pagination={false}
-        size="small"
+        pagination={pagination}
         sticky={PAGE_TABLE_STICKY}
-        scroll={{ x: 1200 }}
-        footer={() =>
-          hasNextPage ? (
-            <Button
-              loading={isFetchingNextPage}
-              onClick={() => void fetchNextPage()}
-              block
-            >
-              {t('common.loadMore')}
-            </Button>
-          ) : null
-        }
+        scroll={{ x: 1400 }}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys) => setSelectedRowKeys(keys as string[]),
+        }}
       />
 
       {/* Job detail drawer */}
@@ -346,57 +567,7 @@ export function JobsPage() {
         {selectedJobQuery.isLoading && <Typography.Text>{t('common.loading')}</Typography.Text>}
         {selectedJobQuery.data && (
           <Space direction="vertical" style={{ width: '100%' }}>
-            <JobDetailSection title={t('jobs.general')} job={selectedJobQuery.data} />
-            {selectedJobQuery.data.payload !== undefined && (
-              <>
-                <Typography.Text strong>Payload:</Typography.Text>
-                <pre
-                  style={{
-                    background: '#f5f5f5',
-                    padding: 12,
-                    borderRadius: 6,
-                    overflow: 'auto',
-                    fontSize: 11,
-                  }}
-                >
-                  {JSON.stringify(selectedJobQuery.data.payload, null, 2)}
-                </pre>
-              </>
-            )}
-            {selectedJobQuery.data.result && (
-              <>
-                <Typography.Text strong>{t('jobs.result')}</Typography.Text>
-                <pre
-                  style={{
-                    background: '#f0fff0',
-                    padding: 12,
-                    borderRadius: 6,
-                    overflow: 'auto',
-                    fontSize: 11,
-                  }}
-                >
-                  {JSON.stringify(selectedJobQuery.data.result, null, 2)}
-                </pre>
-              </>
-            )}
-            {selectedJobQuery.data.error && (
-              <>
-                <Typography.Text strong type="danger">
-                  {t('jobs.error')}
-                </Typography.Text>
-                <pre
-                  style={{
-                    background: '#fff0f0',
-                    padding: 12,
-                    borderRadius: 6,
-                    overflow: 'auto',
-                    fontSize: 11,
-                  }}
-                >
-                  {JSON.stringify(selectedJobQuery.data.error, null, 2)}
-                </pre>
-              </>
-            )}
+            <JobDetailSection job={selectedJobQuery.data} />
           </Space>
         )}
       </Drawer>
@@ -404,7 +575,7 @@ export function JobsPage() {
   );
 }
 
-function JobDetailSection({ title, job }: { title: string; job: JobView }) {
+function JobDetailSection({ job }: { job: JobView }) {
   const { t } = useTranslation();
   const rows = [
     ['ID', job.id],
@@ -412,13 +583,16 @@ function JobDetailSection({ title, job }: { title: string; job: JobView }) {
     [t('jobs.type'), job.type],
     ['Lane', job.lane],
     [t('jobs.status'), statusLabel(job.status)],
-    [t('jobs.priority'), job.priority],
+    [t('jobs.priority'), String(job.priority)],
     ['Correlation ID', job.correlation_id],
     ['Affinity key', job.affinity_key ?? '—'],
+    ['Group key', job.group_key ?? '—'],
     [t('jobs.attempts'), `${job.attempt_count}/${job.max_attempts}`],
-    [t('jobs.node'), job.node_id ?? '—'],
+    [t('jobs.node'), job.node_name ?? job.node_id ?? '—'],
     [t('jobs.progress'), job.progress_percent != null ? `${Math.round(job.progress_percent)}%` : '—'],
     [t('jobs.stage'), job.progress_stage ?? '—'],
+    [t('jobs.notBeforeLabel'), job.not_before ?? '—'],
+    [t('jobs.leaseExpiresAtLabel'), job.lease_expires_at ?? '—'],
     [t('common.createdAt'), job.created_at],
     [t('jobs.updatedAt'), job.updated_at],
     [t('jobs.finishedAt'), job.finished_at ?? '—'],
@@ -426,20 +600,13 @@ function JobDetailSection({ title, job }: { title: string; job: JobView }) {
   ];
 
   return (
-    <Space direction="vertical" size={4} style={{ width: '100%' }}>
-      <Typography.Text strong>{title}</Typography.Text>
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Typography.Text strong>{t('jobs.general')}</Typography.Text>
       <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
         <tbody>
           {rows.map(([label, value]) => (
             <tr key={String(label)}>
-              <td
-                style={{
-                  padding: '3px 8px 3px 0',
-                  color: '#888',
-                  whiteSpace: 'nowrap',
-                  verticalAlign: 'top',
-                }}
-              >
+              <td style={{ padding: '3px 8px 3px 0', color: '#888', whiteSpace: 'nowrap', verticalAlign: 'top' }}>
                 {label}
               </td>
               <td style={{ padding: '3px 0', wordBreak: 'break-all' }}>{value}</td>
@@ -447,6 +614,41 @@ function JobDetailSection({ title, job }: { title: string; job: JobView }) {
           ))}
         </tbody>
       </table>
+
+      {job.payload !== undefined && (
+        <>
+          <Typography.Text strong>{t('jobs.payload')}</Typography.Text>
+          <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 6, overflow: 'auto', fontSize: 11 }}>
+            {JSON.stringify(job.payload, null, 2)}
+          </pre>
+        </>
+      )}
+
+      {job.requirements && Object.keys(job.requirements).length > 0 && (
+        <>
+          <Typography.Text strong>{t('jobs.requirements')}</Typography.Text>
+          <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 6, overflow: 'auto', fontSize: 11 }}>
+            {JSON.stringify(job.requirements, null, 2)}
+          </pre>
+        </>
+      )}
+
+      {job.result && (
+        <>
+          <Typography.Text strong>{t('jobs.result')}</Typography.Text>
+          <pre style={{ background: '#f0fff0', padding: 12, borderRadius: 6, overflow: 'auto', fontSize: 11 }}>
+            {JSON.stringify(job.result, null, 2)}
+          </pre>
+        </>
+      )}
+      {job.error && (
+        <>
+          <Typography.Text strong type="danger">{t('jobs.error')}</Typography.Text>
+          <pre style={{ background: '#fff0f0', padding: 12, borderRadius: 6, overflow: 'auto', fontSize: 11 }}>
+            {JSON.stringify(job.error, null, 2)}
+          </pre>
+        </>
+      )}
     </Space>
   );
 }

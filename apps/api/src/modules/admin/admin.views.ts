@@ -1,3 +1,4 @@
+import type { FarmJobEntity } from '../../database/entities/farm-job.entity';
 import type { FarmNodeEntity } from '../../database/entities/farm-node.entity';
 import type { FarmOwnerEntity } from '../../database/entities/farm-owner.entity';
 
@@ -12,6 +13,7 @@ export function toNodeView(node: FarmNodeEntity, online: boolean) {
     name: node.name,
     machine: node.machine,
     kinds: node.kinds,
+    allowed_kinds: node.allowedKinds ?? null,
     status: node.status,
     os: node.os,
     cpu_cores: node.cpuCores,
@@ -39,5 +41,37 @@ export function toOwnerView(owner: FarmOwnerEntity) {
     default_lane: owner.defaultLane,
     created_at: owner.createdAt.toISOString(),
     updated_at: owner.updatedAt.toISOString(),
+  };
+}
+
+/** Dạng job đầy đủ cho admin (bao gồm payload, requirements, not_before, lease_expires_at). */
+export function toAdminJobView(j: FarmJobEntity, nodeName?: string | null) {
+  return {
+    id: j.id,
+    owner: j.owner,
+    type: j.type,
+    lane: j.lane,
+    status: j.status,
+    priority: j.priority,
+    correlation_id: j.correlationId,
+    affinity_key: j.affinityKey,
+    group_key: j.groupKey,
+    attempt_count: j.attemptCount,
+    max_attempts: j.maxAttempts,
+    node_id: j.nodeId,
+    node_name: nodeName ?? null,
+    progress_percent: j.progressPercent,
+    progress_stage: j.progressStage,
+    payload: j.payload,
+    requirements: j.requirements,
+    not_before: j.notBefore ? j.notBefore.toISOString() : null,
+    lease_expires_at: j.leaseExpiresAt ? j.leaseExpiresAt.toISOString() : null,
+    result: j.result,
+    error: j.error,
+    created_at: j.createdAt.toISOString(),
+    updated_at: j.updatedAt.toISOString(),
+    started_at: j.startedAt ? j.startedAt.toISOString() : null,
+    finished_at: j.finishedAt ? j.finishedAt.toISOString() : null,
+    acked_at: j.ackedAt ? j.ackedAt.toISOString() : null,
   };
 }

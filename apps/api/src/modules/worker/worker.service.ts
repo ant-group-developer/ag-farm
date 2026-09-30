@@ -78,6 +78,7 @@ export class WorkerService {
   }
 
   async heartbeat(node: FarmNodeEntity, req: HeartbeatRequest): Promise<HeartbeatResponse> {
+    // Chỉ cập nhật `kinds` (kinds báo cáo) — không ghi đè `allowed_kinds` (do admin chỉnh).
     await this.nodeRepo.update(node.id, {
       agentVersion: req.agent_version,
       kinds: req.kinds,
@@ -115,12 +116,23 @@ export class WorkerService {
     const waiting = { cpu: 0, gpu: 0 };
 
     const job = await this.dataSource.transaction(async (em) => {
+      // Tính giao: reported_kinds ∩ allowed_kinds (null allowed_kinds = tất cả được phép)
+      const freshNodeForKinds = await em
+        .getRepository(FarmNodeEntity)
+        .findOneByOrFail({ id: node.id });
+      const effectiveKinds =
+        freshNodeForKinds.allowedKinds != null
+          ? req.kinds.filter((k) => freshNodeForKinds.allowedKinds!.includes(k))
+          : req.kinds;
+
+      if (effectiveKinds.length === 0) return null;
+
       // Lấy tối đa 50 job queued, SKIP LOCKED
       const qb = em
         .getRepository(FarmJobEntity)
         .createQueryBuilder('j')
         .where('j.status = :status', { status: 'queued' })
-        .andWhere('j.type = ANY(:kinds)', { kinds: req.kinds })
+        .andWhere('j.type = ANY(:kinds)', { kinds: effectiveKinds })
         .andWhere('j.lane = ANY(:lanes)', { lanes: laneFilter })
         .andWhere('(j.not_before IS NULL OR j.not_before <= now())')
         .orderBy(`(j.lane = 'interactive')`, 'DESC')

@@ -24,6 +24,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-i18next": "^17",
+    "nuqs": "^2.4.3",
     "react-router-dom": "^6.28.0"
   },
   "devDependencies": {
