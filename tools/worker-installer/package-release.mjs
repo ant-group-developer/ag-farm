@@ -27,19 +27,32 @@ export function publishDirFromArgv(argv = process.argv) {
 }
 
 /**
- * @param {{ releaseRoot: string, name: string, packageName: string, version: string, publishDir?: string | null }} o
- *   releaseRoot: thư mục `release/` chứa `<name>/`; name: `<packageName>-<version>`.
+ * @param {{ repoRoot: string, releaseRoot: string, name: string, packageName: string, version: string, publishDir?: string | null }} o
+ *   repoRoot: repo worker (lấy binary ffmpeg đã cài); releaseRoot: thư mục `release/` chứa `<name>/`;
+ *   name: `<packageName>-<version>`.
  */
 export function finishRelease(o) {
   const out = join(o.releaseRoot, o.name);
   const isWindows = process.platform === 'win32';
 
-  // 1. Binary native cài sẵn trong gói (trước đây máy đích phải `npm install`)
-  execFileSync(isWindows ? 'npm.cmd' : 'npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock'], {
+  // 1. Binary native cài sẵn trong gói (trước đây máy đích phải `npm install`). `--ignore-scripts`: script
+  //    postinstall của ffmpeg-static tải ffmpeg từ GitHub (rất chậm); binary đó đã có trong node_modules của
+  //    repo worker trên máy build, chép sang.
+  execFileSync(isWindows ? 'npm.cmd' : 'npm', ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock'], {
     cwd: out,
     stdio: 'inherit',
     shell: isWindows,
   });
+  const ffmpegName = isWindows ? 'ffmpeg.exe' : 'ffmpeg';
+  const ffmpegOut = join(out, 'node_modules', 'ffmpeg-static', ffmpegName);
+  if (existsSync(join(out, 'node_modules', 'ffmpeg-static')) && !existsSync(ffmpegOut)) {
+    const local = join(o.repoRoot, 'node_modules', 'ffmpeg-static', ffmpegName);
+    if (existsSync(local)) {
+      copyFileSync(local, ffmpegOut);
+    } else {
+      execFileSync(process.execPath, ['install.js'], { cwd: join(out, 'node_modules', 'ffmpeg-static'), stdio: 'inherit' });
+    }
+  }
 
   // ffprobe-static mang binary cho mọi hệ điều hành (~340 MB): gói Windows chỉ giữ win32/x64.
   const ffprobeBin = join(out, 'node_modules', 'ffprobe-static', 'bin');
