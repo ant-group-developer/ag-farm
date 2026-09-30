@@ -13,9 +13,16 @@ export class FarmNodeEntity {
   @Column({ type: 'text' })
   machine!: string;
 
-  /** Các loại job mà node này nhận */
+  /** Loại job node báo cáo qua heartbeat (tự động cập nhật) */
   @Column({ type: 'text', array: true })
   kinds!: string[];
+
+  /**
+   * Loại job admin cho phép node nhận (nullable = cho phép tất cả kinds được báo cáo).
+   * Khi assign job dùng giao: reported_kinds ∩ allowed_kinds.
+   */
+  @Column({ name: 'allowed_kinds', type: 'text', array: true, nullable: true, default: null })
+  allowedKinds!: string[] | null;
 
   /** sha256 hex của token node */
   @Column({ name: 'token_hash', type: 'char', length: 64, unique: true })

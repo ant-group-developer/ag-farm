@@ -11,6 +11,7 @@ describe('admin views', () => {
       name: 'local-render',
       machine: 'PC',
       kinds: ['studio.tts'],
+      allowedKinds: null,
       tokenHash: 'a'.repeat(64),
       status: 'active',
       os: 'windows',

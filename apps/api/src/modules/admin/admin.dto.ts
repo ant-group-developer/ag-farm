@@ -11,6 +11,7 @@ export type CreateNodeDto = z.infer<typeof CreateNodeSchema>;
 export const PatchNodeSchema = z.strictObject({
   name: z.string().min(1).max(200).optional(),
   kinds: z.array(JobTypeSchema).min(1).optional(),
+  allowed_kinds: z.array(JobTypeSchema).nullable().optional(),
   status: z.enum(['active', 'disabled']).optional(),
   schedule: z.unknown().optional(),
 });
@@ -45,11 +46,44 @@ export const AdminJobControlSchema = z
   });
 export type AdminJobControlDto = z.infer<typeof AdminJobControlSchema>;
 
+const SortOrderSchema = z.enum(['asc', 'desc']).default('desc');
+
+/** Query phân trang theo trang cho danh sách jobs. */
 export const AdminListJobsQuerySchema = z.strictObject({
-  status: z.string().max(200).optional(),
-  type: z.string().max(200).optional(),
+  // Phân trang
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(20),
+  // Sắp xếp
+  sortBy: z
+    .enum(['createdAt', 'updatedAt', 'priority', 'status', 'type'])
+    .default('createdAt'),
+  sortOrder: SortOrderSchema,
+  // Lọc
+  status: z.string().max(500).optional(),
+  type: z.string().max(500).optional(),
   owner: z.string().max(40).optional(),
-  limit: z.coerce.number().int().min(1).max(500).default(100),
-  after: z.string().max(200).optional(),
+  node: z.string().uuid().optional(),
+  q: z.string().max(200).optional(),
 });
 export type AdminListJobsQuery = z.infer<typeof AdminListJobsQuerySchema>;
+
+/** Query phân trang theo trang cho danh sách nodes. */
+export const AdminListNodesQuerySchema = z.strictObject({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(20),
+  sortBy: z.enum(['name', 'lastSeenAt', 'createdAt']).default('createdAt'),
+  sortOrder: SortOrderSchema,
+  status: z.enum(['active', 'disabled']).optional(),
+  q: z.string().max(200).optional(),
+});
+export type AdminListNodesQuery = z.infer<typeof AdminListNodesQuerySchema>;
+
+/** Query phân trang theo trang cho danh sách owners. */
+export const AdminListOwnersQuerySchema = z.strictObject({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(20),
+  sortBy: z.enum(['name', 'createdAt']).default('createdAt'),
+  sortOrder: SortOrderSchema,
+  q: z.string().max(200).optional(),
+});
+export type AdminListOwnersQuery = z.infer<typeof AdminListOwnersQuerySchema>;
