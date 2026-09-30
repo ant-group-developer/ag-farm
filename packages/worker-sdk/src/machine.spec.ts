@@ -114,4 +114,43 @@ describe('SlotAllocator', () => {
     expect(h).not.toBeNull();
     alloc.release(h!);
   });
+
+  describe('interactive pressure flags', () => {
+    const cfg = { cpu_slots: 2, gpu_slots: 1, reserve_interactive: { cpu: 1, gpu: 0 } };
+
+    it('is raised while an interactive job is marked and cleared afterwards', () => {
+      const alloc = new SlotAllocator(cfg, makeTempMachineFile(tmpDir, cfg));
+      expect(alloc.interactivePressure()).toBe(false);
+      const flag = alloc.markInteractive('job/with:odd*chars');
+      expect(alloc.interactivePressure()).toBe(true);
+      alloc.clearFlag(flag);
+      expect(alloc.interactivePressure()).toBe(false);
+    });
+
+    it('is shared across allocators on the same machine file', () => {
+      const machineFile = makeTempMachineFile(tmpDir, cfg);
+      const render = new SlotAllocator(cfg, machineFile);
+      const scan = new SlotAllocator(cfg, machineFile);
+      render.setWanted(true);
+      expect(scan.interactivePressure()).toBe(true);
+      render.setWanted(false);
+      expect(scan.interactivePressure()).toBe(false);
+    });
+
+    it('ignores flags of dead processes and stale wanted flags', () => {
+      const alloc = new SlotAllocator(cfg, makeTempMachineFile(tmpDir, cfg));
+      writeFileSync(join(tmpDir, 'locks', 'interactive-999999999-x.lock'), `999999999 ${Date.now()}
+`);
+      writeFileSync(join(tmpDir, 'locks', `wanted-${process.pid}.lock`), `${process.pid} ${Date.now() - 60_000}
+`);
+      expect(alloc.interactivePressure()).toBe(false);
+    });
+
+    it('does not count flags as used slots', () => {
+      const alloc = new SlotAllocator(cfg, makeTempMachineFile(tmpDir, cfg));
+      alloc.markInteractive('j1');
+      alloc.setWanted(true);
+      expect(alloc.freeSlots()).toEqual({ cpu: 2, gpu: 1 });
+    });
+  });
 });

@@ -201,6 +201,8 @@ export class AdminService {
       finishedAt: null,
       ackedAt: null,
       notBefore: null,
+      progressPercent: null,
+      progressStage: null,
       updatedAt: new Date(),
     });
     return this.getJob(id);

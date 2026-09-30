@@ -63,6 +63,8 @@ export class ReaperService implements OnModuleInit, OnModuleDestroy {
             leaseExpiresAt: null,
             notBefore: new Date(now.getTime() + backoffMs(job.attemptCount)),
             error: { code: 'lease_expired', message: 'Lease expired', retryable: true },
+            progressPercent: null,
+            progressStage: null,
             updatedAt: now,
           }
         : {

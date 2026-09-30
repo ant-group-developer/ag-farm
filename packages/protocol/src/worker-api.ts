@@ -53,6 +53,12 @@ export type ClaimedJob = z.infer<typeof ClaimedJobSchema>;
 
 export const ClaimResponseSchema = z.strictObject({
   job: ClaimedJobSchema.nullable(),
+  /**
+   * Khi không giao được job: số job interactive đang chờ mà node đáp ứng được nhưng thiếu slot, theo loại
+   * slot. Worker dùng nó để báo các worker batch cùng máy nhường slot. Hub chỉ gửi khi có ít nhất một job
+   * (worker cũ parse strict nên không được thấy khoá lạ).
+   */
+  waiting_interactive: z.strictObject({ cpu: z.int().nonnegative(), gpu: z.int().nonnegative() }).optional(),
 });
 export type ClaimResponse = z.infer<typeof ClaimResponseSchema>;
 

@@ -98,6 +98,8 @@ export class WorkerService {
     const privateKeyPem = parseKeyPem(this.config.getOrThrow<string>('FARM_TICKET_PRIVATE_KEY'));
     const laneFilter = req.lanes ?? ['interactive', 'batch'];
     const cachedAffinity = req.cached_affinity ?? [];
+    // Job interactive node làm được nhưng thiếu slot: worker báo cho worker batch cùng máy nhường slot.
+    const waiting = { cpu: 0, gpu: 0 };
 
     const job = await this.dataSource.transaction(async (em) => {
       // Lấy tối đa 50 job queued, SKIP LOCKED
@@ -141,7 +143,10 @@ export class WorkerService {
         // Kiểm slot
         const slotKind = spec.slot;
         const available = slotKind === 'gpu' ? freeSlots.gpu : freeSlots.cpu;
-        if (available < 1) continue;
+        if (available < 1) {
+          if (candidate.lane === 'interactive') waiting[slotKind]++;
+          continue;
+        }
 
         // Đánh dấu leased
         const now = new Date();
@@ -153,6 +158,9 @@ export class WorkerService {
           status: 'leased',
           nodeId: freshNode.id,
           leaseToken: token,
+          // Tiến độ của lần thử trước không còn đúng
+          progressPercent: null,
+          progressStage: null,
           leaseExpiresAt,
           attemptCount: newAttempt,
           startedAt: now,
@@ -169,7 +177,9 @@ export class WorkerService {
       return null;
     });
 
-    if (!job) return { job: null };
+    if (!job) {
+      return waiting.cpu + waiting.gpu > 0 ? { job: null, waiting_interactive: waiting } : { job: null };
+    }
 
     const { job: claimedJob } = job;
 
@@ -294,6 +304,8 @@ export class WorkerService {
           leaseExpiresAt: null,
           notBefore: new Date(now.getTime() + backoffMs(job.attemptCount)),
           error: req.error,
+          progressPercent: null,
+          progressStage: null,
           updatedAt: now,
         }
       : {

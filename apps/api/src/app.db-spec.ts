@@ -547,6 +547,49 @@ describe('ag-farm DB integration', () => {
     expect(claimRes.body.data.job.lane).toBe('interactive');
   });
 
+  // ---- Hết slot: hub báo job interactive đang chờ để worker batch cùng máy nhường slot ----
+  it('reports interactive jobs waiting for a slot, and nothing when none wait', async () => {
+    const { key } = await createOwner(ds, 'studio', ['studio.render_preview']);
+    const { token } = await createNode(ds, ['studio.render_preview']);
+    const caps = {
+      os: 'linux',
+      cpu_cores: 4,
+      ram_mb: 8192,
+      gpus: [],
+      engines: { ffmpeg: null, ollama_models: [], python: null },
+    };
+    await request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({ agent_version: '1.0', kinds: ['studio.render_preview'], capabilities: caps, free_slots: { cpu: 0, gpu: 0 }, running_job_ids: [] });
+    const claim = () =>
+      request(app.getHttpServer())
+        .post('/v1/worker/claim')
+        .set('Authorization', `Node ${token}`)
+        .send({ kinds: ['studio.render_preview'], free_slots: { cpu: 0, gpu: 0 }, lanes: ['interactive'], cached_affinity: [] });
+
+    const empty = await claim();
+    expect(empty.body.data).toEqual({ job: null });
+
+    await request(app.getHttpServer())
+      .post('/v1/owner/jobs')
+      .set('Authorization', `Owner ${key}`)
+      .send({
+        type: 'studio.render_preview',
+        correlation_id: 'waiting-1',
+        payload: {
+          production_id: 'prod-1',
+          revision: 1,
+          composition: 'stage:renders/1/composition.json',
+          canvas: { width: 1280, height: 720 },
+          output: 'renders/1/preview.mp4',
+        },
+        max_attempts: 1,
+      });
+    const blocked = await claim();
+    expect(blocked.body.data).toEqual({ job: null, waiting_interactive: { cpu: 1, gpu: 0 } });
+  });
+
   // ---- Owner không thấy job của owner khác ----
   it('owner cannot see other owner jobs', async () => {
     const { key: k1 } = await createOwner(ds, 'ag-go');

@@ -7,8 +7,13 @@
  * Nội dung: "<pid> <start_time_ms>\n"
  * Tạo bằng cờ 'wx' (exclusive create); nếu đã có → slot đang dùng.
  * Phát hiện lock cũ: process.kill(pid, 0) → ESRCH → xoá lock.
+ *
+ * Cùng thư mục còn có cờ ưu tiên cho việc interactive (Studio) trên máy:
+ *   interactive-<pid>-<tag>.lock  một job interactive đang chạy hoặc đang chờ slot
+ *   wanted-<pid>.lock             hub báo còn job interactive chờ vì máy hết slot (làm mới mỗi vòng claim)
+ * Khi có cờ, worker batch ngừng nhận việc mới và job batch đang chạy nhường slot (`interactivePressure`).
  */
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
@@ -24,6 +29,9 @@ export const MachineConfigSchema = z.strictObject({
     .default({ cpu: 0, gpu: 0 }),
 });
 export type MachineConfig = z.infer<typeof MachineConfigSchema>;
+
+/** Cờ `wanted-*` cũ hơn chừng này thì bỏ qua: worker interactive làm mới nó mỗi vòng claim (~1 s). */
+const WANTED_TTL_MS = 15_000;
 
 export type SlotKind = 'cpu' | 'gpu';
 
@@ -120,7 +128,63 @@ export class SlotAllocator {
     }
   }
 
+  /** Đánh dấu máy đang có một job interactive (chạy hoặc chờ slot). Trả đường dẫn cờ để gỡ. */
+  markInteractive(tag: string): string {
+    const safeTag = tag.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
+    const flagPath = join(this.lockDir, `interactive-${process.pid}-${safeTag}.lock`);
+    writeFileSync(flagPath, `${process.pid} ${Date.now()}\n`);
+    return flagPath;
+  }
+
+  /** Gỡ cờ do `markInteractive` tạo. */
+  clearFlag(flagPath: string): void {
+    try {
+      unlinkSync(flagPath);
+    } catch {
+      // Đã bị xoá, không sao
+    }
+  }
+
+  /**
+   * Bật/tắt cờ "hub còn job interactive chờ slot" của process này. Bật lại mỗi vòng claim để làm mới
+   * thời điểm; cờ quá `WANTED_TTL_MS` coi như hết hiệu lực (process còn sống nhưng đã thôi claim).
+   */
+  setWanted(on: boolean): void {
+    const flagPath = join(this.lockDir, `wanted-${process.pid}.lock`);
+    if (on) {
+      writeFileSync(flagPath, `${process.pid} ${Date.now()}\n`);
+    } else {
+      this.clearFlag(flagPath);
+    }
+  }
+
+  /** Có job interactive đang chạy, đang chờ slot, hoặc đang chờ trên hub vì máy hết slot. */
+  interactivePressure(): boolean {
+    let names: string[];
+    try {
+      names = readdirSync(this.lockDir);
+    } catch {
+      return false;
+    }
+    for (const name of names) {
+      const flagPath = join(this.lockDir, name);
+      if (name.startsWith('interactive-') && this.isLocked(flagPath)) return true;
+      if (name.startsWith('wanted-') && this.isFresh(flagPath, WANTED_TTL_MS) && this.isLocked(flagPath)) return true;
+    }
+    return false;
+  }
+
   // ---- private ----
+
+  private isFresh(flagPath: string, ttlMs: number): boolean {
+    try {
+      const [, tsStr] = readFileSync(flagPath, 'utf8').trim().split(' ');
+      const ts = Number(tsStr);
+      return Number.isFinite(ts) && Date.now() - ts <= ttlMs;
+    } catch {
+      return false;
+    }
+  }
 
   private countUsed(kind: SlotKind, total: number): number {
     let used = 0;

@@ -30,6 +30,8 @@ import type {
   ProgressResponse,
 } from '@ag-farm/protocol';
 
+const HUB_REQUEST_TIMEOUT_MS = 30_000;
+
 export class LeaseLostError extends Error {
   constructor(
     readonly reason: 'lease_lost' | 'job_cancelled',
@@ -93,6 +95,8 @@ export class HubClient {
         Authorization: `${AUTH_SCHEMES.node} ${this.token}`,
       },
       body: JSON.stringify(body),
+      // Hub treo không được giữ vòng claim/heartbeat mãi.
+      signal: AbortSignal.timeout(HUB_REQUEST_TIMEOUT_MS),
     });
   }
 
