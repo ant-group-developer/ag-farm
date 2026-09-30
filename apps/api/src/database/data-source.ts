@@ -7,6 +7,7 @@ import { FarmOwnerEntity } from './entities/farm-owner.entity';
 import { FarmEnrollmentEntity } from './entities/farm-enrollment.entity';
 import { Initial1000000000000 } from './migrations/1000000000000-initial';
 import { Enrollments1100000000000 } from './migrations/1100000000000-enrollments';
+import { JobPause1200000000000 } from './migrations/1200000000000-job-pause';
 
 loadEnv();
 
@@ -21,6 +22,6 @@ export const AppDataSource = new DataSource({
   poolSize: Number(process.env['DATABASE_POOL_MAX'] ?? 10),
   connectTimeoutMS: 10_000,
   entities: [FarmOwnerEntity, FarmNodeEntity, FarmJobEntity, FarmEnrollmentEntity],
-  migrations: [Initial1000000000000, Enrollments1100000000000],
+  migrations: [Initial1000000000000, Enrollments1100000000000, JobPause1200000000000],
   synchronize: false,
 });

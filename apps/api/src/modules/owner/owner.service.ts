@@ -7,8 +7,9 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   JOB_TYPE_SPECS,
+  JobControlRequest,
+  JobControlResponse,
   JobView,
-  JobViewSchema,
   ListJobsQuery,
   ListJobsResponse,
   SubmitJobRequest,
@@ -18,6 +19,8 @@ import {
 import { Repository } from 'typeorm';
 import { FarmJobEntity } from '../../database/entities/farm-job.entity';
 import { FarmOwnerEntity } from '../../database/entities/farm-owner.entity';
+import { controlJobs, type JobControlAction } from '../../common/job-control';
+import { toJobView } from '../../common/job-view';
 
 /** Encode cursor: base64(json({updated_at, id})) */
 function encodeCursor(updatedAt: Date, id: string): string {
@@ -36,30 +39,6 @@ function decodeCursor(cursor: string): { updatedAt: string; id: string } | null 
   } catch {
     return null;
   }
-}
-
-function toJobView(j: FarmJobEntity): JobView {
-  return JobViewSchema.parse({
-    id: j.id,
-    owner: j.owner,
-    type: j.type,
-    lane: j.lane,
-    status: j.status,
-    priority: j.priority,
-    correlation_id: j.correlationId,
-    affinity_key: j.affinityKey,
-    attempt_count: j.attemptCount,
-    max_attempts: j.maxAttempts,
-    node_id: j.nodeId,
-    progress_percent: j.progressPercent,
-    progress_stage: j.progressStage,
-    result: j.result,
-    error: j.error,
-    created_at: j.createdAt.toISOString(),
-    updated_at: j.updatedAt.toISOString(),
-    finished_at: j.finishedAt?.toISOString() ?? null,
-    acked_at: j.ackedAt?.toISOString() ?? null,
-  });
 }
 
 @Injectable()
@@ -106,6 +85,7 @@ export class OwnerService {
     entity.priority = req.priority ?? 0;
     entity.requirements = requirements as Record<string, unknown>;
     entity.affinityKey = req.affinity_key ?? null;
+    entity.groupKey = req.group_key ?? null;
     entity.notBefore = req.not_before ? new Date(req.not_before) : null;
     entity.payload = payloadResult.data;
     entity.correlationId = req.correlation_id;
@@ -210,5 +190,15 @@ export class OwnerService {
     job.status = 'cancelled';
     job.finishedAt = now;
     return toJobView(job);
+  }
+
+  /** Tạm dừng / chạy tiếp / huỷ job của chính chủ job này, theo id hoặc nhóm. */
+  async control(owner: FarmOwnerEntity, action: JobControlAction, req: JobControlRequest): Promise<JobControlResponse> {
+    const affected = await controlJobs(this.jobRepo, action, {
+      owner: owner.id,
+      ...(req.ids ? { ids: req.ids } : {}),
+      ...(req.group_key ? { groupKey: req.group_key } : {}),
+    });
+    return { affected };
   }
 }

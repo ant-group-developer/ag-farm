@@ -45,6 +45,7 @@ export const vi = {
   status: {
     queued: 'Chờ',
     leased: 'Đang chạy',
+    paused: 'Tạm dừng',
     completed: 'Hoàn tất',
     failed: 'Thất bại',
     cancelled: 'Đã hủy',

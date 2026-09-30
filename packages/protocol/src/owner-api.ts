@@ -23,6 +23,8 @@ export const SubmitJobRequestSchema = z.strictObject({
   /** Gửi lại cùng `correlation_id` trả về job cũ, không tạo job mới. */
   correlation_id: z.string().min(1).max(200),
   not_before: IsoDateTimeSchema.nullable().default(null),
+  /** Nhóm để tạm dừng / chạy tiếp / huỷ cả loạt, ví dụ `batch:<id>` của một đợt quét. */
+  group_key: z.string().min(1).max(200).nullable().default(null),
 });
 export type SubmitJobRequest = z.input<typeof SubmitJobRequestSchema>;
 
@@ -35,6 +37,7 @@ export const JobViewSchema = z.strictObject({
   priority: z.int(),
   correlation_id: z.string(),
   affinity_key: z.string().nullable(),
+  group_key: z.string().nullable(),
   attempt_count: z.int().nonnegative(),
   max_attempts: z.int().positive(),
   node_id: z.uuid().nullable(),
@@ -74,3 +77,25 @@ export const ListJobsResponseSchema = z.strictObject({
   next_cursor: z.string().nullable(),
 });
 export type ListJobsResponse = z.infer<typeof ListJobsResponseSchema>;
+
+/**
+ * `POST /v1/owner/jobs/{pause|resume|cancel}`: theo danh sách id hoặc cả nhóm `group_key`.
+ * - pause: `queued` → `paused`; `leased` → `paused` (worker nhận 409 `job_paused` ở lần progress kế tiếp,
+ *   lần thử đang chạy không bị tính).
+ * - resume: `paused` → `queued`.
+ * - cancel: `queued`/`paused`/`leased` → `cancelled`.
+ * Job ở trạng thái khác được bỏ qua.
+ */
+export const JobControlRequestSchema = z
+  .strictObject({
+    ids: z.array(z.uuid()).min(1).max(1000).optional(),
+    group_key: z.string().min(1).max(200).optional(),
+  })
+  .refine((v) => (v.ids ? 1 : 0) + (v.group_key ? 1 : 0) === 1, { message: 'Give exactly one of ids or group_key' });
+export type JobControlRequest = z.infer<typeof JobControlRequestSchema>;
+
+export const JobControlResponseSchema = z.strictObject({
+  /** Số job đã đổi trạng thái. */
+  affected: z.int().nonnegative(),
+});
+export type JobControlResponse = z.infer<typeof JobControlResponseSchema>;

@@ -47,6 +47,7 @@ export const en: LocaleMessages = {
   status: {
     queued: 'Queued',
     leased: 'Running',
+    paused: 'Paused',
     completed: 'Completed',
     failed: 'Failed',
     cancelled: 'Cancelled',

@@ -5,10 +5,11 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { JobViewSchema } from '@ag-farm/protocol';
 import { createHash, randomBytes } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { FarmJobEntity } from '../../database/entities/farm-job.entity';
+import { controlJobs, type JobControlAction, type JobSelector } from '../../common/job-control';
+import { toJobView } from '../../common/job-view';
 import { FarmNodeEntity } from '../../database/entities/farm-node.entity';
 import { FarmOwnerEntity } from '../../database/entities/farm-owner.entity';
 import type {
@@ -134,53 +135,18 @@ export class AdminService {
         ? encodeCursor(page[page.length - 1]!.updatedAt, page[page.length - 1]!.id)
         : null;
 
-    return { jobs: page.map((j) => JobViewSchema.parse({
-      id: j.id,
-      owner: j.owner,
-      type: j.type,
-      lane: j.lane,
-      status: j.status,
-      priority: j.priority,
-      correlation_id: j.correlationId,
-      affinity_key: j.affinityKey,
-      attempt_count: j.attemptCount,
-      max_attempts: j.maxAttempts,
-      node_id: j.nodeId,
-      progress_percent: j.progressPercent,
-      progress_stage: j.progressStage,
-      result: j.result,
-      error: j.error,
-      created_at: j.createdAt.toISOString(),
-      updated_at: j.updatedAt.toISOString(),
-      finished_at: j.finishedAt?.toISOString() ?? null,
-      acked_at: j.ackedAt?.toISOString() ?? null,
-    })), next_cursor: nextCursor };
+    return { jobs: page.map(toJobView), next_cursor: nextCursor };
   }
 
   async getJob(id: string) {
     const j = await this.jobRepo.findOne({ where: { id } });
     if (!j) throw new NotFoundException('Job not found');
-    return JobViewSchema.parse({
-      id: j.id,
-      owner: j.owner,
-      type: j.type,
-      lane: j.lane,
-      status: j.status,
-      priority: j.priority,
-      correlation_id: j.correlationId,
-      affinity_key: j.affinityKey,
-      attempt_count: j.attemptCount,
-      max_attempts: j.maxAttempts,
-      node_id: j.nodeId,
-      progress_percent: j.progressPercent,
-      progress_stage: j.progressStage,
-      result: j.result,
-      error: j.error,
-      created_at: j.createdAt.toISOString(),
-      updated_at: j.updatedAt.toISOString(),
-      finished_at: j.finishedAt?.toISOString() ?? null,
-      acked_at: j.ackedAt?.toISOString() ?? null,
-    });
+    return toJobView(j);
+  }
+
+  /** Tạm dừng / chạy tiếp / huỷ hàng loạt theo id, nhóm, chủ job, loại hoặc trạng thái. */
+  async controlJobs(action: JobControlAction, sel: JobSelector): Promise<{ affected: number }> {
+    return { affected: await controlJobs(this.jobRepo, action, sel) };
   }
 
   async retryJob(id: string) {

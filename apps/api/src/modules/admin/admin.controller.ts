@@ -13,6 +13,7 @@ import {
 import { AdminGuard } from '../../auth/admin.guard';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import {
+  AdminJobControlSchema,
   AdminListJobsQuerySchema,
   CreateNodeSchema,
   CreateOwnerSchema,
@@ -20,8 +21,20 @@ import {
   PatchOwnerSchema,
 } from './admin.dto';
 import { AdminService } from './admin.service';
+import type { AdminJobControlDto } from './admin.dto';
+import type { JobSelector } from '../../common/job-control';
 import { CreateEnrollmentRequestSchema } from '@ag-farm/protocol';
 import { EnrollService } from '../enroll/enroll.service';
+
+function toSelector(body: AdminJobControlDto): JobSelector {
+  return {
+    ...(body.ids ? { ids: body.ids } : {}),
+    ...(body.group_key ? { groupKey: body.group_key } : {}),
+    ...(body.owner ? { owner: body.owner } : {}),
+    ...(body.types ? { types: body.types } : {}),
+    ...(body.statuses ? { statuses: body.statuses } : {}),
+  };
+}
 
 @UseGuards(AdminGuard)
 @Controller('v1/admin')
@@ -72,6 +85,24 @@ export class AdminController {
   @Get('jobs')
   async listJobs(@Query(new ZodValidationPipe(AdminListJobsQuerySchema)) query: any) {
     return this.svc.listJobs(query);
+  }
+
+  @Post('jobs/pause')
+  @HttpCode(200)
+  async pauseJobs(@Body(new ZodValidationPipe(AdminJobControlSchema)) body: any) {
+    return this.svc.controlJobs('pause', toSelector(body));
+  }
+
+  @Post('jobs/resume')
+  @HttpCode(200)
+  async resumeJobs(@Body(new ZodValidationPipe(AdminJobControlSchema)) body: any) {
+    return this.svc.controlJobs('resume', toSelector(body));
+  }
+
+  @Post('jobs/cancel')
+  @HttpCode(200)
+  async cancelJobs(@Body(new ZodValidationPipe(AdminJobControlSchema)) body: any) {
+    return this.svc.controlJobs('cancel', toSelector(body));
   }
 
   @Get('jobs/:id')

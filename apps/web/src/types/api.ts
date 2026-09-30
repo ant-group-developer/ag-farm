@@ -15,7 +15,7 @@ export const JOB_TYPES: JobType[] = [
   'studio.render_final',
 ];
 
-export type JobStatus = 'queued' | 'leased' | 'completed' | 'failed' | 'cancelled';
+export type JobStatus = 'queued' | 'leased' | 'paused' | 'completed' | 'failed' | 'cancelled';
 export const TERMINAL_JOB_STATUSES: JobStatus[] = ['completed', 'failed', 'cancelled'];
 
 export type Lane = 'interactive' | 'batch';
@@ -88,6 +88,7 @@ export interface JobView {
   priority: number;
   correlation_id: string;
   affinity_key: string | null;
+  group_key: string | null;
   attempt_count: number;
   max_attempts: number;
   node_id: string | null;

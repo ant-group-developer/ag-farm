@@ -1,4 +1,8 @@
 import {
+  JobControlRequestSchema,
+  JobControlResponseSchema,
+  type JobControlRequest,
+  type JobControlResponse,
   JobView,
   JobViewSchema,
   ListJobsQuery,
@@ -124,5 +128,11 @@ export class FarmOwnerClient {
       `/v1/owner/jobs/${encodeURIComponent(jobId)}/cancel`,
     );
     return JobViewSchema.parse(raw);
+  }
+
+  /** Tạm dừng / chạy tiếp / huỷ job của chủ job này theo id hoặc cả nhóm `group_key`. */
+  async controlJobs(action: 'pause' | 'resume' | 'cancel', req: JobControlRequest): Promise<JobControlResponse> {
+    const raw = await this.req<unknown>('POST', `/v1/owner/jobs/${action}`, JobControlRequestSchema.parse(req));
+    return JobControlResponseSchema.parse(raw);
   }
 }

@@ -14,12 +14,14 @@ export function statusColor(status: JobStatus): string {
       return 'error';
     case 'cancelled':
       return 'warning';
+    case 'paused':
+      return 'default';
     default:
       return 'default';
   }
 }
 
-const KNOWN_STATUSES: readonly string[] = ['queued', 'leased', 'completed', 'failed', 'cancelled'];
+const KNOWN_STATUSES: readonly string[] = ['queued', 'leased', 'paused', 'completed', 'failed', 'cancelled'];
 
 /** Nhãn của trạng thái job theo ngôn ngữ đang dùng; trạng thái lạ thì trả nguyên giá trị. */
 export function statusLabel(status: JobStatus): string {

@@ -8,7 +8,9 @@ import {
   RelativePathSchema,
   ScanAiPayloadSchema,
   ScanExtractPayloadSchema,
-  SegmentDescriptionSchema,
+  AssetDescriptionSchema,
+  JobControlRequestSchema,
+  SCAN_AI_MAX_KEYFRAMES,
   signTicket,
   SignRequestSchema,
   SubmitJobRequestSchema,
@@ -158,46 +160,59 @@ describe('payloads', () => {
       },
       extract_version: 'x1',
     });
-    expect(payload.params.window_s).toBe(4);
-    expect(payload.params.max_segment_s).toBe(20);
+    expect(payload.params.max_keyframes).toBe(24);
+    expect(payload.params.keyframe_dedup_distance).toBe(8);
     expect(payload.params.proxy.height).toBe(720);
   });
 
-  it('caps a scan.ai chunk at 30 segments', () => {
-    const segment = {
-      segment_id: randomUUID(),
-      index: 0,
-      start_ms: 0,
-      end_ms: 4000,
-      keyframes: ['artifact:keyframes/0000-1.jpg'],
+  it('caps scan.ai at the keyframe limit and fills its options', () => {
+    const base = {
+      asset_id: randomUUID(),
+      model: 'qwen2.5vl:7b',
+      prompt_version: 'p2',
+      media: { duration_ms: 60000, has_audio: true, has_speech_hint: null },
     };
-    const base = { asset_id: randomUUID(), chunk: 0, model: 'qwen2.5vl:7b', prompt_version: 'p1' };
-    expect(ScanAiPayloadSchema.safeParse({ ...base, segments: Array(30).fill(segment) }).success).toBe(true);
-    expect(ScanAiPayloadSchema.safeParse({ ...base, segments: Array(31).fill(segment) }).success).toBe(false);
+    const frame = { input: 'artifact:keyframes/0001.jpg', t_ms: 1000 };
+    const ok = ScanAiPayloadSchema.parse({ ...base, keyframes: Array(SCAN_AI_MAX_KEYFRAMES).fill(frame) });
+    expect(ok.options.frames_per_note).toBe(4);
+    expect(ok.context.asset_name).toBeNull();
+    expect(ScanAiPayloadSchema.safeParse({ ...base, keyframes: Array(SCAN_AI_MAX_KEYFRAMES + 1).fill(frame) }).success).toBe(false);
   });
 
-  it('limits caption length in words', () => {
+  it('limits the asset summary length in words', () => {
     const description = {
-      caption_vi: 'một tô phở bò nóng trên bàn gỗ',
-      caption_en: 'a bowl of beef pho on a wooden table',
-      tags: ['phở'],
+      title_vi: 'Phở bò Hà Nội buổi sáng',
+      summary_vi: 'Quán phở đông khách buổi sáng, cận cảnh tô phở bò nóng và người bán chan nước dùng.',
+      summary_en: 'A busy pho shop in the morning with close-ups of a hot bowl of beef pho.',
+      genre: 'ẩm thực đường phố',
+      topics: ['phở'],
+      subjects: ['tô phở', 'người bán'],
+      places: ['Hà Nội'],
+      actions: ['chan nước dùng'],
       keywords_vi: ['phở bò'],
-      subjects: ['tô phở'],
-      actions: [],
-      shot_size: 'close_up',
-      camera_motion: 'static',
-      time_of_day: 'indoor',
+      tags: ['pho'],
+      mood: 'nhộn nhịp',
       setting: 'indoor',
-      people_count: 'none',
+      time_of_day: 'day',
+      people_count: 'few',
+      shot_variety: ['close_up', 'medium'],
+      camera_motions: ['handheld'],
       visible_text: '',
       has_watermark: false,
       usable: true,
       usable_reason: '',
       quality: 4,
     };
-    expect(SegmentDescriptionSchema.safeParse(description).success).toBe(true);
-    const tooLong = { ...description, caption_en: Array(31).fill('word').join(' ') };
-    expect(SegmentDescriptionSchema.safeParse(tooLong).success).toBe(false);
+    expect(AssetDescriptionSchema.safeParse(description).success).toBe(true);
+    const tooLong = { ...description, summary_en: Array(91).fill('word').join(' ') };
+    expect(AssetDescriptionSchema.safeParse(tooLong).success).toBe(false);
+  });
+
+  it('job control takes ids or a group, not both', () => {
+    expect(JobControlRequestSchema.safeParse({ group_key: 'batch:1' }).success).toBe(true);
+    expect(JobControlRequestSchema.safeParse({ ids: [randomUUID()] }).success).toBe(true);
+    expect(JobControlRequestSchema.safeParse({}).success).toBe(false);
+    expect(JobControlRequestSchema.safeParse({ ids: [randomUUID()], group_key: 'batch:1' }).success).toBe(false);
   });
 
   it('applies submit defaults', () => {
@@ -205,6 +220,7 @@ describe('payloads', () => {
     expect(request.priority).toBe(0);
     expect(request.max_attempts).toBe(3);
     expect(request.requirements).toEqual({});
+    expect(request.group_key).toBeNull();
     expect(ClaimRequestSchema.parse({ kinds: ['scan.ai'], free_slots: { cpu: 1, gpu: 1 } }).cached_affinity).toEqual([]);
   });
 });

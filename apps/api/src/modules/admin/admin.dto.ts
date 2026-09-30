@@ -31,6 +31,20 @@ export const PatchOwnerSchema = z.strictObject({
 });
 export type PatchOwnerDto = z.infer<typeof PatchOwnerSchema>;
 
+/** Chọn job cho tạm dừng / chạy tiếp / huỷ hàng loạt: cần ít nhất một điều kiện. */
+export const AdminJobControlSchema = z
+  .strictObject({
+    ids: z.array(z.uuid()).min(1).max(1000).optional(),
+    group_key: z.string().min(1).max(200).optional(),
+    owner: z.string().min(1).max(40).optional(),
+    types: z.array(JobTypeSchema).min(1).optional(),
+    statuses: z.array(JobStatusSchema).min(1).optional(),
+  })
+  .refine((v) => Boolean(v.ids || v.group_key || v.owner || v.types), {
+    message: 'Pick jobs by ids, group_key, owner or types',
+  });
+export type AdminJobControlDto = z.infer<typeof AdminJobControlSchema>;
+
 export const AdminListJobsQuerySchema = z.strictObject({
   status: z.string().max(200).optional(),
   type: z.string().max(200).optional(),

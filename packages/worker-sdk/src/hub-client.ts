@@ -34,7 +34,7 @@ const HUB_REQUEST_TIMEOUT_MS = 30_000;
 
 export class LeaseLostError extends Error {
   constructor(
-    readonly reason: 'lease_lost' | 'job_cancelled',
+    readonly reason: 'lease_lost' | 'job_cancelled' | 'job_paused',
     message: string,
   ) {
     super(message);
@@ -102,12 +102,12 @@ export class HubClient {
 
   private async checkStatus(res: Response, path: string): Promise<void> {
     if (res.status === 409) {
-      let reason: 'lease_lost' | 'job_cancelled' = 'lease_lost';
+      let reason: LeaseLostError['reason'] = 'lease_lost';
       try {
         const rawBody = await res.json();
         const err = apiErrorOf(rawBody);
         const code = err.code;
-        if (code === 'lease_lost' || code === 'job_cancelled') {
+        if (code === 'lease_lost' || code === 'job_cancelled' || code === 'job_paused') {
           reason = code;
         }
       } catch {

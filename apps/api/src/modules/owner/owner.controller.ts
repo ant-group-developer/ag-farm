@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import {
+  JobControlRequestSchema,
   ListJobsQuerySchema,
   OWNER_API,
   SubmitJobRequestSchema,
@@ -31,6 +32,25 @@ export class OwnerController {
     @Body(new ZodValidationPipe(SubmitJobRequestSchema)) body: any,
   ) {
     return this.svc.submit(req.ownerContext!.owner, body);
+  }
+
+  /** Tạm dừng / chạy tiếp / huỷ theo id hoặc cả nhóm `group_key`. */
+  @Post('v1/owner/jobs/pause')
+  @HttpCode(200)
+  async pauseJobs(@Req() req: Request, @Body(new ZodValidationPipe(JobControlRequestSchema)) body: any) {
+    return this.svc.control(req.ownerContext!.owner, 'pause', body);
+  }
+
+  @Post('v1/owner/jobs/resume')
+  @HttpCode(200)
+  async resumeJobs(@Req() req: Request, @Body(new ZodValidationPipe(JobControlRequestSchema)) body: any) {
+    return this.svc.control(req.ownerContext!.owner, 'resume', body);
+  }
+
+  @Post('v1/owner/jobs/cancel')
+  @HttpCode(200)
+  async cancelJobs(@Req() req: Request, @Body(new ZodValidationPipe(JobControlRequestSchema)) body: any) {
+    return this.svc.control(req.ownerContext!.owner, 'cancel', body);
   }
 
   @Get('v1/owner/jobs')

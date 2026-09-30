@@ -9,7 +9,7 @@ import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Capabilities, signTicket, verifyTicket } from '@ag-farm/protocol';
-import { createHash, generateKeyPairSync as genKeyPair, randomBytes } from 'node:crypto';
+import { createHash, generateKeyPairSync as genKeyPair, randomBytes, randomUUID } from 'node:crypto';
 import supertest from 'supertest';
 const request = supertest;
 import { DataSource } from 'typeorm';
@@ -18,6 +18,7 @@ import { FarmNodeEntity } from './database/entities/farm-node.entity';
 import { FarmOwnerEntity } from './database/entities/farm-owner.entity';
 import { Initial1000000000000 } from './database/migrations/1000000000000-initial';
 import { Enrollments1100000000000 } from './database/migrations/1100000000000-enrollments';
+import { JobPause1200000000000 } from './database/migrations/1200000000000-job-pause';
 import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
 import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
@@ -77,7 +78,7 @@ async function buildApp(): Promise<INestApplication> {
         type: 'postgres',
         url: TEST_DB_URL,
         entities: [FarmOwnerEntity, FarmNodeEntity, FarmJobEntity, FarmEnrollmentEntity],
-        migrations: [Initial1000000000000, Enrollments1100000000000],
+        migrations: [Initial1000000000000, Enrollments1100000000000, JobPause1200000000000],
         migrationsRun: true,
         synchronize: false,
         dropSchema: true, // reset DB mỗi lần test
@@ -593,6 +594,79 @@ describe('ag-farm DB integration', () => {
       });
     const blocked = await claim();
     expect(blocked.body.data).toEqual({ job: null, waiting_interactive: { cpu: 1, gpu: 0 } });
+  });
+
+  // ---- Tạm dừng / chạy tiếp / huỷ theo nhóm ----
+  it('pauses a batch (queued and running), resumes it and cancels it, without touching other groups or owners', async () => {
+    const { key } = await createOwner(ds, 'ag-go');
+    const { key: otherKey } = await createOwner(ds, 'other', ['scan.extract']);
+    const { token } = await createNode(ds, ['scan.extract']);
+    const submit = (ownerKey: string, correlation: string, group: string | null) =>
+      request(app.getHttpServer())
+        .post('/v1/owner/jobs')
+        .set('Authorization', `Owner ${ownerKey}`)
+        .send({
+          type: 'scan.extract',
+          correlation_id: correlation,
+          group_key: group,
+          payload: {
+            asset: { id: randomUUID(), kind: 'video', mime_type: 'video/mp4', size_bytes: null, checksum_sha256: null, duration_ms: null, width: null, height: null },
+            extract_version: 'x2',
+          },
+        });
+    const a1 = (await submit(key, 'a1', 'batch:1')).body.data.job;
+    const a2 = (await submit(key, 'a2', 'batch:1')).body.data.job;
+    const b1 = (await submit(key, 'b1', 'batch:2')).body.data.job;
+    const other = (await submit(otherKey, 'o1', 'batch:1')).body.data.job;
+    expect(a1.group_key).toBe('batch:1');
+
+    // a1 đang chạy trên worker
+    const claim = await request(app.getHttpServer())
+      .post('/v1/worker/claim')
+      .set('Authorization', `Node ${token}`)
+      .send({ kinds: ['scan.extract'], free_slots: { cpu: 1, gpu: 0 }, lanes: ['batch'] });
+    const running = claim.body.data.job;
+    expect(running.attempt).toBe(1);
+
+    const control = (action: string, body: object, ownerKey = key) =>
+      request(app.getHttpServer()).post(`/v1/owner/jobs/${action}`).set('Authorization', `Owner ${ownerKey}`).send(body);
+
+    const paused = await control('pause', { group_key: 'batch:1' });
+    expect(paused.body.data).toEqual({ affected: 2 });
+    const statusOf = async (id: string) => (await ds.getRepository(FarmJobEntity).findOneByOrFail({ id }));
+    expect((await statusOf(other.id)).status).toBe('queued'); // nhóm cùng tên của chủ job khác: không đụng
+    expect((await statusOf(b1.id)).status).toBe('queued');
+
+    // Worker đang chạy job bị tạm dừng: 409 job_paused, lần thử không bị tính
+    const progress = await request(app.getHttpServer())
+      .post(`/v1/worker/jobs/${running.id}/progress`)
+      .set('Authorization', `Node ${token}`)
+      .send({ lease_token: running.lease_token, percent: 50 });
+    expect(progress.status).toBe(409);
+    expect(progress.body.error.code).toBe('job_paused');
+    const pausedRunning = await statusOf(running.id);
+    expect(pausedRunning.status).toBe('paused');
+    expect(pausedRunning.attemptCount).toBe(0);
+    expect(pausedRunning.nodeId).toBeNull();
+
+    // Job đang tạm dừng không được giao
+    const claimWhilePaused = await request(app.getHttpServer())
+      .post('/v1/worker/claim')
+      .set('Authorization', `Node ${token}`)
+      .send({ kinds: ['scan.extract'], free_slots: { cpu: 1, gpu: 0 }, lanes: ['batch'] });
+    expect([b1.id, other.id]).toContain(claimWhilePaused.body.data.job.id);
+
+    const resumed = await control('resume', { ids: [a1.id, a2.id, b1.id] });
+    expect(resumed.body.data).toEqual({ affected: 2 }); // b1 không ở trạng thái paused
+    expect((await statusOf(a2.id)).status).toBe('queued');
+
+    const cancelled = await control('cancel', { group_key: 'batch:1' });
+    expect(cancelled.body.data).toEqual({ affected: 2 });
+    expect((await statusOf(a1.id)).status).toBe('cancelled');
+    expect((await statusOf(other.id)).status).not.toBe('cancelled');
+
+    const bad = await control('pause', {});
+    expect(bad.status).toBe(400);
   });
 
   // ---- Mã cài đặt máy worker ----

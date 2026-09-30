@@ -53,6 +53,7 @@ const JOB_VIEW = {
   priority: 0,
   correlation_id: 'c1',
   affinity_key: null,
+  group_key: null,
   attempt_count: 0,
   max_attempts: 3,
   node_id: null,

@@ -15,7 +15,8 @@ export const LANES = ['interactive', 'batch'] as const;
 export const LaneSchema = z.enum(LANES);
 export type Lane = z.infer<typeof LaneSchema>;
 
-export const JOB_STATUSES = ['queued', 'leased', 'completed', 'failed', 'cancelled'] as const;
+/** `paused`: chủ job hoặc admin tạm dừng; không được giao cho worker tới khi chạy tiếp (về `queued`). */
+export const JOB_STATUSES = ['queued', 'leased', 'paused', 'completed', 'failed', 'cancelled'] as const;
 export const JobStatusSchema = z.enum(JOB_STATUSES);
 export type JobStatus = z.infer<typeof JobStatusSchema>;
 export const TERMINAL_JOB_STATUSES: readonly JobStatus[] = ['completed', 'failed', 'cancelled'];

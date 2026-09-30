@@ -255,6 +255,9 @@ export class WorkerService {
     if (job.status === 'cancelled') {
       throw new ConflictException({ code: 'job_cancelled', error: 'job_cancelled', message: 'Job has been cancelled' });
     }
+    if (job.status === 'paused') {
+      throw new ConflictException({ code: 'job_paused', error: 'job_paused', message: 'Job has been paused' });
+    }
     throw new ConflictException({ code: 'lease_lost', error: 'lease_lost', message: 'Lease has been lost' });
   }
 

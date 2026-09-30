@@ -32,7 +32,7 @@ import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
-const ALL_STATUSES: JobStatus[] = ['queued', 'leased', 'completed', 'failed', 'cancelled'];
+const ALL_STATUSES: JobStatus[] = ['queued', 'leased', 'paused', 'completed', 'failed', 'cancelled'];
 
 const OWNER_OPTIONS = [
   { value: 'ag-go', label: 'ag-go' },

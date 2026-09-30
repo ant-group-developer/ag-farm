@@ -35,6 +35,10 @@ export class FarmJobEntity {
   @Column({ name: 'affinity_key', type: 'text', nullable: true })
   affinityKey!: string | null;
 
+  /** Nhóm job của chủ job (ví dụ `batch:<id>`) để tạm dừng / chạy tiếp / huỷ cả loạt. */
+  @Column({ name: 'group_key', type: 'text', nullable: true })
+  groupKey!: string | null;
+
   @Column({ name: 'not_before', type: 'timestamptz', nullable: true })
   notBefore!: Date | null;
 
