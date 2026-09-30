@@ -41,6 +41,13 @@ export function finishRelease(o) {
     shell: isWindows,
   });
 
+  // ffprobe-static mang binary cho mọi hệ điều hành (~340 MB): gói Windows chỉ giữ win32/x64.
+  const ffprobeBin = join(out, 'node_modules', 'ffprobe-static', 'bin');
+  if (isWindows && existsSync(ffprobeBin)) {
+    for (const platform of ['darwin', 'linux']) rmSync(join(ffprobeBin, platform), { recursive: true, force: true });
+    rmSync(join(ffprobeBin, 'win32', 'ia32'), { recursive: true, force: true });
+  }
+
   // 2. Node chạy worker: đúng bản của máy build
   if (isWindows) {
     mkdirSync(join(out, 'runtime'), { recursive: true });

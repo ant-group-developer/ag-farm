@@ -9,7 +9,7 @@
 #
 # Tuỳ chọn:
 #   -InstallDir C:\ag-farm   thư mục cài (mặc định C:\ag-farm)
-#   -Model qwen2.5vl:7b      model Ollama cho máy quét (mặc định theo VRAM; phải trùng ANALYSIS_MODEL của ag-go)
+#   -Model qwen2.5vl:7b      model Ollama cho máy quét (mặc định: danh sách hub cấu hình FARM_OLLAMA_MODELS)
 #   -WithTts                 cài thêm Python + OmniVoice cho giọng đọc (máy render)
 #   -ReconfigureSlots        tính lại machine.yaml theo cấu hình máy
 #   -Yes                     không hỏi (cài Ollama, dừng worker cũ)
@@ -187,7 +187,7 @@ function Wait-AgHttp {
 
 # Ollama chạy như task hệ thống (không cần ai đăng nhập). Thư mục model dùng chung cả máy.
 function Install-AgOllama {
-  param([string]$InstallDir, [string]$Model, [switch]$Yes)
+  param([string]$InstallDir, [string[]]$Models, [switch]$Yes)
   $exe = Find-AgOllama
   if (-not $exe) {
     if (-not (Confirm-AgStep 'Máy chưa có Ollama (cần cho quét video). Cài Ollama bản chính thức?' -Yes:$Yes)) {
@@ -235,10 +235,12 @@ function Install-AgOllama {
     throw "Ollama không lên sau 60 giây. Xem $ollamaDir\ollama.log"
   }
 
-  Write-Host "Tải model $Model (lần đầu có thể mất vài phút)"
   $env:OLLAMA_HOST = '127.0.0.1:11434'
-  & $exe pull $Model
-  if ($LASTEXITCODE -ne 0) { throw "ollama pull $Model lỗi" }
+  foreach ($m in $Models) {
+    Write-Host "Tải model $m (lần đầu có thể mất vài phút)"
+    & $exe pull $m
+    if ($LASTEXITCODE -ne 0) { throw "ollama pull $m lỗi" }
+  }
 }
 
 function Install-AgPackage {
@@ -307,10 +309,12 @@ function Install-AgWorker {
   # 1. Vai trò và token: mã mới (cài / cài lại) hoặc config đã có (cập nhật)
   $roles = @()
   $nodes = @{}
+  $hubModels = @()
   if ($Code) {
     $body = [ordered]@{ code = $Code; os = 'windows'; cpu_cores = $machineInfo.cpu_cores; ram_mb = $machineInfo.ram_mb; gpus = @($machineInfo.gpus) }
     $enrolled = Invoke-AgApi -Method Post -Url "$Hub/v1/enroll" -Body $body
     foreach ($n in $enrolled.nodes) { $roles += $n.role; $nodes[$n.role] = $n }
+    $hubModels = @($enrolled.ollama_models)
     Write-Host "Đã đăng ký máy $($enrolled.machine): $(($enrolled.nodes | ForEach-Object { $_.name }) -join ', ')"
   } else {
     foreach ($r in @('scan', 'render')) {
@@ -321,6 +325,7 @@ function Install-AgWorker {
       }
     }
     if ($roles.Count -eq 0) { throw 'Máy chưa cài worker: cần -Code (lấy ở trang Máy của web farm).' }
+    try { $hubModels = @((Invoke-AgApi -Method Get -Url "$Hub/v1/worker/me" -Token $nodes[$roles[0]].token).ollama_models) } catch { }
     Write-Host "Cập nhật vai trò: $($roles -join ', ')"
   }
 
@@ -359,8 +364,11 @@ function Install-AgWorker {
     $extra = @{}
     if ($role -eq 'scan') {
       $extra['ollama_url'] = 'http://127.0.0.1:11434'
-      if (-not $Model) { $Model = Get-AgDefaultModel -Gpus $machineInfo.gpus }
-      Install-AgOllama -InstallDir $InstallDir -Model $Model -Yes:$Yes
+      # Model phải trùng model chủ job gửi trong job (hub cấu hình); chỉ đoán theo VRAM khi hub không nói.
+      if ($Model) { $models = @($Model) }
+      elseif ($hubModels.Count -gt 0) { $models = $hubModels }
+      else { $models = @(Get-AgDefaultModel -Gpus $machineInfo.gpus) }
+      Install-AgOllama -InstallDir $InstallDir -Models $models -Yes:$Yes
     } else {
       $extra['encoder'] = 'auto'
       $extra['ollama_url'] = 'http://127.0.0.1:11434'

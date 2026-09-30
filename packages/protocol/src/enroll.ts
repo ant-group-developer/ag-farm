@@ -67,9 +67,13 @@ export const EnrolledNodeSchema = z.strictObject({
 });
 export type EnrolledNode = z.infer<typeof EnrolledNodeSchema>;
 
+/** Model Ollama máy quét phải có: trùng `ANALYSIS_MODEL` của chủ job (hub cấu hình `FARM_OLLAMA_MODELS`). */
+const OllamaModelsSchema = z.array(z.string().min(1).max(200)).max(20);
+
 export const EnrollResponseSchema = z.strictObject({
   machine: MachineNameSchema,
   nodes: z.array(EnrolledNodeSchema).min(1),
+  ollama_models: OllamaModelsSchema,
 });
 export type EnrollResponse = z.infer<typeof EnrollResponseSchema>;
 
@@ -80,5 +84,6 @@ export const WorkerMeResponseSchema = z.strictObject({
   status: z.enum(['active', 'disabled']),
   agent_version: z.string().nullable(),
   last_seen_at: IsoDateTimeSchema.nullable(),
+  ollama_models: OllamaModelsSchema,
 });
 export type WorkerMeResponse = z.infer<typeof WorkerMeResponseSchema>;

@@ -38,7 +38,17 @@ export const EnvSchema = z.object({
   FARM_RELEASES_DIR: z.string().optional(),
   /** Thư mục chứa install.ps1/uninstall.ps1, phục vụ ở `/dist/`. */
   FARM_INSTALLER_DIR: z.string().optional(),
+  /** Model Ollama máy quét cần có (phân cách bởi dấu phẩy), trùng ANALYSIS_MODEL của ag-go. Bộ cài tải các model này. */
+  FARM_OLLAMA_MODELS: z.string().default('qwen2.5vl:7b'),
 });
+
+/** `FARM_OLLAMA_MODELS` thành danh sách. */
+export function ollamaModels(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
+}
 
 export type Env = z.infer<typeof EnvSchema>;
 

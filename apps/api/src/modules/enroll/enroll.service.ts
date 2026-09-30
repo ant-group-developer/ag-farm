@@ -15,6 +15,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { DataSource, Repository } from 'typeorm';
 import { FarmEnrollmentEntity } from '../../database/entities/farm-enrollment.entity';
 import { FarmNodeEntity } from '../../database/entities/farm-node.entity';
+import { ollamaModels } from '../../config/env';
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -88,7 +89,7 @@ export class EnrollService {
         usedAt: new Date(),
         nodeIds: nodes.map((n) => n.node_id),
       });
-      return { machine: enrollment.machine, nodes };
+      return { machine: enrollment.machine, nodes, ollama_models: ollamaModels(this.config.get<string>('FARM_OLLAMA_MODELS')) };
     });
   }
 }

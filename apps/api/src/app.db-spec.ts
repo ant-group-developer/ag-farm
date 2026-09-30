@@ -58,6 +58,7 @@ const TEST_ENV = {
   NODE_OFFLINE_AFTER_SECONDS: '90',
   FRONTEND_ORIGIN: '*',
   PORT: '3099',
+  FARM_OLLAMA_MODELS: 'qwen2.5vl:3b, qwen2.5vl:7b',
 };
 
 /** Fake AccountMeClient → luôn trả ADMIN */
@@ -608,11 +609,13 @@ describe('ag-farm DB integration', () => {
       ['render', 'lan-4060ti-render', 'ag-render-worker'],
     ]);
     expect(nodes[0]!.kinds).toEqual(['scan.extract', 'scan.ai']);
+    // Bộ cài tải đúng model chủ job dùng
+    expect(res.body.data.ollama_models).toEqual(['qwen2.5vl:3b', 'qwen2.5vl:7b']);
 
     // Token dùng được ngay với API worker
     const me = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${nodes[0]!.token}`);
     expect(me.status).toBe(200);
-    expect(me.body.data).toMatchObject({ name: 'lan-4060ti-scan', status: 'active', last_seen_at: null });
+    expect(me.body.data).toMatchObject({ name: 'lan-4060ti-scan', status: 'active', last_seen_at: null, ollama_models: ['qwen2.5vl:3b', 'qwen2.5vl:7b'] });
 
     // Mã chỉ dùng một lần
     const again = await request(app.getHttpServer()).post('/v1/enroll').send({ code: first.code, ...caps });

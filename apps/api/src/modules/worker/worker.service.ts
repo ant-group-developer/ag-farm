@@ -31,7 +31,7 @@ import { FarmJobEntity } from '../../database/entities/farm-job.entity';
 type JobPatch = Parameters<Repository<FarmJobEntity>['update']>[1];
 import { FarmNodeEntity } from '../../database/entities/farm-node.entity';
 import { FarmOwnerEntity } from '../../database/entities/farm-owner.entity';
-import { parseKeyPem } from '../../config/env';
+import { ollamaModels, parseKeyPem } from '../../config/env';
 
 function leaseToken(): string {
   return randomBytes(32).toString('base64url');
@@ -73,6 +73,7 @@ export class WorkerService {
       status: fresh.status,
       agent_version: fresh.agentVersion ?? null,
       last_seen_at: fresh.lastSeenAt ? fresh.lastSeenAt.toISOString() : null,
+      ollama_models: ollamaModels(this.config.get<string>('FARM_OLLAMA_MODELS')),
     };
   }
 
