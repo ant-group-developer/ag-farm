@@ -139,10 +139,8 @@ describe('SlotAllocator', () => {
 
     it('ignores flags of dead processes and stale wanted flags', () => {
       const alloc = new SlotAllocator(cfg, makeTempMachineFile(tmpDir, cfg));
-      writeFileSync(join(tmpDir, 'locks', 'interactive-999999999-x.lock'), `999999999 ${Date.now()}
-`);
-      writeFileSync(join(tmpDir, 'locks', `wanted-${process.pid}.lock`), `${process.pid} ${Date.now() - 60_000}
-`);
+      writeFileSync(join(tmpDir, 'locks', 'interactive-999999999-x.lock'), `999999999 ${Date.now()}\n`);
+      writeFileSync(join(tmpDir, 'locks', `wanted-${process.pid}.lock`), `${process.pid} ${Date.now() - 60_000}\n`);
       expect(alloc.interactivePressure()).toBe(false);
     });
 
