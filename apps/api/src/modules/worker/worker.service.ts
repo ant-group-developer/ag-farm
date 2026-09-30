@@ -230,9 +230,9 @@ export class WorkerService {
     const job = await this.jobRepo.findOne({ where: { id: jobId } });
     if (!job) throw new NotFoundException('Job not found');
     if (job.status === 'cancelled') {
-      throw new ConflictException({ error: 'job_cancelled', message: 'Job has been cancelled' });
+      throw new ConflictException({ code: 'job_cancelled', error: 'job_cancelled', message: 'Job has been cancelled' });
     }
-    throw new ConflictException({ error: 'lease_lost', message: 'Lease has been lost' });
+    throw new ConflictException({ code: 'lease_lost', error: 'lease_lost', message: 'Lease has been lost' });
   }
 
   async progress(

@@ -5,6 +5,7 @@
  */
 import { INestApplication } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Capabilities, signTicket, verifyTicket } from '@ag-farm/protocol';
@@ -17,6 +18,8 @@ import { FarmNodeEntity } from './database/entities/farm-node.entity';
 import { FarmOwnerEntity } from './database/entities/farm-owner.entity';
 import { Initial1000000000000 } from './database/migrations/1000000000000-initial';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
+import { ApiExceptionFilter } from './common/api-exception.filter';
+import { ApiResponseInterceptor } from './common/api-response.interceptor';
 import { AdminModule } from './modules/admin/admin.module';
 import { OwnerModule } from './modules/owner/owner.module';
 import { ReaperModule } from './modules/reaper/reaper.module';
@@ -86,6 +89,11 @@ async function buildApp(): Promise<INestApplication> {
     .compile();
 
   const app = moduleRef.createNestApplication();
+  // Register the envelope interceptor and exception filter the same way main.ts does
+  // via AppModule providers. The test module is built independently, so we wire them
+  // manually here.
+  app.useGlobalFilters(new ApiExceptionFilter());
+  app.useGlobalInterceptors(new ApiResponseInterceptor(app.get(Reflector)));
   await app.init();
   return app;
 }
@@ -191,10 +199,10 @@ describe('ag-farm DB integration', () => {
   it('GET /health returns ok', async () => {
     const res = await request(app.getHttpServer()).get('/health');
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe('ok');
+    expect(res.body.data.status).toBe('ok');
   });
 
-  // ---- Full lifecycle: submit â†’ claim â†’ progress â†’ complete â†’ list unacked â†’ ack ----
+  // ---- Full lifecycle: submit â†' claim â†' progress â†' complete â†' list unacked â†' ack ----
   it('full lifecycle', async () => {
     const { key } = await createOwner(ds, 'ag-go');
     agGoKey = key;
@@ -220,8 +228,8 @@ describe('ag-farm DB integration', () => {
         running_job_ids: [],
       });
     expect(hbRes.status).toBe(200);
-    expect(hbRes.body.node_id).toBe(nodeId);
-    expect(hbRes.body.status).toBe('active');
+    expect(hbRes.body.data.node_id).toBe(nodeId);
+    expect(hbRes.body.data.status).toBe('active');
 
     // 2. Submit job
     const submitRes = await request(app.getHttpServer())
@@ -250,8 +258,8 @@ describe('ag-farm DB integration', () => {
         correlation_id: 'test-corr-1',
       });
     expect(submitRes.status).toBe(200);
-    expect(submitRes.body.created).toBe(true);
-    const jobId = submitRes.body.job.id as string;
+    expect(submitRes.body.data.created).toBe(true);
+    const jobId = submitRes.body.data.job.id as string;
 
     // 3. Claim
     const claimRes = await request(app.getHttpServer())
@@ -263,10 +271,10 @@ describe('ag-farm DB integration', () => {
         cached_affinity: [],
       });
     expect(claimRes.status).toBe(200);
-    expect(claimRes.body.job).not.toBeNull();
-    expect(claimRes.body.job.id).toBe(jobId);
-    const leaseToken = claimRes.body.job.lease_token as string;
-    const ticket = claimRes.body.job.ticket as string;
+    expect(claimRes.body.data.job).not.toBeNull();
+    expect(claimRes.body.data.job.id).toBe(jobId);
+    const leaseToken = claimRes.body.data.job.lease_token as string;
+    const ticket = claimRes.body.data.job.ticket as string;
 
     // 4. Verify ticket
     const claims = verifyTicket(ticket, PUB_KEY, { owner: 'ag-go' });
@@ -280,7 +288,7 @@ describe('ag-farm DB integration', () => {
       .set('Authorization', `Node ${nodeToken}`)
       .send({ lease_token: leaseToken, percent: 50, stage: 'extracting' });
     expect(progRes.status).toBe(200);
-    expect(progRes.body.ticket).toBeTruthy();
+    expect(progRes.body.data.ticket).toBeTruthy();
 
     // 6. Complete
     const completeRes = await request(app.getHttpServer())
@@ -297,22 +305,22 @@ describe('ag-farm DB integration', () => {
       .get('/v1/owner/jobs?unacked=1')
       .set('Authorization', `Owner ${agGoKey}`);
     expect(listRes.status).toBe(200);
-    expect(listRes.body.jobs).toHaveLength(1);
-    expect(listRes.body.jobs[0].id).toBe(jobId);
-    expect(listRes.body.jobs[0].status).toBe('completed');
+    expect(listRes.body.data.jobs).toHaveLength(1);
+    expect(listRes.body.data.jobs[0].id).toBe(jobId);
+    expect(listRes.body.data.jobs[0].status).toBe('completed');
 
     // 8. Ack
     const ackRes = await request(app.getHttpServer())
       .post(`/v1/owner/jobs/${jobId}/ack`)
       .set('Authorization', `Owner ${agGoKey}`);
     expect(ackRes.status).toBe(200);
-    expect(ackRes.body.acked_at).toBeTruthy();
+    expect(ackRes.body.data.acked_at).toBeTruthy();
 
     // 9. List unacked lại → rỗng
     const listRes2 = await request(app.getHttpServer())
       .get('/v1/owner/jobs?unacked=1')
       .set('Authorization', `Owner ${agGoKey}`);
-    expect(listRes2.body.jobs).toHaveLength(0);
+    expect(listRes2.body.data.jobs).toHaveLength(0);
   });
 
   // ---- Correlation ID idempotency ----
@@ -342,16 +350,16 @@ describe('ag-farm DB integration', () => {
       .set('Authorization', `Owner ${key}`)
       .send(body);
     expect(r1.status).toBe(200);
-    expect(r1.body.created).toBe(true);
-    const id1 = r1.body.job.id;
+    expect(r1.body.data.created).toBe(true);
+    const id1 = r1.body.data.job.id;
 
     const r2 = await request(app.getHttpServer())
       .post('/v1/owner/jobs')
       .set('Authorization', `Owner ${key}`)
       .send(body);
     expect(r2.status).toBe(200);
-    expect(r2.body.created).toBe(false);
-    expect(r2.body.job.id).toBe(id1);
+    expect(r2.body.data.created).toBe(false);
+    expect(r2.body.data.job.id).toBe(id1);
   });
 
   // ---- Concurrent claims: không hai node cùng lấy một job ----
@@ -382,7 +390,7 @@ describe('ag-farm DB integration', () => {
           },
           max_attempts: 1,
         });
-      jobIds.push(r.body.job.id);
+      jobIds.push(r.body.data.job.id);
     }
 
     // Tạo 10 node tokens
@@ -448,8 +456,8 @@ describe('ag-farm DB integration', () => {
     );
 
     const claimedIds = claims
-      .filter((r) => r.body.job != null)
-      .map((r) => r.body.job.id as string);
+      .filter((r) => r.body.data?.job != null)
+      .map((r) => r.body.data.job.id as string);
 
     // Không trùng lặp
     expect(new Set(claimedIds).size).toBe(claimedIds.length);
@@ -535,8 +543,8 @@ describe('ag-farm DB integration', () => {
         cached_affinity: [],
       });
     expect(claimRes.status).toBe(200);
-    expect(claimRes.body.job).not.toBeNull();
-    expect(claimRes.body.job.lane).toBe('interactive');
+    expect(claimRes.body.data.job).not.toBeNull();
+    expect(claimRes.body.data.job.lane).toBe('interactive');
   });
 
   // ---- Owner không thấy job của owner khác ----
@@ -566,7 +574,7 @@ describe('ag-farm DB integration', () => {
         },
         max_attempts: 1,
       });
-    const jobId = r.body.job.id;
+    const jobId = r.body.data.job.id;
 
     // k2 không thể lấy job của k1
     const getRes = await request(app.getHttpServer())
@@ -626,15 +634,15 @@ describe('ag-farm DB integration', () => {
           extract_version: 'x1',
         },
       });
-    const jobId = submitRes.body.job.id;
+    const jobId = submitRes.body.data.job.id;
 
-    // Attempt 1: claim â†’ fail (retryable)
+    // Attempt 1: claim → fail (retryable)
     const c1 = await request(app.getHttpServer())
       .post('/v1/worker/claim')
       .set('Authorization', `Node ${token}`)
       .send({ kinds: ['scan.extract'], free_slots: { cpu: 2, gpu: 0 }, cached_affinity: [] });
-    expect(c1.body.job).not.toBeNull();
-    const lt1 = c1.body.job.lease_token;
+    expect(c1.body.data.job).not.toBeNull();
+    const lt1 = c1.body.data.job.lease_token;
 
     await request(app.getHttpServer())
       .post(`/v1/worker/jobs/${jobId}/fail`)
@@ -654,8 +662,8 @@ describe('ag-farm DB integration', () => {
       .post('/v1/worker/claim')
       .set('Authorization', `Node ${token}`)
       .send({ kinds: ['scan.extract'], free_slots: { cpu: 2, gpu: 0 }, cached_affinity: [] });
-    expect(c2.body.job).not.toBeNull();
-    const lt2 = c2.body.job.lease_token;
+    expect(c2.body.data.job).not.toBeNull();
+    const lt2 = c2.body.data.job.lease_token;
 
     await request(app.getHttpServer())
       .post(`/v1/worker/jobs/${jobId}/fail`)
@@ -711,14 +719,14 @@ describe('ag-farm DB integration', () => {
           extract_version: 'x1',
         },
       });
-    const jobId = submitRes.body.job.id;
+    const jobId = submitRes.body.data.job.id;
 
     // Claim
     const c = await request(app.getHttpServer())
       .post('/v1/worker/claim')
       .set('Authorization', `Node ${token}`)
       .send({ kinds: ['scan.extract'], free_slots: { cpu: 2, gpu: 0 }, cached_affinity: [] });
-    const lt = c.body.job.lease_token as string;
+    const lt = c.body.data.job.lease_token as string;
 
     // Đặt lease_expires_at về quá khứ
     await ds
@@ -740,7 +748,7 @@ describe('ag-farm DB integration', () => {
       .set('Authorization', `Node ${token}`)
       .send({ lease_token: lt, percent: 50 });
     expect(lateProgress.status).toBe(409);
-    expect(lateProgress.body.error).toBe('lease_lost');
+    expect(lateProgress.body.error.code).toBe('lease_lost');
   });
 
   // ---- Lease cũ không nộp đè được sau khi máy khác đã claim lại ----
@@ -782,10 +790,10 @@ describe('ag-farm DB integration', () => {
         .set('Authorization', `Node ${token}`)
         .send({ lease_token: leaseToken, result: { manifest: 'extract.json', summary: {} } });
 
-    const jobId = (await submit('reclaim-race', 'a1b2c3d4-e5f6-4a7b-8c9d-000000000041')).body.job
+    const jobId = (await submit('reclaim-race', 'a1b2c3d4-e5f6-4a7b-8c9d-000000000041')).body.data.job
       .id as string;
     const claimA = await claim(nodeA.token);
-    expect(claimA.body.job.id).toBe(jobId);
+    expect(claimA.body.data.job.id).toBe(jobId);
 
     // Lease của A hết hạn, reaper trả job về hàng đợi, B claim lại ngay.
     await ds
@@ -794,16 +802,16 @@ describe('ag-farm DB integration', () => {
     expect(await app.get(ReaperService).reap()).toBe(1);
     await ds.getRepository(FarmJobEntity).update(jobId, { notBefore: null });
     const claimB = await claim(nodeB.token);
-    expect(claimB.body.job.id).toBe(jobId);
+    expect(claimB.body.data.job.id).toBe(jobId);
 
-    const stale = await complete(nodeA.token, jobId, claimA.body.job.lease_token);
+    const stale = await complete(nodeA.token, jobId, claimA.body.data.job.lease_token);
     expect(stale.status).toBe(409);
-    expect(stale.body.error).toBe('lease_lost');
+    expect(stale.body.error.code).toBe('lease_lost');
     const stillLeased = await ds.getRepository(FarmJobEntity).findOneByOrFail({ id: jobId });
     expect(stillLeased.status).toBe('leased');
     expect(stillLeased.nodeId).toBe(nodeB.node.id);
 
-    const ok = await complete(nodeB.token, jobId, claimB.body.job.lease_token);
+    const ok = await complete(nodeB.token, jobId, claimB.body.data.job.lease_token);
     expect(ok.status).toBeLessThan(300);
     expect((await ds.getRepository(FarmJobEntity).findOneByOrFail({ id: jobId })).status).toBe(
       'completed',
@@ -813,9 +821,9 @@ describe('ag-farm DB integration', () => {
     await submit('reaper-skip', 'a1b2c3d4-e5f6-4a7b-8c9d-000000000042');
     const claimC = await claim(nodeA.token);
     const progress = await request(app.getHttpServer())
-      .post(`/v1/worker/jobs/${claimC.body.job.id}/progress`)
+      .post(`/v1/worker/jobs/${claimC.body.data.job.id}/progress`)
       .set('Authorization', `Node ${nodeA.token}`)
-      .send({ lease_token: claimC.body.job.lease_token, percent: 10 });
+      .send({ lease_token: claimC.body.data.job.lease_token, percent: 10 });
     expect(progress.status).toBeLessThan(300);
     expect(await app.get(ReaperService).reap()).toBe(0);
   });
@@ -887,7 +895,7 @@ describe('ag-farm DB integration', () => {
         running_job_ids: [],
       });
     expect(hb.status).toBe(200);
-    expect(hb.body.status).toBe('disabled');
+    expect(hb.body.data.status).toBe('disabled');
 
     // Claim trả về null job
     const claimRes = await request(app.getHttpServer())
@@ -895,7 +903,7 @@ describe('ag-farm DB integration', () => {
       .set('Authorization', `Node ${token}`)
       .send({ kinds: ['scan.extract'], free_slots: { cpu: 2, gpu: 0 }, cached_affinity: [] });
     expect(claimRes.status).toBe(200);
-    expect(claimRes.body.job).toBeNull();
+    expect(claimRes.body.data.job).toBeNull();
   });
 
   // ---- Ticket verifies with public key ----
@@ -941,14 +949,14 @@ describe('ag-farm DB integration', () => {
           extract_version: 'x1',
         },
       });
-    const jobId = submitRes.body.job.id;
+    const jobId = submitRes.body.data.job.id;
 
     const claimRes = await request(app.getHttpServer())
       .post('/v1/worker/claim')
       .set('Authorization', `Node ${token}`)
       .send({ kinds: ['scan.extract'], free_slots: { cpu: 4, gpu: 0 }, cached_affinity: [] });
-    expect(claimRes.body.job).not.toBeNull();
-    const ticket = claimRes.body.job.ticket as string;
+    expect(claimRes.body.data.job).not.toBeNull();
+    const ticket = claimRes.body.data.job.ticket as string;
 
     // Kiểm bằng PUB_KEY
     const claims = verifyTicket(ticket, PUB_KEY, { owner: 'ag-go' });

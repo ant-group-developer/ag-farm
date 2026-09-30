@@ -2,6 +2,8 @@
  * HubClient: gọi API worker của ag-farm (heartbeat, claim, progress, complete, fail).
  * Xác thực: Authorization: Node <token>
  * 409 → ném LeaseLostError (lease_lost | job_cancelled).
+ *
+ * Accepts both enveloped responses (new hub) and raw responses (legacy hub).
  */
 import {
   AUTH_SCHEMES,
@@ -11,10 +13,11 @@ import {
   FailRequestSchema,
   HeartbeatRequestSchema,
   HeartbeatResponseSchema,
-  LeaseLostResponseSchema,
   ProgressRequestSchema,
   ProgressResponseSchema,
   WORKER_API,
+  apiErrorOf,
+  unwrapApiResponse,
 } from '@ag-farm/protocol';
 import type {
   ClaimRequest,
@@ -47,14 +50,14 @@ export class HubClient {
     const body = HeartbeatRequestSchema.parse(req);
     const res = await this.post(WORKER_API.heartbeat, body);
     await this.checkStatus(res, WORKER_API.heartbeat);
-    return HeartbeatResponseSchema.parse(await res.json());
+    return HeartbeatResponseSchema.parse(unwrapApiResponse(await res.json()));
   }
 
   async claim(req: ClaimRequest): Promise<ClaimResponse> {
     const body = ClaimRequestSchema.parse(req);
     const res = await this.post(WORKER_API.claim, body);
     await this.checkStatus(res, WORKER_API.claim);
-    return ClaimResponseSchema.parse(await res.json());
+    return ClaimResponseSchema.parse(unwrapApiResponse(await res.json()));
   }
 
   async progress(jobId: string, req: ProgressRequest): Promise<ProgressResponse> {
@@ -62,7 +65,7 @@ export class HubClient {
     const path = WORKER_API.progress(jobId);
     const res = await this.post(path, body);
     await this.checkStatus(res, path);
-    return ProgressResponseSchema.parse(await res.json());
+    return ProgressResponseSchema.parse(unwrapApiResponse(await res.json()));
   }
 
   async complete(jobId: string, req: CompleteRequest): Promise<void> {
@@ -97,10 +100,14 @@ export class HubClient {
     if (res.status === 409) {
       let reason: 'lease_lost' | 'job_cancelled' = 'lease_lost';
       try {
-        const data = LeaseLostResponseSchema.parse(await res.json());
-        reason = data.error;
+        const rawBody = await res.json();
+        const err = apiErrorOf(rawBody);
+        const code = err.code;
+        if (code === 'lease_lost' || code === 'job_cancelled') {
+          reason = code;
+        }
       } catch {
-        // Ignore parse errors
+        // Ignore parse errors — default reason is 'lease_lost'
       }
       throw new LeaseLostError(reason, `Lease lost on ${path}: ${reason}`);
     }

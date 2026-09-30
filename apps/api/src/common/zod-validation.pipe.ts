@@ -9,8 +9,9 @@ export class ZodValidationPipe<T> implements PipeTransform {
     const result = this.schema.safeParse(value);
     if (!result.success) {
       throw new BadRequestException({
-        message: 'Validation failed',
-        issues: result.error.issues,
+        code: 'VALIDATION_ERROR',
+        // Array message triggers the validation-error branch in ApiExceptionFilter.
+        message: result.error.issues.map((i) => i.message),
       });
     }
     return result.data;

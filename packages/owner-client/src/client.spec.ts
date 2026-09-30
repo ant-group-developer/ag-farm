@@ -28,6 +28,20 @@ function jsonRes(
   res.end(json);
 }
 
+// ---- Helpers ----
+const REQ_ID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+const TS = '2026-09-30T00:00:00.000Z';
+
+/** Wrap a raw body in the ag-farm envelope (success). */
+function envelope(data: unknown) {
+  return { data, requestId: REQ_ID, timestamp: TS, success: true, error: null };
+}
+
+/** Wrap a raw body in the ag-farm envelope (error). */
+function envelopeError(code: string, message: string) {
+  return { data: null, requestId: REQ_ID, timestamp: TS, success: false, error: { code, message } };
+}
+
 // ---- Fixtures ----
 const NOW = '2024-01-01T00:00:00.000Z';
 const JOB_VIEW = {
@@ -176,6 +190,65 @@ describe('FarmOwnerClient', () => {
       const err = await client.getJob('x').catch((e: unknown) => e as FarmHttpError);
       expect(err).toBeInstanceOf(FarmHttpError);
       expect(err.status).toBe(403);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('FarmOwnerClient — envelope support', () => {
+  it('unwraps enveloped submitJob response', async () => {
+    const { url, close } = await makeServer((req, res) => {
+      jsonRes(res, 200, envelope({ job: JOB_VIEW, created: true }));
+    });
+    try {
+      const client = new FarmOwnerClient({ baseUrl: url, ownerKey: 'k' });
+      const result = await client.submitJob({ type: 'scan.extract', correlation_id: 'c2', payload: {}, max_attempts: 3 } as any);
+      expect(result.created).toBe(true);
+      expect(result.job.id).toBe(JOB_VIEW.id);
+    } finally {
+      await close();
+    }
+  });
+
+  it('unwraps enveloped getJob response', async () => {
+    const { url, close } = await makeServer((req, res) => {
+      jsonRes(res, 200, envelope(JOB_VIEW));
+    });
+    try {
+      const client = new FarmOwnerClient({ baseUrl: url, ownerKey: 'k' });
+      const job = await client.getJob(JOB_VIEW.id);
+      expect(job.id).toBe(JOB_VIEW.id);
+    } finally {
+      await close();
+    }
+  });
+
+  it('reads error code from enveloped 404', async () => {
+    const { url, close } = await makeServer((req, res) => {
+      jsonRes(res, 404, envelopeError('NOT_FOUND', 'Job not found'));
+    });
+    try {
+      const client = new FarmOwnerClient({ baseUrl: url, ownerKey: 'k' });
+      const err = (await client.getJob('does-not-exist').catch((e: unknown) => e)) as FarmHttpError;
+      expect(err).toBeInstanceOf(FarmHttpError);
+      expect(err.status).toBe(404);
+      expect(err.code).toBe('NOT_FOUND');
+      expect(err.message).toBe('Job not found');
+    } finally {
+      await close();
+    }
+  });
+
+  it('reads error code from legacy error body', async () => {
+    const { url, close } = await makeServer((req, res) => {
+      jsonRes(res, 409, { error: 'lease_lost', message: 'Lease lost' });
+    });
+    try {
+      const client = new FarmOwnerClient({ baseUrl: url, ownerKey: 'k' });
+      const err = (await client.cancelJob(JOB_VIEW.id).catch((e: unknown) => e)) as FarmHttpError;
+      expect(err).toBeInstanceOf(FarmHttpError);
+      expect(err.code).toBe('lease_lost');
     } finally {
       await close();
     }

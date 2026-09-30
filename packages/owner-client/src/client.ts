@@ -8,6 +8,7 @@ import {
   SubmitJobRequest,
   SubmitJobResponse,
   SubmitJobResponseSchema,
+  unwrapApiResponse,
 } from '@ag-farm/protocol';
 import { FarmHttpError } from './error';
 
@@ -84,7 +85,7 @@ export class FarmOwnerClient {
       throw new FarmHttpError(res.status, responseBody);
     }
 
-    return responseBody as T;
+    return unwrapApiResponse<T>(responseBody);
   }
 
   async submitJob(req: SubmitJobRequest): Promise<SubmitJobResponse> {

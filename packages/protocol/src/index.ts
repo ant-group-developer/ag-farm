@@ -1,6 +1,7 @@
 export * from './capabilities';
 export * from './common';
 export * from './constants';
+export * from './envelope';
 export * from './jobs/registry';
 export * from './jobs/scan';
 export * from './jobs/studio';

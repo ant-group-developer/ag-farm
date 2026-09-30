@@ -20,6 +20,18 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The hub answers { data, requestId, timestamp, success, error } (ag-go-api's envelope); the payload is
+ * `data`. A body without the envelope (an older hub) is returned as is.
+ */
+export function unwrapEnvelope<T>(body: unknown): T {
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const b = body as Record<string, unknown>;
+    if (typeof b.success === 'boolean' && 'data' in b && typeof b.requestId === 'string') return b.data as T;
+  }
+  return body as T;
+}
+
 const axiosInstance = axios.create({
   baseURL: API_BASE_URL,
   headers: { Accept: 'application/json' },
@@ -46,17 +58,23 @@ export async function apiClient<T>(
     config.headers = { 'Content-Type': 'application/json' };
   }
   try {
-    const response = await axiosInstance.request<T>(config);
-    return response.data;
+    const response = await axiosInstance.request<unknown>(config);
+    return unwrapEnvelope<T>(response.data);
   } catch (error) {
     if (axios.isAxiosError(error)) {
       const status = error.response?.status ?? 0;
       const data = error.response?.data as Record<string, unknown> | undefined;
+      // Support both new envelope { error: { code, message } } and legacy { message }.
+      const envelopeError = data?.error as Record<string, unknown> | undefined;
       const message =
-        typeof data?.message === 'string'
-          ? data.message
-          : (error.message ?? 'API request failed');
-      throw new ApiError(message, status);
+        typeof envelopeError?.message === 'string'
+          ? envelopeError.message
+          : typeof data?.message === 'string'
+            ? data.message
+            : (error.message ?? 'API request failed');
+      const code =
+        typeof envelopeError?.code === 'string' ? envelopeError.code : undefined;
+      throw new ApiError(message, status, code);
     }
     throw new ApiError(error instanceof Error ? error.message : 'API request failed', 0);
   }

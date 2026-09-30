@@ -14,6 +14,8 @@ import {
   SubmitJobRequestSchema,
   TicketError,
   verifyTicket,
+  unwrapApiResponse,
+  apiErrorOf,
   type Capabilities,
 } from './index';
 
@@ -204,5 +206,94 @@ describe('payloads', () => {
     expect(request.max_attempts).toBe(3);
     expect(request.requirements).toEqual({});
     expect(ClaimRequestSchema.parse({ kinds: ['scan.ai'], free_slots: { cpu: 1, gpu: 1 } }).cached_affinity).toEqual([]);
+  });
+});
+
+// ---- Envelope helpers ----
+
+describe('unwrapApiResponse', () => {
+  const REQ_ID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+  const TS = '2026-09-30T00:00:00.000Z';
+
+  it('extracts data from a success envelope', () => {
+    const envelope = {
+      data: { node_id: 'n1', status: 'active' },
+      requestId: REQ_ID,
+      timestamp: TS,
+      success: true,
+      error: null,
+    };
+    const result = unwrapApiResponse(envelope);
+    expect(result).toEqual({ node_id: 'n1', status: 'active' });
+  });
+
+  it('returns raw body unchanged when it is not an envelope', () => {
+    const raw = { node_id: 'n1', status: 'active' };
+    expect(unwrapApiResponse(raw)).toBe(raw);
+  });
+
+  it('returns null data from an error envelope', () => {
+    const envelope = {
+      data: null,
+      requestId: REQ_ID,
+      timestamp: TS,
+      success: false,
+      error: { code: 'NOT_FOUND', message: 'Not found' },
+    };
+    expect(unwrapApiResponse(envelope)).toBeNull();
+  });
+
+  it('returns array body unchanged', () => {
+    const arr = [1, 2, 3];
+    expect(unwrapApiResponse(arr)).toBe(arr);
+  });
+});
+
+describe('apiErrorOf', () => {
+  const REQ_ID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+  const TS = '2026-09-30T00:00:00.000Z';
+
+  it('reads code+message from new envelope error', () => {
+    const envelope = {
+      data: null,
+      requestId: REQ_ID,
+      timestamp: TS,
+      success: false,
+      error: { code: 'lease_lost', message: 'Lease lost', details: { extra: 1 } },
+    };
+    const err = apiErrorOf(envelope);
+    expect(err.code).toBe('lease_lost');
+    expect(err.message).toBe('Lease lost');
+    expect(err.details).toEqual({ extra: 1 });
+  });
+
+  it('reads code from legacy lease_lost shape', () => {
+    const legacy = { error: 'lease_lost', message: 'Reaper took lease' };
+    const err = apiErrorOf(legacy);
+    expect(err.code).toBe('lease_lost');
+    expect(err.message).toBe('Reaper took lease');
+  });
+
+  it('reads code from legacy job_cancelled shape', () => {
+    const legacy = { error: 'job_cancelled', message: 'Job cancelled' };
+    expect(apiErrorOf(legacy).code).toBe('job_cancelled');
+  });
+
+  it('reads code from NestJS default error shape', () => {
+    const nestErr = { statusCode: 404, message: 'Not Found', error: 'Not Found' };
+    const err = apiErrorOf(nestErr);
+    expect(err.code).toBe('Not Found');
+    expect(err.message).toBe('Not Found');
+  });
+
+  it('returns empty object for null or non-object', () => {
+    expect(apiErrorOf(null)).toEqual({});
+    expect(apiErrorOf('string')).toEqual({});
+    expect(apiErrorOf(undefined)).toEqual({});
+    expect(apiErrorOf([])).toEqual({});
+  });
+
+  it('reads code from generic shape', () => {
+    expect(apiErrorOf({ code: 'FORBIDDEN', message: 'No access' }).code).toBe('FORBIDDEN');
   });
 });

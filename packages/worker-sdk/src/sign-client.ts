@@ -6,6 +6,7 @@ import {
   AUTH_SCHEMES,
   SignRequestSchema,
   SignResponseSchema,
+  unwrapApiResponse,
 } from '@ag-farm/protocol';
 import type { SignOp, SignRequest, SignResponse, SignResult } from '@ag-farm/protocol';
 
@@ -51,7 +52,8 @@ export class SignClient {
       throw new SignError(res.status, `Sign request failed: HTTP ${res.status} - ${text}`);
     }
 
-    const data: SignResponse = SignResponseSchema.parse(await res.json());
+    const rawBody = await res.json();
+    const data: SignResponse = SignResponseSchema.parse(unwrapApiResponse(rawBody));
     return data.results;
   }
 

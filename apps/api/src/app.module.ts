@@ -1,7 +1,11 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { validateEnv } from './config/env';
+import { ApiExceptionFilter } from './common/api-exception.filter';
+import { ApiResponseInterceptor } from './common/api-response.interceptor';
+import { RequestIdMiddleware } from './common/request-id.middleware';
 import { FarmJobEntity } from './database/entities/farm-job.entity';
 import { FarmNodeEntity } from './database/entities/farm-node.entity';
 import { FarmOwnerEntity } from './database/entities/farm-owner.entity';
@@ -37,5 +41,13 @@ import { WorkerModule } from './modules/worker/worker.module';
     AdminModule,
     ReaperModule,
   ],
+  providers: [
+    { provide: APP_INTERCEPTOR, useClass: ApiResponseInterceptor },
+    { provide: APP_FILTER, useClass: ApiExceptionFilter },
+  ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestIdMiddleware).forRoutes('*');
+  }
+}
