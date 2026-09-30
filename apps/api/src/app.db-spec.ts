@@ -19,6 +19,7 @@ import { FarmOwnerEntity } from './database/entities/farm-owner.entity';
 import { Initial1000000000000 } from './database/migrations/1000000000000-initial';
 import { Enrollments1100000000000 } from './database/migrations/1100000000000-enrollments';
 import { JobPause1200000000000 } from './database/migrations/1200000000000-job-pause';
+import { AdminListIndexes1300000000000 } from './database/migrations/1300000000000-admin-list-indexes';
 import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
 import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
@@ -78,7 +79,7 @@ async function buildApp(): Promise<INestApplication> {
         type: 'postgres',
         url: TEST_DB_URL,
         entities: [FarmOwnerEntity, FarmNodeEntity, FarmJobEntity, FarmEnrollmentEntity],
-        migrations: [Initial1000000000000, Enrollments1100000000000, JobPause1200000000000],
+        migrations: [Initial1000000000000, Enrollments1100000000000, JobPause1200000000000, AdminListIndexes1300000000000],
         migrationsRun: true,
         synchronize: false,
         dropSchema: true, // reset DB mỗi lần test
@@ -97,6 +98,44 @@ async function buildApp(): Promise<INestApplication> {
   // Register the envelope interceptor and exception filter the same way main.ts does
   // via AppModule providers. The test module is built independently, so we wire them
   // manually here.
+  app.useGlobalFilters(new ApiExceptionFilter());
+  app.useGlobalInterceptors(new ApiResponseInterceptor(app.get(Reflector)));
+  await app.init();
+  return app;
+}
+
+/** buildAdminApp: giống buildApp nhưng bỏ qua JWT verification trong AdminGuard */
+async function buildAdminApp(): Promise<INestApplication> {
+  const moduleRef = await Test.createTestingModule({
+    controllers: [HealthController],
+    imports: [
+      ConfigModule.forRoot({
+        load: [() => TEST_ENV],
+        isGlobal: true,
+        ignoreEnvFile: true,
+      }),
+      TypeOrmModule.forRoot({
+        type: 'postgres',
+        url: TEST_DB_URL,
+        entities: [FarmOwnerEntity, FarmNodeEntity, FarmJobEntity, FarmEnrollmentEntity],
+        migrations: [Initial1000000000000, Enrollments1100000000000, JobPause1200000000000, AdminListIndexes1300000000000],
+        migrationsRun: true,
+        synchronize: false,
+        dropSchema: true,
+      }),
+      WorkerModule,
+      OwnerModule,
+      AdminModule,
+      ReaperModule,
+    ],
+  })
+    .overrideProvider(ACCOUNT_ME_CLIENT)
+    .useValue(fakeAccountMeClient)
+    .overrideGuard(AdminGuard)
+    .useValue({ canActivate: () => true })
+    .compile();
+
+  const app = moduleRef.createNestApplication();
   app.useGlobalFilters(new ApiExceptionFilter());
   app.useGlobalInterceptors(new ApiResponseInterceptor(app.get(Reflector)));
   await app.init();
@@ -1135,6 +1174,379 @@ describe('ag-farm DB integration', () => {
     expect(claims.owner).toBe('ag-go');
     expect(claims.type).toBe('scan.extract');
     expect(claims.attempt).toBe(1);
+  });
+});
+
+// ============================================================
+// GĐ4: Admin list endpoints, node kinds intersection, delete-with-lease
+// ============================================================
+
+describe('ag-farm GĐ4 DB integration', () => {
+  let app: INestApplication;
+  let ds: DataSource;
+
+  beforeAll(async () => {
+    app = await buildAdminApp();
+    ds = getDs(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await ds.query('TRUNCATE TABLE farm_jobs, farm_nodes, farm_owners, farm_enrollments RESTART IDENTITY CASCADE');
+  });
+
+  // Helper: tạo nhiều jobs cùng owner
+  async function seedJobs(ownerKey: string, count: number, type = 'scan.extract') {
+    for (let i = 0; i < count; i++) {
+      await request(app.getHttpServer())
+        .post('/v1/owner/jobs')
+        .set('Authorization', `Owner ${ownerKey}`)
+        .send({
+          type,
+          correlation_id: `seed-${i}-${Math.random()}`,
+          priority: i,
+          payload: {
+            asset: {
+              id: randomUUID(),
+              kind: 'video',
+              mime_type: 'video/mp4',
+              size_bytes: null,
+              checksum_sha256: null,
+              duration_ms: null,
+              width: null,
+              height: null,
+            },
+            extract_version: 'x1',
+          },
+        });
+    }
+  }
+
+  // ---- GET /v1/admin/jobs: pagination ----
+  it('GET /v1/admin/jobs returns paged response with correct totals', async () => {
+    const { key } = await createOwner(ds, 'ag-go');
+    await seedJobs(key, 15);
+
+    const res = await request(app.getHttpServer()).get('/v1/admin/jobs?page=1&pageSize=5');
+    expect(res.status).toBe(200);
+    expect(res.body.data.items).toHaveLength(5);
+    expect(res.body.data.total).toBe(15);
+    expect(res.body.data.page).toBe(1);
+    expect(res.body.data.pageSize).toBe(5);
+
+    // page 2 cũng đúng
+    const res2 = await request(app.getHttpServer()).get('/v1/admin/jobs?page=2&pageSize=5');
+    expect(res2.status).toBe(200);
+    expect(res2.body.data.items).toHaveLength(5);
+    expect(res2.body.data.page).toBe(2);
+  });
+
+  // ---- GET /v1/admin/jobs?status=queued: filter ----
+  it('GET /v1/admin/jobs filters by status', async () => {
+    const { key } = await createOwner(ds, 'ag-go');
+    await seedJobs(key, 5);
+
+    // Tất cả vừa tạo đều là queued
+    const res = await request(app.getHttpServer()).get('/v1/admin/jobs?status=queued');
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(5);
+    expect(res.body.data.items.every((j: { status: string }) => j.status === 'queued')).toBe(true);
+
+    // status=failed → 0 kết quả
+    const res2 = await request(app.getHttpServer()).get('/v1/admin/jobs?status=failed');
+    expect(res2.status).toBe(200);
+    expect(res2.body.data.total).toBe(0);
+  });
+
+  // ---- GET /v1/admin/jobs?owner=ag-go: filter by owner ----
+  it('GET /v1/admin/jobs filters by owner', async () => {
+    const { key: k1 } = await createOwner(ds, 'ag-go');
+    const { key: k2 } = await createOwner(ds, 'studio', ['scan.extract']);
+    await seedJobs(k1, 3);
+    await seedJobs(k2, 2);
+
+    const res = await request(app.getHttpServer()).get('/v1/admin/jobs?owner=ag-go');
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(3);
+    expect(res.body.data.items.every((j: { owner: string }) => j.owner === 'ag-go')).toBe(true);
+  });
+
+  // ---- GET /v1/admin/jobs?sortBy=priority&sortOrder=asc ----
+  it('GET /v1/admin/jobs sorts by priority asc', async () => {
+    const { key } = await createOwner(ds, 'ag-go');
+    await seedJobs(key, 5); // priority 0..4
+
+    const res = await request(app.getHttpServer()).get('/v1/admin/jobs?sortBy=priority&sortOrder=asc&pageSize=5');
+    expect(res.status).toBe(200);
+    const priorities = res.body.data.items.map((j: { priority: number }) => j.priority) as number[];
+    expect(priorities).toEqual([...priorities].sort((a, b) => a - b));
+  });
+
+  // ---- GET /v1/admin/jobs invalid query → 400 ----
+  it('GET /v1/admin/jobs returns 400 for invalid sortBy', async () => {
+    const res = await request(app.getHttpServer()).get('/v1/admin/jobs?sortBy=invalid_col');
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /v1/admin/jobs returns 400 for pageSize > 200', async () => {
+    const res = await request(app.getHttpServer()).get('/v1/admin/jobs?pageSize=999');
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /v1/admin/jobs returns 400 for negative page', async () => {
+    const res = await request(app.getHttpServer()).get('/v1/admin/jobs?page=0');
+    expect(res.status).toBe(400);
+  });
+
+  // ---- GET /v1/admin/jobs/:id returns node_name ----
+  it('GET /v1/admin/jobs/:id includes node_name after claim', async () => {
+    const { key } = await createOwner(ds, 'ag-go');
+    const { token } = await createNode(ds);
+
+    await request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({
+        agent_version: '1.0',
+        kinds: ['scan.extract'],
+        capabilities: { os: 'linux', cpu_cores: 4, ram_mb: 8192, gpus: [], engines: { ffmpeg: null, ollama_models: [], python: null } },
+        free_slots: { cpu: 2, gpu: 0 },
+        running_job_ids: [],
+      });
+
+    const submit = await request(app.getHttpServer())
+      .post('/v1/owner/jobs')
+      .set('Authorization', `Owner ${key}`)
+      .send({
+        type: 'scan.extract',
+        correlation_id: 'detail-test',
+        payload: {
+          asset: { id: randomUUID(), kind: 'video', mime_type: 'video/mp4', size_bytes: null, checksum_sha256: null, duration_ms: null, width: null, height: null },
+          extract_version: 'x1',
+        },
+      });
+    const jobId = submit.body.data.job.id as string;
+
+    await request(app.getHttpServer())
+      .post('/v1/worker/claim')
+      .set('Authorization', `Node ${token}`)
+      .send({ kinds: ['scan.extract'], free_slots: { cpu: 2, gpu: 0 }, cached_affinity: [] });
+
+    const res = await request(app.getHttpServer()).get(`/v1/admin/jobs/${jobId}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.node_name).toBe('test-node');
+    expect(res.body.data.status).toBe('leased');
+    expect(res.body.data).toHaveProperty('payload');
+    expect(res.body.data).toHaveProperty('lease_expires_at');
+  });
+
+  // ---- GET /v1/admin/nodes pagination ----
+  it('GET /v1/admin/nodes returns paged list', async () => {
+    for (let i = 0; i < 6; i++) {
+      await createNode(ds);
+    }
+    const res = await request(app.getHttpServer()).get('/v1/admin/nodes?pageSize=4');
+    expect(res.status).toBe(200);
+    expect(res.body.data.items).toHaveLength(4);
+    expect(res.body.data.total).toBe(6);
+    expect(res.body.data.pageSize).toBe(4);
+  });
+
+  // ---- GET /v1/admin/nodes invalid query → 400 ----
+  it('GET /v1/admin/nodes returns 400 for invalid status', async () => {
+    const res = await request(app.getHttpServer()).get('/v1/admin/nodes?status=unknown_status');
+    expect(res.status).toBe(400);
+  });
+
+  // ---- GET /v1/admin/owners pagination ----
+  it('GET /v1/admin/owners returns paged list', async () => {
+    await createOwner(ds, 'owner-1');
+    await createOwner(ds, 'owner-2');
+    await createOwner(ds, 'owner-3');
+
+    const res = await request(app.getHttpServer()).get('/v1/admin/owners?pageSize=2&page=1');
+    expect(res.status).toBe(200);
+    expect(res.body.data.items).toHaveLength(2);
+    expect(res.body.data.total).toBe(3);
+  });
+
+  // ---- Node kinds intersection: allowed_kinds restricts claim ----
+  it('allowed_kinds intersection: intersection is empty → no jobs claimed', async () => {
+    const { key } = await createOwner(ds, 'ag-go');
+    const { token, node } = await createNode(ds, ['scan.extract']);
+
+    // Heartbeat để set kinds
+    await request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({
+        agent_version: '1.0',
+        kinds: ['scan.extract'],
+        capabilities: { os: 'linux', cpu_cores: 4, ram_mb: 8192, gpus: [], engines: { ffmpeg: null, ollama_models: [], python: null } },
+        free_slots: { cpu: 4, gpu: 0 },
+        running_job_ids: [],
+      });
+
+    // Tạo job scan.extract
+    const submit = await request(app.getHttpServer())
+      .post('/v1/owner/jobs')
+      .set('Authorization', `Owner ${key}`)
+      .send({
+        type: 'scan.extract',
+        correlation_id: 'kinds-intersection-test',
+        payload: {
+          asset: { id: randomUUID(), kind: 'video', mime_type: 'video/mp4', size_bytes: null, checksum_sha256: null, duration_ms: null, width: null, height: null },
+          extract_version: 'x1',
+        },
+      });
+    expect(submit.status).toBe(200);
+    const jobId = submit.body.data.job.id as string;
+
+    // Đặt allowed_kinds = ['scan.ai'] → node chỉ được phép claim scan.ai
+    // nhưng node báo cáo kinds = ['scan.extract'], giao = [] → không claim được
+    await ds.getRepository(FarmNodeEntity).update(node.id, { allowedKinds: ['scan.ai'] });
+
+    const claimRes = await request(app.getHttpServer())
+      .post('/v1/worker/claim')
+      .set('Authorization', `Node ${token}`)
+      .send({ kinds: ['scan.extract'], free_slots: { cpu: 4, gpu: 0 }, cached_affinity: [] });
+    expect(claimRes.status).toBe(200);
+    // Giao rỗng → không nhận được job nào
+    expect(claimRes.body.data.job).toBeNull();
+
+    // Job vẫn queued
+    const j = await ds.getRepository(FarmJobEntity).findOneByOrFail({ id: jobId });
+    expect(j.status).toBe('queued');
+  });
+
+  // ---- Node kinds intersection: allowed_kinds = subset → only matching jobs claimed ----
+  it('allowed_kinds intersection: only jobs whose type is in the intersection are claimed', async () => {
+    const { key } = await createOwner(ds, 'ag-go');
+    const { token, node } = await createNode(ds, ['scan.extract']);
+
+    await request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({
+        agent_version: '1.0',
+        kinds: ['scan.extract'],
+        capabilities: { os: 'linux', cpu_cores: 4, ram_mb: 8192, gpus: [], engines: { ffmpeg: null, ollama_models: [], python: null } },
+        free_slots: { cpu: 4, gpu: 0 },
+        running_job_ids: [],
+      });
+
+    // Tạo job scan.extract
+    const submit = await request(app.getHttpServer())
+      .post('/v1/owner/jobs')
+      .set('Authorization', `Owner ${key}`)
+      .send({
+        type: 'scan.extract',
+        correlation_id: 'kinds-subset-test',
+        payload: {
+          asset: { id: randomUUID(), kind: 'video', mime_type: 'video/mp4', size_bytes: null, checksum_sha256: null, duration_ms: null, width: null, height: null },
+          extract_version: 'x1',
+        },
+      });
+    expect(submit.status).toBe(200);
+
+    // allowed_kinds = ['scan.extract'] (khớp) → claim được
+    await ds.getRepository(FarmNodeEntity).update(node.id, { allowedKinds: ['scan.extract'] });
+
+    const claimRes = await request(app.getHttpServer())
+      .post('/v1/worker/claim')
+      .set('Authorization', `Node ${token}`)
+      .send({ kinds: ['scan.extract'], free_slots: { cpu: 4, gpu: 0 }, cached_affinity: [] });
+    expect(claimRes.status).toBe(200);
+    expect(claimRes.body.data.job).not.toBeNull();
+    expect(claimRes.body.data.job.type).toBe('scan.extract');
+  });
+
+  // ---- Node kinds intersection: allowed_kinds = null → tất cả kinds được phép ----
+  it('allowed_kinds = null allows all reported kinds', async () => {
+    const { key } = await createOwner(ds, 'ag-go');
+    const { token } = await createNode(ds, ['scan.extract']);
+
+    await request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({
+        agent_version: '1.0',
+        kinds: ['scan.extract'],
+        capabilities: { os: 'linux', cpu_cores: 4, ram_mb: 8192, gpus: [], engines: { ffmpeg: null, ollama_models: [], python: null } },
+        free_slots: { cpu: 4, gpu: 0 },
+        running_job_ids: [],
+      });
+
+    // allowed_kinds là null (mặc định) → nhận được job scan.extract
+    await request(app.getHttpServer())
+      .post('/v1/owner/jobs')
+      .set('Authorization', `Owner ${key}`)
+      .send({
+        type: 'scan.extract',
+        correlation_id: 'null-kinds-test',
+        payload: {
+          asset: { id: randomUUID(), kind: 'video', mime_type: 'video/mp4', size_bytes: null, checksum_sha256: null, duration_ms: null, width: null, height: null },
+          extract_version: 'x1',
+        },
+      });
+
+    const claimRes = await request(app.getHttpServer())
+      .post('/v1/worker/claim')
+      .set('Authorization', `Node ${token}`)
+      .send({ kinds: ['scan.extract'], free_slots: { cpu: 4, gpu: 0 }, cached_affinity: [] });
+    expect(claimRes.status).toBe(200);
+    expect(claimRes.body.data.job).not.toBeNull();
+    expect(claimRes.body.data.job.type).toBe('scan.extract');
+  });
+
+  // ---- DELETE /v1/admin/nodes/:id with leased job → 409 ----
+  it('DELETE /v1/admin/nodes/:id returns 409 when node has a leased job', async () => {
+    const { key } = await createOwner(ds, 'ag-go');
+    const { token, node } = await createNode(ds);
+
+    await request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({
+        agent_version: '1.0',
+        kinds: ['scan.extract'],
+        capabilities: { os: 'linux', cpu_cores: 4, ram_mb: 8192, gpus: [], engines: { ffmpeg: null, ollama_models: [], python: null } },
+        free_slots: { cpu: 2, gpu: 0 },
+        running_job_ids: [],
+      });
+
+    await request(app.getHttpServer())
+      .post('/v1/owner/jobs')
+      .set('Authorization', `Owner ${key}`)
+      .send({
+        type: 'scan.extract',
+        correlation_id: 'delete-node-test',
+        payload: {
+          asset: { id: randomUUID(), kind: 'video', mime_type: 'video/mp4', size_bytes: null, checksum_sha256: null, duration_ms: null, width: null, height: null },
+          extract_version: 'x1',
+        },
+      });
+
+    // Node claim job
+    await request(app.getHttpServer())
+      .post('/v1/worker/claim')
+      .set('Authorization', `Node ${token}`)
+      .send({ kinds: ['scan.extract'], free_slots: { cpu: 2, gpu: 0 }, cached_affinity: [] });
+
+    // Xoá node đang giữ job → 409
+    const del = await request(app.getHttpServer()).delete(`/v1/admin/nodes/${node.id}`);
+    expect(del.status).toBe(409);
+    expect(del.body.error?.code).toBe('node_has_leased_jobs');
+  });
+
+  // ---- DELETE /v1/admin/nodes/:id without leased jobs → 204 ----
+  it('DELETE /v1/admin/nodes/:id succeeds when node has no leased jobs', async () => {
+    const { node } = await createNode(ds);
+    const del = await request(app.getHttpServer()).delete(`/v1/admin/nodes/${node.id}`);
+    expect(del.status).toBe(204);
   });
 });
 
