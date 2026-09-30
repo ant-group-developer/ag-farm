@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { JobType, Lane } from '../common';
 import { RequirementsSchema, type Requirements } from '../capabilities';
 import { ScanAiPayloadSchema, ScanExtractPayloadSchema } from './scan';
-import { StudioRenderPayloadSchema, StudioTtsPayloadSchema } from './studio';
+import { StudioRenderPayloadSchema, StudioTtsPayloadSchema, StudioExportPremierePayloadSchema } from './studio';
 
 export type SlotKind = 'cpu' | 'gpu';
 
@@ -51,6 +51,13 @@ export const JOB_TYPE_SPECS: Record<JobType, JobTypeSpec> = {
     lane: 'interactive',
     slot: 'cpu',
     payload: StudioRenderPayloadSchema,
+    baseRequirements: {},
+  },
+  'studio.export_premiere': {
+    owner: 'studio',
+    lane: 'interactive',
+    slot: 'cpu',
+    payload: StudioExportPremierePayloadSchema,
     baseRequirements: {},
   },
 };

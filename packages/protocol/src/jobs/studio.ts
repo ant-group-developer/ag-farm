@@ -140,3 +140,52 @@ export type RenderManifest = z.infer<typeof RenderManifestSchema>;
 export function thumbnailOutputPath(output: string, n: number): string {
   return output.replace(/\.mp4$/, `.thumb-${n}.jpg`);
 }
+
+// ---------------------------------------------------------------------------------------------
+// studio.export_premiere: xuất tập phim thành project Adobe Premiere Pro (.zip).
+// Output `premiere.json` + file zip ở `output`.
+// ---------------------------------------------------------------------------------------------
+
+export const StudioExportPremierePayloadSchema = z.strictObject({
+  production_id: z.string().min(1).max(100),
+  episode_id: z.string().min(1).max(100),
+  /** composition.json của Studio (giống như render, asset: inputs). */
+  composition: InputNameSchema,
+  /** Loại media: proxy 720p hay bản gốc. */
+  media: z.enum(['proxy', 'original']),
+  /** Tên sequence trong Premiere (≤ 200 ký tự). */
+  name: z.string().min(1).max(200),
+  /** Chapter markers (≤ 100). */
+  markers: z
+    .array(
+      z.strictObject({
+        t_s: z.number().min(0),
+        title: z.string().min(1).max(100),
+      }),
+    )
+    .max(100)
+    .default([]),
+  /** Đường dẫn file zip kết quả, ví dụ `episodes/<eid>/premiere/<job>.zip`. */
+  output: RelativePathSchema,
+});
+export type StudioExportPremierePayload = z.infer<typeof StudioExportPremierePayloadSchema>;
+
+export const PREMIERE_MANIFEST_SCHEMA = 'ag.studio.premiere/v1';
+export const PREMIERE_MANIFEST_PATH = 'premiere.json';
+
+export const PremiereManifestSchema = z.strictObject({
+  schema: z.literal(PREMIERE_MANIFEST_SCHEMA),
+  output: RelativePathSchema,
+  size_bytes: z.int().nonnegative(),
+  media: z.enum(['proxy', 'original']),
+  files: z.array(
+    z.strictObject({
+      path: z.string(),
+      size_bytes: z.int().nonnegative(),
+      source_kind: z.enum(['original', 'proxy', 'preview']),
+      watermarked: z.boolean(),
+    }),
+  ),
+  warnings: z.array(z.string()).default([]),
+});
+export type PremiereManifest = z.infer<typeof PremiereManifestSchema>;
