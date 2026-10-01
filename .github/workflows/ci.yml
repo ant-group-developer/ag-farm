@@ -1,0 +1,44 @@
+name: CI
+
+# Kiểm mọi nhánh và PR; deploy.dev.yml gọi lại workflow này trước khi deploy main.
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+  workflow_call:
+
+concurrency:
+  group: ag-farm-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # Cùng cấu hình docker-compose.test.yml: test DB (*.db-spec.ts) mặc định gọi localhost:55433.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: farm_test
+          POSTGRES_PASSWORD: farm_test
+          POSTGRES_DB: ag_farm_test
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U farm_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn build
+      - run: yarn typecheck
+      - run: yarn test
+      - name: DB tests
+        run: yarn workspace @ag-farm/api test:db
