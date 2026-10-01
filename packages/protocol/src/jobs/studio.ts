@@ -165,6 +165,14 @@ export const StudioExportPremierePayloadSchema = z.strictObject({
     )
     .max(100)
     .default([]),
+  /**
+   * Tên hiển thị của từng video (`asset:<id>` → tên), để file trong `media/` của zip mang tên video thay vì
+   * id. Thiếu tên thì worker dùng id.
+   */
+  media_names: z
+    .record(InputNameSchema, z.string().min(1).max(200))
+    .refine((m) => Object.keys(m).length <= 500, 'at most 500 media names')
+    .default({}),
   /** Đường dẫn file zip kết quả, ví dụ `episodes/<eid>/premiere/<job>.zip`. */
   output: RelativePathSchema,
 });

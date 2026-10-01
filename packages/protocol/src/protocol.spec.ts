@@ -14,6 +14,7 @@ import {
   signTicket,
   SignRequestSchema,
   StudioRenderPayloadSchema,
+  StudioExportPremierePayloadSchema,
   RenderManifestSchema,
   RENDER_MANIFEST_SCHEMA,
   thumbnailOutputPath,
@@ -268,6 +269,25 @@ describe('payloads', () => {
           { t_s: 4, text: 'D' },
         ],
       }).success,
+    ).toBe(false);
+  });
+
+  it('StudioExportPremierePayloadSchema: media_names defaults to {} and keeps given names', () => {
+    const base = {
+      production_id: 'p1',
+      episode_id: 'e1',
+      composition: 'stage:composition.json',
+      media: 'proxy',
+      name: 'Tập 1',
+      output: 'episodes/e1/premiere/j1.zip',
+    };
+    expect(StudioExportPremierePayloadSchema.parse(base).media_names).toEqual({});
+    expect(
+      StudioExportPremierePayloadSchema.parse({ ...base, media_names: { 'asset:a1': 'Chợ nổi Cái Răng' } })
+        .media_names,
+    ).toEqual({ 'asset:a1': 'Chợ nổi Cái Răng' });
+    expect(
+      StudioExportPremierePayloadSchema.safeParse({ ...base, media_names: { 'asset:a1': '' } }).success,
     ).toBe(false);
   });
 
