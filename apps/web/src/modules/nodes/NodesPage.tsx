@@ -79,7 +79,7 @@ function Spec({ icon, children }: { icon: ReactNode; children: ReactNode }) {
 /** Machine specs on separate lines: OS · CPU · RAM, one line per GPU, then installed engines. */
 function NodeSpecs({ caps }: { caps: NodeCapabilities | null }) {
   const { t } = useTranslation();
-  if (!caps) return <Text type="secondary">—</Text>;
+  if (!caps) return <Text type="secondary">-</Text>;
   const { ffmpeg, python, ollama_models: models } = caps.engines;
   return (
     <Flex vertical gap={4}>
@@ -220,7 +220,7 @@ export function NodesPage() {
         <Flex vertical style={{ minWidth: 0 }}>
           <Text strong ellipsis={{ tooltip: v }}>{v}</Text>
           <Text type="secondary" ellipsis={{ tooltip: r.machine || undefined }}>
-            {r.machine || '—'}
+            {r.machine || '-'}
           </Text>
         </Flex>
       ),
@@ -282,7 +282,7 @@ export function NodesPage() {
             </Text>
           </Flex>
         ) : (
-          <Text type="secondary">—</Text>
+          <Text type="secondary">-</Text>
         ),
     },
     {
@@ -294,7 +294,7 @@ export function NodesPage() {
         r.running_job_ids.length > 0 ? (
           <Text strong>{r.running_job_ids.length}</Text>
         ) : (
-          <Text type="secondary">—</Text>
+          <Text type="secondary">-</Text>
         ),
     },
     {
@@ -308,7 +308,7 @@ export function NodesPage() {
             <Text>{formatDateTime(r.last_seen_at)}</Text>
           </Tooltip>
         ) : (
-          <Text type="secondary">—</Text>
+          <Text type="secondary">-</Text>
         ),
     },
     {
@@ -317,7 +317,7 @@ export function NodesPage() {
       key: 'version',
       width: 110,
       ellipsis: true,
-      render: (v: string | null) => (v ? <Text>{v}</Text> : <Text type="secondary">—</Text>),
+      render: (v: string | null) => (v ? <Text>{v}</Text> : <Text type="secondary">-</Text>),
     },
     {
       title: t('common.actions'),
