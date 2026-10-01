@@ -266,3 +266,51 @@ export const AiManifestSchema = z.strictObject({
   duration_ms: z.int().nonnegative(),
 });
 export type AiManifest = z.infer<typeof AiManifestSchema>;
+
+// ---------------------------------------------------------------------------------------------
+// scan.ai trace – lưu mọi lần gọi Ollama để làm dataset huấn luyện
+// ---------------------------------------------------------------------------------------------
+
+export const AI_TRACE_PATH = 'ai-trace.json';
+export const AI_TRACE_SCHEMA = 'ag.scan.ai-trace/v1';
+
+const AiTraceCallImageSchema = z.strictObject({
+  /** Tên input keyframe, ví dụ `artifact:keyframes/0003.jpg`. */
+  input: z.string(),
+  t_ms: z.int().nonnegative(),
+});
+
+const AiTraceMessageSchema = z.strictObject({
+  role: z.enum(['system', 'user', 'assistant']),
+  content: z.string(),
+  /** Ảnh tham chiếu theo tên input; KHÔNG dùng base64. */
+  images: z.array(AiTraceCallImageSchema),
+});
+
+const AiTraceCallSchema = z.strictObject({
+  step: z.enum(['notes', 'summary']),
+  /** Chỉ số nhóm keyframe (0-based) cho bước notes; null cho bước summary. */
+  group: z.int().nonnegative().nullable(),
+  /** Lần gọi (1-based); notes luôn là 1; summary tăng theo repair_attempts. */
+  attempt: z.int().min(1),
+  started_at: z.string(),
+  messages: z.array(AiTraceMessageSchema),
+  options: z.record(z.string(), z.unknown()),
+  response: z.string().nullable(),
+  error: z.string().nullable(),
+  accepted: z.boolean(),
+  done_reason: z.string().nullable(),
+  prompt_eval_count: z.int().nonnegative().nullable(),
+  eval_count: z.int().nonnegative().nullable(),
+  total_duration_ms: z.number().nonnegative().nullable(),
+});
+
+export const AiTraceSchema = z.strictObject({
+  schema: z.literal(AI_TRACE_SCHEMA),
+  asset_id: z.uuid(),
+  model: z.string(),
+  prompt_version: z.string(),
+  calls: z.array(AiTraceCallSchema),
+});
+
+export type AiTrace = z.infer<typeof AiTraceSchema>;
