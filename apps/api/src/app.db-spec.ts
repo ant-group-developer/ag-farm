@@ -352,6 +352,9 @@ describe('ag-farm DB integration', () => {
     expect(listRes.body.data.jobs).toHaveLength(1);
     expect(listRes.body.data.jobs[0].id).toBe(jobId);
     expect(listRes.body.data.jobs[0].status).toBe('completed');
+    // The 50% "extracting" sent in step 5 does not outlive the job
+    expect(listRes.body.data.jobs[0].progress_percent).toBe(100);
+    expect(listRes.body.data.jobs[0].progress_stage).toBeNull();
 
     // 8. Ack
     const ackRes = await request(app.getHttpServer())

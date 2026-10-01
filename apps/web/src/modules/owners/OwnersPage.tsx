@@ -26,7 +26,7 @@ import type { CreateOwnerRequest, OwnerSortBy, OwnerView, PatchOwnerRequest, Sor
 import { JOB_TYPES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
-import { Plus } from 'lucide-react';
+import { Pencil, Plus } from 'lucide-react';
 
 const { Text } = Typography;
 
@@ -150,6 +150,8 @@ export function OwnersPage() {
         <Tooltip title={t('common.edit')}>
           <Button
             size="small"
+            icon={<Pencil size={14} />}
+            aria-label={t('common.edit')}
             onClick={() => {
               setEditOwner(r);
               editForm.setFieldsValue({
@@ -157,9 +159,7 @@ export function OwnersPage() {
                 allowed_types: r.allowed_types,
               });
             }}
-          >
-            {t('common.edit')}
-          </Button>
+          />
         </Tooltip>
       ),
     },

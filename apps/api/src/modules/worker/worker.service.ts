@@ -311,6 +311,9 @@ export class WorkerService {
     await this.updateOwnLease(node, jobId, req.lease_token, {
       status: 'completed',
       result: req.result as FarmJobEntity['result'],
+      // The last progress a worker sent (often an early stage, progress is throttled) must not outlive the job.
+      progressPercent: 100,
+      progressStage: null,
       finishedAt: now,
       leaseToken: null,
       leaseExpiresAt: null,

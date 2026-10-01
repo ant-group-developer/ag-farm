@@ -41,7 +41,7 @@ import type { JobSortBy, JobStatus, JobType, JobView, SortOrder } from '../../ty
 import { JOB_TYPES, TERMINAL_JOB_STATUSES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown } from 'lucide-react';
+import { Ban, ChevronDown, Eye, Pause, Play, RotateCcw } from 'lucide-react';
 
 const { Text } = Typography;
 
@@ -323,7 +323,7 @@ export function JobsPage() {
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 160,
+      width: 120,
       fixed: 'right' as const,
       render: (_: unknown, r: JobView) => {
         const canRetry = r.status === 'failed' || r.status === 'cancelled';
@@ -332,9 +332,9 @@ export function JobsPage() {
         const canResume = r.status === 'paused';
         return (
           <Space size={4}>
-            <Button size="small" onClick={() => setSelectedJobId(r.id)}>
-              {t('jobs.details')}
-            </Button>
+            <Tooltip title={t('jobs.details')}>
+              <Button size="small" icon={<Eye size={14} />} aria-label={t('jobs.details')} onClick={() => setSelectedJobId(r.id)} />
+            </Tooltip>
             {canRetry && (
               <Popconfirm
                 title={t('jobs.retryConfirm')}
@@ -342,9 +342,9 @@ export function JobsPage() {
                 okText={t('jobs.retry')}
                 cancelText={t('common.cancel')}
               >
-                <Button size="small" type="primary">
-                  {t('jobs.retry')}
-                </Button>
+                <Tooltip title={t('jobs.retry')}>
+                  <Button size="small" type="primary" icon={<RotateCcw size={14} />} aria-label={t('jobs.retry')} />
+                </Tooltip>
               </Popconfirm>
             )}
             {canPause && (
@@ -354,7 +354,9 @@ export function JobsPage() {
                 okText={t('jobs.pause')}
                 cancelText={t('common.cancel')}
               >
-                <Button size="small">{t('jobs.pause')}</Button>
+                <Tooltip title={t('jobs.pause')}>
+                  <Button size="small" icon={<Pause size={14} />} aria-label={t('jobs.pause')} />
+                </Tooltip>
               </Popconfirm>
             )}
             {canResume && (
@@ -364,7 +366,9 @@ export function JobsPage() {
                 okText={t('jobs.resume')}
                 cancelText={t('common.cancel')}
               >
-                <Button size="small">{t('jobs.resume')}</Button>
+                <Tooltip title={t('jobs.resume')}>
+                  <Button size="small" icon={<Play size={14} />} aria-label={t('jobs.resume')} />
+                </Tooltip>
               </Popconfirm>
             )}
             {canCancel && (
@@ -375,9 +379,9 @@ export function JobsPage() {
                 cancelText={t('common.no')}
                 okButtonProps={{ danger: true }}
               >
-                <Button size="small" danger>
-                  {t('jobs.cancel')}
-                </Button>
+                <Tooltip title={t('jobs.cancel')}>
+                  <Button size="small" danger icon={<Ban size={14} />} aria-label={t('jobs.cancel')} />
+                </Tooltip>
               </Popconfirm>
             )}
           </Space>

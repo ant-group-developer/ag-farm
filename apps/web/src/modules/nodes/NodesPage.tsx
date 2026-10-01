@@ -34,7 +34,7 @@ import type { JobType, NodeSortBy, NodeView, SortOrder } from '../../types/api';
 import { JOB_TYPES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, KeyRound, Plus, TerminalSquare } from 'lucide-react';
+import { ChevronDown, KeyRound, Pencil, Plus, TerminalSquare, Trash2 } from 'lucide-react';
 import { EnrollModal } from './EnrollModal';
 
 const { Text } = Typography;
@@ -250,13 +250,15 @@ export function NodesPage() {
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 120,
+      width: 90,
       fixed: 'right' as const,
       render: (_: unknown, r: NodeView) => (
         <Space size={4}>
           <Tooltip title={t('common.edit')}>
             <Button
               size="small"
+              icon={<Pencil size={14} />}
+              aria-label={t('common.edit')}
               onClick={() => {
                 setEditNode(r);
                 editForm.setFieldsValue({
@@ -265,9 +267,7 @@ export function NodesPage() {
                   allowed_kinds: r.allowed_kinds ?? undefined,
                 });
               }}
-            >
-              {t('common.edit')}
-            </Button>
+            />
           </Tooltip>
           <Popconfirm
             title={t('nodes.deleteConfirm')}
@@ -278,9 +278,7 @@ export function NodesPage() {
             okButtonProps={{ danger: true }}
           >
             <Tooltip title={t('common.delete')}>
-              <Button size="small" danger>
-                {t('common.delete')}
-              </Button>
+              <Button size="small" danger icon={<Trash2 size={14} />} aria-label={t('common.delete')} />
             </Tooltip>
           </Popconfirm>
         </Space>
