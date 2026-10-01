@@ -1,9 +1,10 @@
 name: Deploy development
 
+# Mọi thay đổi vào nhánh dev (merge PR) deploy lên VPS dev; main chỉ lên prod qua deploy.prod.yml.
 on:
   push:
     branches:
-      - main
+      - dev
   workflow_dispatch:
 
 # Không huỷ deploy đang chạy: ngắt SSH giữa chừng để lại container dở dang.
@@ -17,12 +18,13 @@ jobs:
 
   deploy:
     needs: test
+    if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     env:
       VPS_HOST: ${{ secrets.VPS_HOST_DEV }}
       VPS_USER: ${{ secrets.VPS_USER_DEV }}
       VPS_PORT: ${{ secrets.VPS_PORT_DEV || '22' }}
-      APP_PATH: ${{ secrets.FARM_APP_PATH_DEV || '/www/wwwroot/dev/ag-farm' }}
+      APP_PATH: ${{ secrets.FARM_APP_PATH_DEV || '/www/wwwroot/dev/ag-harness-agent/ag-farm' }}
     steps:
       - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.9.0
@@ -37,7 +39,10 @@ jobs:
             set -e
             sudo git config --global --add safe.directory '$APP_PATH'
             cd '$APP_PATH'
-            sudo git pull --ff-only origin main
+            # Checkout trên VPS dev theo nhánh dev (lần đầu tự tạo nhánh dev từ origin/dev).
+            sudo git fetch origin dev
+            sudo git checkout dev
+            sudo git merge --ff-only origin/dev
             TAG=\$(sudo git rev-parse --short HEAD)
             sudo env TAG=\$TAG bash ./deploy.sh
           "
