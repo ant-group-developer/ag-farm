@@ -45,8 +45,8 @@ async function main() {
   );
 
   console.log(`\nOwner "${ownerId}" upserted.`);
-  console.log(`\nKhoá owner (chỉ hiện một lần):\n${key}`);
-  console.log(`\nDán vào .env của ag-go-api:\nFARM_OWNER_KEY="${key}"`);
+  console.log(`\nKhoa owner (chi hien mot lan):\n${key}`);
+  console.log(`\nDan vao .env cua ag-go-api:\nFARM_OWNER_KEY="${key}"`);
 
   await ds.destroy();
 }

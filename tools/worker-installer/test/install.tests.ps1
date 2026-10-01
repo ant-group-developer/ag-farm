@@ -9,10 +9,10 @@ $source = Get-Content -Raw -Encoding UTF8 (Join-Path $here '..\install.ps1')
 # Script phải parse được (chạy bằng `iwr | iex` nên lỗi cú pháp chỉ lộ ra trên máy worker)
 $tokens = $null; $errors = $null
 [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$errors) | Out-Null
-if ($errors.Count -gt 0) { throw "install.ps1 có lỗi cú pháp: $($errors[0].Message) (dòng $($errors[0].Extent.StartLineNumber))" }
+if ($errors.Count -gt 0) { throw "install.ps1 co loi cu phap: $($errors[0].Message) (dong $($errors[0].Extent.StartLineNumber))" }
 $uninstall = Get-Content -Raw -Encoding UTF8 (Join-Path $here '..\uninstall.ps1')
 [System.Management.Automation.Language.Parser]::ParseInput($uninstall, [ref]$tokens, [ref]$errors) | Out-Null
-if ($errors.Count -gt 0) { throw "uninstall.ps1 có lỗi cú pháp: $($errors[0].Message)" }
+if ($errors.Count -gt 0) { throw "uninstall.ps1 co loi cu phap: $($errors[0].Message)" }
 
 Invoke-Expression $source
 
@@ -72,5 +72,5 @@ if ($OutDir) {
 }
 Remove-Item -Recurse -Force -LiteralPath $tmp
 
-if ($failures -gt 0) { Write-Host "$failures test lỗi" -ForegroundColor Red; exit 1 }
-Write-Host 'Tất cả test install.ps1 đều qua' -ForegroundColor Green
+if ($failures -gt 0) { Write-Host "$failures test loi" -ForegroundColor Red; exit 1 }
+Write-Host 'Tat ca test install.ps1 deu qua' -ForegroundColor Green

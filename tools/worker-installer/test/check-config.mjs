@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const sdk = require('../../../packages/worker-sdk/dist/index.js');
 const dir = process.argv[2];
-if (!dir) throw new Error('Thiếu thư mục');
+if (!dir) throw new Error('Thieu thu muc');
 
 const cfg = sdk.loadConfig(join(dir, 'config.yaml'));
 const machine = sdk.loadMachineConfig(join(dir, 'machine.yaml'));
@@ -25,4 +25,4 @@ expect(cfg.cache.max_gb === 50, 'cache.max_gb is a number');
 expect(cfg.extra.unload_ollama_before_tts === true, 'boolean extra stays boolean');
 expect(machine.cpu_slots === 4 && machine.gpu_slots === 1, 'machine slots');
 expect(machine.reserve_interactive.cpu === 1 && machine.reserve_interactive.gpu === 0, 'reserve_interactive');
-console.log('config do install.ps1 sinh ra hợp lệ với worker-sdk');
+console.log('config do install.ps1 sinh ra hop le voi worker-sdk');

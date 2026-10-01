@@ -61,7 +61,7 @@ function ConvertTo-AgYamlString {
 function New-AgMachineYaml {
   param($Plan)
   return @(
-    '# Slot dùng chung cho mọi worker trên máy này (install.ps1 tạo; -ReconfigureSlots để tính lại)',
+    '# Slot dung chung cho moi worker tren may nay (install.ps1 tao; -ReconfigureSlots de tinh lai)',
     "cpu_slots: $($Plan.cpu_slots)",
     "gpu_slots: $($Plan.gpu_slots)",
     'reserve_interactive:',
@@ -73,7 +73,7 @@ function New-AgMachineYaml {
 function New-AgConfigYaml {
   param([string]$Hub, $Node, [string]$RoleDir, [string]$CacheDir, [int]$CacheGb, [string]$MachineFile, [hashtable]$Extra)
   $lines = @(
-    '# Cấu hình worker (install.ps1 tạo). Token chỉ hiện ở đây, đừng chia sẻ file này.',
+    '# Cau hinh worker (install.ps1 tao). Token chi hien o day, dung chia se file nay.',
     "hub_url: $(ConvertTo-AgYamlString $Hub)",
     "token: $(ConvertTo-AgYamlString $Node.token)",
     "name: $(ConvertTo-AgYamlString $Node.name)",
@@ -146,7 +146,7 @@ function Remove-AgLegacyService {
   param([string]$Name)
   & sc.exe query $Name *> $null
   if ($LASTEXITCODE -eq 0) {
-    Write-Host "Gỡ dịch vụ cũ $Name (NSSM)"
+    Write-Host "Go dich vu cu $Name (NSSM)"
     & sc.exe stop $Name *> $null
     Start-Sleep -Seconds 3
     & sc.exe delete $Name *> $null
@@ -190,8 +190,8 @@ function Install-AgOllama {
   param([string]$InstallDir, [string[]]$Models, [switch]$Yes)
   $exe = Find-AgOllama
   if (-not $exe) {
-    if (-not (Confirm-AgStep 'Máy chưa có Ollama (cần cho quét video). Cài Ollama bản chính thức?' -Yes:$Yes)) {
-      throw 'Cần Ollama cho vai trò quét. Cài từ https://ollama.com/download rồi chạy lại lệnh.'
+    if (-not (Confirm-AgStep 'May chua co Ollama (can cho quet video). Cai Ollama ban chinh thuc?' -Yes:$Yes)) {
+      throw 'Can Ollama cho vai tro quet. Cai tu https://ollama.com/download roi chay lai lenh.'
     }
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if ($winget) {
@@ -202,7 +202,7 @@ function Install-AgOllama {
       Start-Process -FilePath $setup -ArgumentList '/VERYSILENT', '/NORESTART', '/SUPPRESSMSGBOXES' -Wait
     }
     $exe = Find-AgOllama
-    if (-not $exe) { throw 'Cài Ollama xong nhưng không tìm thấy ollama.exe. Mở PowerShell mới rồi chạy lại lệnh.' }
+    if (-not $exe) { throw 'Cai Ollama xong nhung khong tim thay ollama.exe. Mo PowerShell moi roi chay lai lenh.' }
   }
 
   # Dùng lại model đã tải của người đang cài nếu có, khỏi tải lại vài GB.
@@ -217,7 +217,7 @@ function Install-AgOllama {
   $serveCmd = Join-Path $ollamaDir 'ollama-serve.cmd'
   $cmdText = @(
     '@echo off',
-    'rem Ollama cho ag-scan-worker, chạy bằng task ag-farm-ollama (install.ps1 tạo)',
+    'rem Ollama cho ag-scan-worker, chay bang task ag-farm-ollama (install.ps1 tao)',
     "set OLLAMA_MODELS=$modelsDir",
     'set OLLAMA_HOST=127.0.0.1:11434',
     ':loop',
@@ -232,26 +232,26 @@ function Install-AgOllama {
   Stop-AgRole -TaskName 'ag-farm-ollama' -AppDir $ollamaDir
   Register-AgTask -TaskName 'ag-farm-ollama' -CmdPath $serveCmd -WorkDir $ollamaDir -Priority 6
   if (-not (Wait-AgHttp -Url 'http://127.0.0.1:11434/api/version' -Seconds 60)) {
-    throw "Ollama không lên sau 60 giây. Xem $ollamaDir\ollama.log"
+    throw "Ollama khong len sau 60 giay. Xem $ollamaDir\ollama.log"
   }
 
   $env:OLLAMA_HOST = '127.0.0.1:11434'
   foreach ($m in $Models) {
-    Write-Host "Tải model $m (lần đầu có thể mất vài phút)"
+    Write-Host "Tai model $m (lan dau co the mat vai phut)"
     & $exe pull $m
-    if ($LASTEXITCODE -ne 0) { throw "ollama pull $m lỗi" }
+    if ($LASTEXITCODE -ne 0) { throw "ollama pull $m loi" }
   }
 }
 
 function Install-AgPackage {
   param([string]$Hub, $Latest, [string]$PackageName, [string]$RoleDir)
   $info = $Latest.packages.$PackageName
-  if (-not $info) { throw "Hub chưa có gói $PackageName (thiếu trong /dist/latest.json)" }
+  if (-not $info) { throw "Hub chua co goi $PackageName (thieu trong /dist/latest.json)" }
   $zip = Join-Path $env:TEMP $info.file
-  Write-Host "Tải $($info.file) ($([Math]::Round($info.size_bytes / 1MB)) MB)"
+  Write-Host "Tai $($info.file) ($([Math]::Round($info.size_bytes / 1MB)) MB)"
   Invoke-WebRequest -Uri "$Hub/dist/$($info.file)" -OutFile $zip -UseBasicParsing
   $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLower()
-  if ($hash -ne $info.sha256) { throw "Gói $($info.file) tải về bị hỏng (sha256 không khớp)" }
+  if ($hash -ne $info.sha256) { throw "Goi $($info.file) tai ve bi hong (sha256 khong khop)" }
 
   $staging = Join-Path $RoleDir 'staging'
   Remove-Item -Recurse -Force -LiteralPath $staging -ErrorAction SilentlyContinue
@@ -290,20 +290,20 @@ function Install-AgWorker {
   )
   $ErrorActionPreference = 'Stop'
   try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
-  $ProgressPreference = 'SilentlyContinue'  # thanh tiến độ của iwr làm tải chậm hàng chục lần trên PowerShell 5.1
+  $ProgressPreference = 'SilentlyContinue'  # thanh tien do cua iwr lam tai cham hang chuc lan tren PowerShell 5.1
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
   $Hub = $Hub.TrimEnd('/')
 
-  if (-not (Test-AgAdmin)) { throw 'Hãy mở PowerShell bằng "Run as Administrator" rồi chạy lại lệnh.' }
+  if (-not (Test-AgAdmin)) { throw 'Hay mo PowerShell bang "Run as Administrator" roi chay lai lenh.' }
 
   $machineInfo = Get-AgMachineInfo
   $gpuText = ($machineInfo.gpus | ForEach-Object { "$($_.name) $([Math]::Round($_.vram_mb / 1024)) GB" }) -join ', '
-  if (-not $gpuText) { $gpuText = 'không có GPU NVIDIA' }
-  Write-Host "Máy: $($machineInfo.cpu_cores) luồng CPU, $([Math]::Round($machineInfo.ram_mb / 1024)) GB RAM, $gpuText"
+  if (-not $gpuText) { $gpuText = 'khong co GPU NVIDIA' }
+  Write-Host "May: $($machineInfo.cpu_cores) luong CPU, $([Math]::Round($machineInfo.ram_mb / 1024)) GB RAM, $gpuText"
 
   $drive = (Split-Path -Qualifier $InstallDir).TrimEnd(':')
   $free = (Get-PSDrive -Name $drive).Free
-  if ($free -lt 20GB) { throw "Ổ $drive còn $([Math]::Round($free / 1GB)) GB, cần ít nhất 20 GB" }
+  if ($free -lt 20GB) { throw "O $drive con $([Math]::Round($free / 1GB)) GB, can it nhat 20 GB" }
   New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
   # 1. Vai trò và token: mã mới (cài / cài lại) hoặc config đã có (cập nhật)
@@ -315,7 +315,7 @@ function Install-AgWorker {
     $enrolled = Invoke-AgApi -Method Post -Url "$Hub/v1/enroll" -Body $body
     foreach ($n in $enrolled.nodes) { $roles += $n.role; $nodes[$n.role] = $n }
     $hubModels = @($enrolled.ollama_models)
-    Write-Host "Đã đăng ký máy $($enrolled.machine): $(($enrolled.nodes | ForEach-Object { $_.name }) -join ', ')"
+    Write-Host "Da dang ky may $($enrolled.machine): $(($enrolled.nodes | ForEach-Object { $_.name }) -join ', ')"
   } else {
     foreach ($r in @('scan', 'render')) {
       $cfg = Join-Path $InstallDir "$r\config.yaml"
@@ -324,9 +324,9 @@ function Install-AgWorker {
         $nodes[$r] = [pscustomobject]@{ role = $r; name = (Read-AgConfigValue $cfg 'name'); token = (Read-AgConfigValue $cfg 'token'); kinds = @() }
       }
     }
-    if ($roles.Count -eq 0) { throw 'Máy chưa cài worker: cần -Code (lấy ở trang Máy của web farm).' }
+    if ($roles.Count -eq 0) { throw 'May chua cai worker: can -Code (lay o trang May cua web farm).' }
     try { $hubModels = @((Invoke-AgApi -Method Get -Url "$Hub/v1/worker/me" -Token $nodes[$roles[0]].token).ollama_models) } catch { }
-    Write-Host "Cập nhật vai trò: $($roles -join ', ')"
+    Write-Host "Cap nhat vai tro: $($roles -join ', ')"
   }
 
   # 2. Slot dùng chung của máy
@@ -335,13 +335,13 @@ function Install-AgWorker {
     New-Item -ItemType Directory -Force -Path (Split-Path $machineFile) | Out-Null
     $plan = Get-AgSlotPlan -Cores $machineInfo.cpu_cores -Gpus $machineInfo.gpus -Roles $roles
     [IO.File]::WriteAllText($machineFile, (New-AgMachineYaml $plan), (New-Object Text.UTF8Encoding($false)))
-    Write-Host "Slot: $($plan.cpu_slots) CPU, $($plan.gpu_slots) GPU (giữ $($plan.reserve_cpu) CPU cho render)"
+    Write-Host "Slot: $($plan.cpu_slots) CPU, $($plan.gpu_slots) GPU (giu $($plan.reserve_cpu) CPU cho render)"
   }
 
   # 3. Worker chạy tay từ trước (ngoài thư mục cài) sẽ tranh việc với bản mới
   $strays = Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
     Where-Object { $_.CommandLine -and $_.CommandLine -match 'worker\.mjs' -and -not $_.CommandLine.Contains($InstallDir) }
-  if ($strays -and (Confirm-AgStep "Có $(@($strays).Count) worker khác đang chạy ngoài $InstallDir. Dừng chúng?" -Yes:$Yes)) {
+  if ($strays -and (Confirm-AgStep "Co $(@($strays).Count) worker khac dang chay ngoai $InstallDir. Dung cac worker do?" -Yes:$Yes)) {
     foreach ($p in $strays) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
   }
 
@@ -359,7 +359,7 @@ function Install-AgWorker {
     Remove-AgLegacyService -Name $package
     Stop-AgRole -TaskName $taskName -AppDir (Join-Path $roleDir 'app')
     $version = Install-AgPackage -Hub $Hub -Latest $latest -PackageName $package -RoleDir $roleDir
-    Write-Host "$package $version đã cài vào $roleDir\app"
+    Write-Host "$package $version da cai vao $roleDir\app"
 
     $extra = @{}
     if ($role -eq 'scan') {
@@ -373,7 +373,7 @@ function Install-AgWorker {
       $extra['encoder'] = 'auto'
       $extra['ollama_url'] = 'http://127.0.0.1:11434'
       $extra['unload_ollama_before_tts'] = $true
-      if (-not (Test-Path -LiteralPath (Join-Path $env:WINDIR 'Fonts\arial.ttf'))) { Write-Warning 'Không thấy font Arial: job render có chữ sẽ lỗi fonts_missing' }
+      if (-not (Test-Path -LiteralPath (Join-Path $env:WINDIR 'Fonts\arial.ttf'))) { Write-Warning 'Khong thay font Arial: job render co chu se loi fonts_missing' }
       if ($WithTts) {
         $venv = Join-Path $InstallDir 'venv'
         & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $roleDir 'app\deploy\setup-python.ps1') -Venv $venv
@@ -401,8 +401,8 @@ function Install-AgWorker {
       Write-Host "$($node.name): Online" -ForegroundColor Green
     } else {
       $allOnline = $false
-      Write-Warning "$($node.name) chưa gửi heartbeat sau 2 phút. Xem log: $InstallDir\$role\logs\worker.log"
+      Write-Warning "$($node.name) chua gui heartbeat sau 2 phut. Xem log: $InstallDir\$role\logs\worker.log"
     }
   }
-  if ($allOnline) { Write-Host 'Xong. Máy tự chạy lại worker khi khởi động hoặc khi worker lỗi.' -ForegroundColor Green }
+  if ($allOnline) { Write-Host 'Xong. May tu chay lai worker khi khoi dong hoac khi worker loi.' -ForegroundColor Green }
 }

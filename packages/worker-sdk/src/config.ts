@@ -10,7 +10,7 @@ import { JobTypeSchema } from '@ag-farm/protocol';
 
 // ---- Lịch chạy ----
 
-const DaySchema = z.int().min(0).max(6); // 0=Chủ nhật..6=Thứ 7
+const DaySchema = z.int().min(0).max(6); // 0=Chu nhat..6=Thu 7
 const TimeStringSchema = z.string().regex(/^\d{2}:\d{2}$/);
 
 export const ScheduleWindowSchema = z.strictObject({
@@ -69,7 +69,7 @@ export function loadConfig(filePath: string): WorkerConfig {
   const cfg = WorkerConfigSchema.parse(parsed);
 
   if (!cfg.token && !cfg.token_file) {
-    throw new Error('Cấu hình thiếu: phải có token hoặc token_file');
+    throw new Error('Cau hinh thieu: phai co token hoac token_file');
   }
   if (!cfg.machine_file) {
     (cfg as Record<string, unknown>)['machine_file'] = DEFAULT_MACHINE_FILE;
@@ -81,7 +81,7 @@ export function loadConfig(filePath: string): WorkerConfig {
 export function resolveToken(config: WorkerConfig): string {
   if (config.token) return config.token;
   if (config.token_file) return readFileSync(config.token_file, 'utf8').trim();
-  throw new Error('Không tìm thấy token');
+  throw new Error('Khong tim thay token');
 }
 
 // ---- Kiểm lịch chạy ----

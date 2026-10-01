@@ -66,7 +66,7 @@ export function finishRelease(o) {
     mkdirSync(join(out, 'runtime'), { recursive: true });
     copyFileSync(process.execPath, join(out, 'runtime', 'node.exe'));
   } else {
-    console.warn('Không build trên Windows: gói không có runtime/node.exe, install.ps1 sẽ không chạy được gói này.');
+    console.warn('Khong build tren Windows: goi khong co runtime/node.exe, install.ps1 se khong chay duoc goi nay.');
   }
 
   // 3. Supervisor. cmd.exe cần CRLF (nhảy nhãn `goto` lỗi với LF).
@@ -80,7 +80,7 @@ export function finishRelease(o) {
   execFileSync(tar, ['-a', '-c', '-f', `${o.name}.zip`, o.name], { cwd: o.releaseRoot, stdio: 'inherit' });
   const sha256 = createHash('sha256').update(readFileSync(zip)).digest('hex');
   const size = statSync(zip).size;
-  console.log(`Đã tạo ${zip} (${(size / 1024 / 1024).toFixed(1)} MB, sha256 ${sha256})`);
+  console.log(`Da tao ${zip} (${(size / 1024 / 1024).toFixed(1)} MB, sha256 ${sha256})`);
 
   // 5. Phát hành lên farm
   if (o.publishDir) {
@@ -97,7 +97,7 @@ export function finishRelease(o) {
       built_at: new Date().toISOString(),
     };
     writeFileSync(latestPath, `${JSON.stringify(latest, null, 2)}\n`);
-    console.log(`Đã phát hành ${o.name} vào ${o.publishDir}`);
+    console.log(`Da phat hanh ${o.name} vao ${o.publishDir}`);
   }
   return { zip, sha256, size };
 }

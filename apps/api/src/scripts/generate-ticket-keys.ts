@@ -19,6 +19,6 @@ console.log('FARM_TICKET_PRIVATE_KEY (PEM):');
 console.log(privateKey);
 console.log('FARM_TICKET_PUBLIC_KEY (PEM):');
 console.log(publicKey);
-console.log('--- Dán vào .env (escaped) ---');
+console.log('--- Dan vao .env (escaped) ---');
 console.log(`FARM_TICKET_PRIVATE_KEY="${escape(privateKey)}"`);
 console.log(`FARM_TICKET_PUBLIC_KEY="${escape(publicKey)}"`);

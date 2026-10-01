@@ -8,13 +8,13 @@ function Uninstall-AgWorker {
   $ErrorActionPreference = 'Stop'
   $id = [Security.Principal.WindowsIdentity]::GetCurrent()
   if (-not (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw 'Hãy mở PowerShell bằng "Run as Administrator" rồi chạy lại lệnh.'
+    throw 'Hay mo PowerShell bang "Run as Administrator" roi chay lai lenh.'
   }
   foreach ($task in @('ag-farm-scan', 'ag-farm-render', 'ag-farm-ollama')) {
     if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) {
       Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
       Unregister-ScheduledTask -TaskName $task -Confirm:$false
-      Write-Host "Đã gỡ task $task"
+      Write-Host "Da go task $task"
     }
   }
   $procs = Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe' OR Name='ollama.exe'" |
@@ -22,7 +22,7 @@ function Uninstall-AgWorker {
   foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
   if ($RemoveFiles) {
     Remove-Item -Recurse -Force -LiteralPath $InstallDir -ErrorAction SilentlyContinue
-    Write-Host "Đã xoá $InstallDir"
+    Write-Host "Da xoa $InstallDir"
   }
   Write-Host 'Xong.' -ForegroundColor Green
 }
