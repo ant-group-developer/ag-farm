@@ -289,7 +289,7 @@ export function JobsPage() {
             <Text style={{ fontSize: 11 }}>{name}</Text>
           </Tooltip>
         ) : (
-          <Text type="secondary">—</Text>
+          <Text type="secondary">-</Text>
         );
       },
     },
@@ -299,7 +299,7 @@ export function JobsPage() {
       width: 130,
       ellipsis: true,
       render: (_: unknown, r: JobView) => {
-        if (r.progress_percent == null && !r.progress_stage) return <Text type="secondary">—</Text>;
+        if (r.progress_percent == null && !r.progress_stage) return <Text type="secondary">-</Text>;
         const pct = r.progress_percent ?? 0;
         return (
           <Tooltip title={`${Math.round(pct)}% ${r.progress_stage ?? ''}`}>
@@ -589,18 +589,18 @@ function JobDetailSection({ job }: { job: JobView }) {
     [t('jobs.status'), statusLabel(job.status)],
     [t('jobs.priority'), String(job.priority)],
     ['Correlation ID', job.correlation_id],
-    ['Affinity key', job.affinity_key ?? '—'],
-    ['Group key', job.group_key ?? '—'],
+    ['Affinity key', job.affinity_key ?? '-'],
+    ['Group key', job.group_key ?? '-'],
     [t('jobs.attempts'), `${job.attempt_count}/${job.max_attempts}`],
-    [t('jobs.node'), job.node_name ?? job.node_id ?? '—'],
-    [t('jobs.progress'), job.progress_percent != null ? `${Math.round(job.progress_percent)}%` : '—'],
-    [t('jobs.stage'), job.progress_stage ?? '—'],
-    [t('jobs.notBeforeLabel'), job.not_before ?? '—'],
-    [t('jobs.leaseExpiresAtLabel'), job.lease_expires_at ?? '—'],
+    [t('jobs.node'), job.node_name ?? job.node_id ?? '-'],
+    [t('jobs.progress'), job.progress_percent != null ? `${Math.round(job.progress_percent)}%` : '-'],
+    [t('jobs.stage'), job.progress_stage ?? '-'],
+    [t('jobs.notBeforeLabel'), job.not_before ?? '-'],
+    [t('jobs.leaseExpiresAtLabel'), job.lease_expires_at ?? '-'],
     [t('common.createdAt'), job.created_at],
     [t('jobs.updatedAt'), job.updated_at],
-    [t('jobs.finishedAt'), job.finished_at ?? '—'],
-    [t('jobs.ackedAt'), job.acked_at ?? '—'],
+    [t('jobs.finishedAt'), job.finished_at ?? '-'],
+    [t('jobs.ackedAt'), job.acked_at ?? '-'],
   ];
 
   return (
