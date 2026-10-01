@@ -8,6 +8,7 @@ import {
   Button,
   Col,
   Dropdown,
+  Flex,
   Form,
   Input,
   Modal,
@@ -24,17 +25,28 @@ import {
 } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { parseAsInteger, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { createNode, deleteNode, listNodes, patchNode } from '../../api/admin';
 import { SecretModal } from '../../shared/components/SecretModal';
 import { SortDropdown } from '../../shared/components/SortDropdown';
 import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
-import type { JobType, NodeSortBy, NodeView, SortOrder } from '../../types/api';
+import type { JobType, NodeCapabilities, NodeSortBy, NodeView, SortOrder } from '../../types/api';
 import { JOB_TYPES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, KeyRound, Pencil, Plus, TerminalSquare, Trash2 } from 'lucide-react';
+import {
+  ChevronDown,
+  Cpu,
+  Gpu,
+  KeyRound,
+  MemoryStick,
+  Monitor,
+  Pencil,
+  Plus,
+  TerminalSquare,
+  Trash2,
+} from 'lucide-react';
 import { EnrollModal } from './EnrollModal';
 
 const { Text } = Typography;
@@ -45,29 +57,84 @@ const NODE_SORT_FIELDS: readonly { value: NodeSortBy; label: string }[] = [
   { value: 'lastSeenAt', label: 'Lần cuối thấy' },
 ];
 
-function CapabilitiesSummary({ node }: { node: NodeView }) {
-  const caps = node.capabilities;
-  if (!caps) return <Text type="secondary">—</Text>;
-  const parts: string[] = [];
-  parts.push(`${caps.os}`);
-  parts.push(`${caps.cpu_cores} CPU`);
-  parts.push(`${Math.round(caps.ram_mb / 1024)} GB RAM`);
-  if (caps.gpus.length > 0) {
-    for (const gpu of caps.gpus) {
-      parts.push(`${gpu.name} ${Math.round(gpu.vram_mb / 1024)}GB${gpu.nvenc ? ' NVENC' : ''}`);
-    }
-  }
-  if (caps.engines.ffmpeg) parts.push('ffmpeg');
-  if (caps.engines.ollama_models.length > 0) {
-    parts.push(`Ollama: ${caps.engines.ollama_models.join(', ')}`);
-  }
-  if (caps.engines.python) parts.push(`py${caps.engines.python}`);
+const OS_LABELS: Record<string, string> = { windows: 'Windows', linux: 'Linux', darwin: 'macOS' };
+
+const SPEC_ICON_STYLE = { flexShrink: 0, color: 'rgba(0, 0, 0, 0.45)' } as const;
+
+/** MB → GB: whole numbers from 10 GB up, one decimal below (8 GB VRAM vs 1.5 GB). */
+function formatGb(mb: number): string {
+  const gb = mb / 1024;
+  return String(gb >= 10 ? Math.round(gb) : Math.round(gb * 10) / 10);
+}
+
+function Spec({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
-    <Tooltip title={parts.join(' | ')}>
-      <Text ellipsis style={{ maxWidth: 280 }}>
-        {parts.join(' | ')}
-      </Text>
-    </Tooltip>
+    <Flex align="center" gap={6} style={{ minWidth: 0 }}>
+      {icon}
+      {children}
+    </Flex>
+  );
+}
+
+/** Machine specs on separate lines: OS · CPU · RAM, one line per GPU, then installed engines. */
+function NodeSpecs({ caps }: { caps: NodeCapabilities | null }) {
+  const { t } = useTranslation();
+  if (!caps) return <Text type="secondary">-</Text>;
+  const { ffmpeg, python, ollama_models: models } = caps.engines;
+  return (
+    <Flex vertical gap={4}>
+      <Flex wrap gap="4px 16px">
+        <Spec icon={<Monitor size={14} style={SPEC_ICON_STYLE} />}>
+          <Text>{OS_LABELS[caps.os] ?? caps.os}</Text>
+        </Spec>
+        <Spec icon={<Cpu size={14} style={SPEC_ICON_STYLE} />}>
+          <Text>{t('nodes.cores', { count: caps.cpu_cores })}</Text>
+        </Spec>
+        <Spec icon={<MemoryStick size={14} style={SPEC_ICON_STYLE} />}>
+          <Text>{formatGb(caps.ram_mb)} GB RAM</Text>
+        </Spec>
+      </Flex>
+      {caps.gpus.length > 0 ? (
+        caps.gpus.map((gpu, i) => (
+          <Spec key={`${gpu.name}-${i}`} icon={<Gpu size={14} style={SPEC_ICON_STYLE} />}>
+            <Text ellipsis={{ tooltip: gpu.name }} style={{ minWidth: 0 }}>
+              {gpu.name}
+            </Text>
+            <Text type="secondary" style={{ flexShrink: 0 }}>
+              {formatGb(gpu.vram_mb)} GB
+            </Text>
+            {gpu.nvenc && (
+              <Tag color="green" bordered={false} style={{ marginInlineEnd: 0, flexShrink: 0 }}>
+                NVENC
+              </Tag>
+            )}
+          </Spec>
+        ))
+      ) : (
+        <Spec icon={<Gpu size={14} style={SPEC_ICON_STYLE} />}>
+          <Text type="secondary">{t('nodes.noGpu')}</Text>
+        </Spec>
+      )}
+      {(ffmpeg || python || models.length > 0) && (
+        <Flex wrap gap={4}>
+          {ffmpeg && (
+            <Tooltip title={`ffmpeg ${ffmpeg}`}>
+              <Tag bordered={false} style={{ marginInlineEnd: 0 }}>ffmpeg</Tag>
+            </Tooltip>
+          )}
+          {python && (
+            <Tag bordered={false} style={{ marginInlineEnd: 0 }}>Python {python}</Tag>
+          )}
+          {models.length > 0 && (
+            <Tooltip title={models.join(', ')}>
+              <Tag bordered={false} color="purple" style={{ marginInlineEnd: 0 }}>
+                {t('nodes.ollamaModels', { count: models.length })}
+              </Tag>
+            </Tooltip>
+          )}
+        </Flex>
+      )}
+    </Flex>
   );
 }
 
@@ -136,8 +203,7 @@ export function NodesPage() {
     {
       title: t('nodes.connection'),
       key: 'online',
-      width: 90,
-      ellipsis: true,
+      width: 110,
       render: (_: unknown, r: NodeView) => (
         <Badge
           status={r.online ? 'success' : 'default'}
@@ -149,28 +215,26 @@ export function NodesPage() {
       title: t('nodes.name'),
       dataIndex: 'name',
       key: 'name',
-      width: 180,
-      ellipsis: true,
+      width: 200,
       render: (v: string, r: NodeView) => (
-        <Tooltip title={`${v}${r.machine ? ` (${r.machine})` : ''}`}>
-          <Space direction="vertical" size={0}>
-            <Text strong>{v}</Text>
-            <Text type="secondary" style={{ fontSize: 11 }}>{r.machine || '—'}</Text>
-          </Space>
-        </Tooltip>
+        <Flex vertical style={{ minWidth: 0 }}>
+          <Text strong ellipsis={{ tooltip: v }}>{v}</Text>
+          <Text type="secondary" ellipsis={{ tooltip: r.machine || undefined }}>
+            {r.machine || '-'}
+          </Text>
+        </Flex>
       ),
     },
     {
       title: t('nodes.enabled'),
       key: 'status',
       width: 110,
-      ellipsis: true,
       render: (_: unknown, r: NodeView) => (
         <Switch
           checked={r.status === 'active'}
           checkedChildren={t('nodes.active')}
           unCheckedChildren={t('nodes.off')}
-          loading={patchMut.isPending}
+          loading={patchMut.isPending && patchMut.variables?.id === r.id}
           onChange={(checked) =>
             patchMut.mutate({ id: r.id, body: { status: checked ? 'active' : 'disabled' } })
           }
@@ -180,20 +244,19 @@ export function NodesPage() {
     {
       title: t('common.jobTypes'),
       key: 'kinds',
-      width: 220,
-      ellipsis: true,
+      width: 200,
       render: (_: unknown, r: NodeView) => {
         const effective = r.allowed_kinds ?? r.kinds;
         const isRestricted = r.allowed_kinds !== null;
         return (
           <Tooltip title={isRestricted ? `${t('nodes.allowedKinds')}: ${effective.join(', ')}` : undefined}>
-            <Space wrap size={4}>
+            <Flex wrap gap={4}>
               {effective.map((k) => (
-                <Tag key={k} color={isRestricted ? 'orange' : 'blue'} style={{ fontSize: 11 }}>
+                <Tag key={k} color={isRestricted ? 'orange' : 'blue'} style={{ marginInlineEnd: 0 }}>
                   {k}
                 </Tag>
               ))}
-            </Space>
+            </Flex>
           </Tooltip>
         );
       },
@@ -201,34 +264,43 @@ export function NodesPage() {
     {
       title: t('nodes.capabilities'),
       key: 'caps',
-      ellipsis: true,
-      render: (_: unknown, r: NodeView) => <CapabilitiesSummary node={r} />,
+      width: 340,
+      render: (_: unknown, r: NodeView) => <NodeSpecs caps={r.capabilities} />,
     },
     {
       title: t('nodes.freeSlots'),
       key: 'slots',
-      width: 100,
-      ellipsis: true,
+      width: 140,
       render: (_: unknown, r: NodeView) =>
         r.free_slots ? (
-          <Text>CPU {r.free_slots.cpu} / GPU {r.free_slots.gpu}</Text>
+          <Flex vertical>
+            <Text>
+              <Text type="secondary">CPU</Text> {r.free_slots.cpu}
+            </Text>
+            <Text>
+              <Text type="secondary">GPU</Text> {r.free_slots.gpu}
+            </Text>
+          </Flex>
         ) : (
-          <Text type="secondary">—</Text>
+          <Text type="secondary">-</Text>
         ),
     },
     {
       title: t('nodes.running'),
       key: 'running',
-      width: 110,
-      ellipsis: true,
-      render: (_: unknown, r: NodeView) => (
-        <Text>{r.running_job_ids.length > 0 ? r.running_job_ids.length : '—'}</Text>
-      ),
+      width: 130,
+      align: 'center',
+      render: (_: unknown, r: NodeView) =>
+        r.running_job_ids.length > 0 ? (
+          <Text strong>{r.running_job_ids.length}</Text>
+        ) : (
+          <Text type="secondary">-</Text>
+        ),
     },
     {
       title: t('nodes.lastSeen'),
       key: 'last_seen',
-      width: 160,
+      width: 170,
       ellipsis: true,
       render: (_: unknown, r: NodeView) =>
         r.last_seen_at ? (
@@ -236,21 +308,21 @@ export function NodesPage() {
             <Text>{formatDateTime(r.last_seen_at)}</Text>
           </Tooltip>
         ) : (
-          <Text type="secondary">—</Text>
+          <Text type="secondary">-</Text>
         ),
     },
     {
       title: t('nodes.version'),
       dataIndex: 'agent_version',
       key: 'version',
-      width: 90,
+      width: 110,
       ellipsis: true,
-      render: (v: string | null) => <Text style={{ fontSize: 11 }}>{v ?? '—'}</Text>,
+      render: (v: string | null) => (v ? <Text>{v}</Text> : <Text type="secondary">-</Text>),
     },
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 90,
+      width: 100,
       fixed: 'right' as const,
       render: (_: unknown, r: NodeView) => (
         <Space size={4}>
@@ -285,6 +357,8 @@ export function NodesPage() {
       ),
     },
   ];
+  // Every column has a fixed width, so the table scrolls at exactly their sum.
+  const tableWidth = columns.reduce((sum, c) => sum + Number(c.width ?? 0), 0);
 
   const pagination: TablePaginationConfig = {
     current: query.page,
@@ -355,7 +429,8 @@ export function NodesPage() {
         loading={nodesQuery.isLoading}
         pagination={pagination}
         sticky={PAGE_TABLE_STICKY}
-        scroll={{ x: 1200 }}
+        tableLayout="fixed"
+        scroll={{ x: tableWidth }}
       />
 
       {/* Create modal */}
