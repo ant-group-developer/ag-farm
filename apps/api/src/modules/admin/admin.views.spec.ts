@@ -64,7 +64,6 @@ describe('admin views', () => {
       keyHash: 'b'.repeat(64),
       signUrl: 'http://api/farm/sign',
       allowedTypes: ['studio.tts'],
-      defaultLane: 'interactive',
       createdAt: at,
       updatedAt: at,
     } as FarmOwnerEntity;
@@ -73,7 +72,6 @@ describe('admin views', () => {
       id: 'studio',
       sign_url: 'http://api/farm/sign',
       allowed_types: ['studio.tts'],
-      default_lane: 'interactive',
       created_at: at.toISOString(),
       updated_at: at.toISOString(),
     });

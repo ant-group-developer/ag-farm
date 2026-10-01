@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { JobStatusSchema, JobTypeSchema, LaneSchema } from '@ag-farm/protocol';
+import { JobStatusSchema, JobTypeSchema } from '@ag-farm/protocol';
 
 export const CreateNodeSchema = z.strictObject({
   name: z.string().min(1).max(200),
@@ -21,14 +21,12 @@ export const CreateOwnerSchema = z.strictObject({
   id: z.string().min(1).max(40).regex(/^[a-z][a-z0-9-]*$/),
   sign_url: z.string().url(),
   allowed_types: z.array(JobTypeSchema).min(1),
-  default_lane: LaneSchema.default('batch'),
 });
 export type CreateOwnerDto = z.infer<typeof CreateOwnerSchema>;
 
 export const PatchOwnerSchema = z.strictObject({
   sign_url: z.string().url().optional(),
   allowed_types: z.array(JobTypeSchema).min(1).optional(),
-  default_lane: LaneSchema.optional(),
 });
 export type PatchOwnerDto = z.infer<typeof PatchOwnerSchema>;
 

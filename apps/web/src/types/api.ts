@@ -166,7 +166,6 @@ export interface OwnerView {
   id: string;
   sign_url: string;
   allowed_types: JobType[];
-  default_lane: Lane;
   created_at: string;
   updated_at: string;
 }
@@ -188,13 +187,11 @@ export interface CreateOwnerRequest {
   id: string;
   sign_url: string;
   allowed_types: JobType[];
-  default_lane?: Lane;
 }
 
 export interface PatchOwnerRequest {
   sign_url?: string;
   allowed_types?: JobType[];
-  default_lane?: Lane;
 }
 
 // ---- Cài máy worker bằng mã (xem ag-farm/packages/protocol/src/enroll.ts) ----

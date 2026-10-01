@@ -100,7 +100,6 @@ export const vi = {
     addTitle: 'Thêm chủ job mới',
     editTitle: 'Sửa chủ job: {{id}}',
     allowedTypes: 'Loại việc được phép',
-    defaultLane: 'Lane mặc định',
     idLabel: 'ID chủ job (vd: ag-go, studio)',
     idRequired: 'Nhập ID',
     idPattern: 'Chỉ gồm chữ thường, chữ số và gạch ngang',

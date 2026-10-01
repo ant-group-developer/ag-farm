@@ -319,7 +319,6 @@ export class AdminService {
       keyHash,
       signUrl: dto.sign_url,
       allowedTypes: dto.allowed_types,
-      defaultLane: dto.default_lane ?? 'batch',
     });
     const saved = await this.ownerRepo.save(owner);
     return { owner: toOwnerView(saved), key };
@@ -330,7 +329,6 @@ export class AdminService {
     if (!owner) throw new NotFoundException('Owner not found');
     if (dto.sign_url !== undefined) owner.signUrl = dto.sign_url;
     if (dto.allowed_types !== undefined) owner.allowedTypes = dto.allowed_types;
-    if (dto.default_lane !== undefined) owner.defaultLane = dto.default_lane;
     return toOwnerView(await this.ownerRepo.save(owner));
   }
 

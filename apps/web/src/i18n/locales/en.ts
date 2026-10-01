@@ -134,7 +134,6 @@ export const en: LocaleMessages = {
     addTitle: 'New job owner',
     editTitle: 'Edit job owner: {{id}}',
     allowedTypes: 'Allowed job types',
-    defaultLane: 'Default lane',
     idLabel: 'Owner ID (e.g. ag-go, studio)',
     idRequired: 'Enter an ID',
     idPattern: 'Lowercase letters, digits and dashes only',

@@ -66,7 +66,8 @@ export class OwnerService {
       });
     }
 
-    const lane = req.lane ?? spec.lane ?? owner.defaultLane;
+    // Lane của loại job (render: interactive, quét: batch) trừ khi chủ job chọn khác.
+    const lane = req.lane ?? spec.lane;
     const requirements = mergeRequirements(req.type, req.requirements ?? {});
 
     // Idempotency: ON CONFLICT DO NOTHING

@@ -12,7 +12,7 @@ import {
 
 export const SubmitJobRequestSchema = z.strictObject({
   type: JobTypeSchema,
-  /** Thiếu thì lấy `default_lane` của chủ job. */
+  /** Thiếu thì lấy lane của loại job (`JOB_TYPE_SPECS[type].lane`). */
   lane: LaneSchema.optional(),
   priority: z.int().min(-100).max(100).default(0),
   requirements: RequirementsSchema.default({}),

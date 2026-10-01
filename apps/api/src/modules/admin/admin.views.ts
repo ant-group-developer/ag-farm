@@ -38,7 +38,6 @@ export function toOwnerView(owner: FarmOwnerEntity) {
     id: owner.id,
     sign_url: owner.signUrl,
     allowed_types: owner.allowedTypes,
-    default_lane: owner.defaultLane,
     created_at: owner.createdAt.toISOString(),
     updated_at: owner.updatedAt.toISOString(),
   };

@@ -22,18 +22,13 @@ import { SecretModal } from '../../shared/components/SecretModal';
 import { SortDropdown } from '../../shared/components/SortDropdown';
 import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
-import type { JobType, Lane, OwnerSortBy, OwnerView, PatchOwnerRequest, SortOrder } from '../../types/api';
+import type { CreateOwnerRequest, OwnerSortBy, OwnerView, PatchOwnerRequest, SortOrder } from '../../types/api';
 import { JOB_TYPES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
 import { Plus } from 'lucide-react';
 
 const { Text } = Typography;
-
-const LANE_OPTIONS: { value: Lane; label: string }[] = [
-  { value: 'interactive', label: 'interactive' },
-  { value: 'batch', label: 'batch' },
-];
 
 const OWNER_SORT_FIELDS: readonly { value: OwnerSortBy; label: string }[] = [
   { value: 'createdAt', label: 'Tạo lúc' },
@@ -47,7 +42,7 @@ export function OwnersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editOwner, setEditOwner] = useState<OwnerView | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
-  const [form] = Form.useForm<{ id: string; sign_url: string; allowed_types: JobType[]; default_lane: Lane }>();
+  const [form] = Form.useForm<CreateOwnerRequest>();
   const [editForm] = Form.useForm<PatchOwnerRequest>();
 
   // URL state via nuqs
@@ -135,16 +130,6 @@ export function OwnersPage() {
       ),
     },
     {
-      title: t('owners.defaultLane'),
-      dataIndex: 'default_lane',
-      key: 'default_lane',
-      width: 100,
-      ellipsis: true,
-      render: (v: string) => (
-        <Tag color={v === 'interactive' ? 'purple' : 'default'}>{v}</Tag>
-      ),
-    },
-    {
       title: t('common.createdAt'),
       dataIndex: 'created_at',
       key: 'created_at',
@@ -170,7 +155,6 @@ export function OwnersPage() {
               editForm.setFieldsValue({
                 sign_url: r.sign_url,
                 allowed_types: r.allowed_types,
-                default_lane: r.default_lane,
               });
             }}
           >
@@ -269,9 +253,6 @@ export function OwnersPage() {
           <Form.Item name="allowed_types" label={t('owners.allowedTypes')} rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}>
             <Select mode="multiple" options={JOB_TYPES.map((tp) => ({ value: tp, label: tp }))} placeholder={t('common.pickJobTypes')} />
           </Form.Item>
-          <Form.Item name="default_lane" label={t('owners.defaultLane')} initialValue="batch">
-            <Select options={LANE_OPTIONS} />
-          </Form.Item>
         </Form>
       </Modal>
 
@@ -298,9 +279,6 @@ export function OwnersPage() {
           </Form.Item>
           <Form.Item name="allowed_types" label={t('owners.allowedTypes')} rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}>
             <Select mode="multiple" options={JOB_TYPES.map((tp) => ({ value: tp, label: tp }))} />
-          </Form.Item>
-          <Form.Item name="default_lane" label={t('owners.defaultLane')}>
-            <Select options={LANE_OPTIONS} />
           </Form.Item>
         </Form>
       </Modal>

@@ -18,10 +18,6 @@ export class FarmOwnerEntity {
   @Column({ name: 'allowed_types', type: 'text', array: true })
   allowedTypes!: string[];
 
-  /** Lane mặc định khi chủ job không chỉ định */
-  @Column({ name: 'default_lane', type: 'text' })
-  defaultLane!: string;
-
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

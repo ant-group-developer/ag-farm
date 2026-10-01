@@ -15,7 +15,6 @@ async function main() {
   const ownerId = process.env['OWNER_ID'];
   const signUrl = process.env['OWNER_SIGN_URL'];
   const allowedTypes = (process.env['OWNER_ALLOWED_TYPES'] ?? '').split(',').filter(Boolean);
-  const defaultLane = (process.env['OWNER_DEFAULT_LANE'] ?? 'batch') as 'interactive' | 'batch';
 
   if (!ownerId || !signUrl) {
     console.error('Usage: OWNER_ID=ag-go OWNER_SIGN_URL=https://... yarn workspace @ag-farm/api owner:key');
@@ -41,7 +40,6 @@ async function main() {
       keyHash,
       signUrl,
       allowedTypes: allowedTypes.length > 0 ? allowedTypes : ['scan.extract', 'scan.ai'],
-      defaultLane,
     },
     ['id'],
   );

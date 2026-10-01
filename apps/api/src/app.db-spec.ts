@@ -161,7 +161,6 @@ async function createOwner(
     keyHash,
     signUrl: 'http://localhost:19999/sign',
     allowedTypes,
-    defaultLane: 'batch',
   });
   await repo.save(owner);
   return { owner, key };
