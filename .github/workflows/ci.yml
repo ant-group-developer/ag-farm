@@ -1,11 +1,13 @@
 name: CI
 
-# Kiểm mọi nhánh và PR; deploy.dev.yml gọi lại workflow này trước khi deploy main.
+# Kiểm mọi nhánh và PR; deploy.dev.yml (nhánh dev) và deploy.prod.yml (main) gọi lại workflow này trước khi deploy,
+# nên push lên dev/main không chạy CI riêng lần nữa.
 on:
   pull_request:
   push:
     branches-ignore:
       - main
+      - dev
   workflow_call:
 
 concurrency:
