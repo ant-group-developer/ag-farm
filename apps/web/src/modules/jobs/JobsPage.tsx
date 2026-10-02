@@ -29,13 +29,15 @@ import {
   cancelJobs,
   getJob,
   listJobs,
+  listOwners,
   pauseJobs,
   resumeJobs,
   retryJob,
 } from '../../api/admin';
+import { PageHeader } from '../../shared/components/PageHeader';
 import { SortDropdown } from '../../shared/components/SortDropdown';
 import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
-import { jobTypeLabel, jobTypeOptions, laneLabel } from '../../shared/lib/job-labels';
+import { jobTypeLabel, jobTypeOptions, laneLabel, stageLabel } from '../../shared/lib/job-labels';
 import { statusColor, statusLabel } from '../../shared/lib/status';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import { SELECTION_COLUMN_WIDTH, columnsWidth } from '../../shared/lib/table-width';
@@ -48,20 +50,6 @@ import { Ban, ChevronDown, Eye, Pause, Play, RotateCcw } from 'lucide-react';
 const { Text } = Typography;
 
 const ALL_STATUSES: JobStatus[] = ['queued', 'leased', 'paused', 'completed', 'failed', 'cancelled'];
-
-const OWNER_OPTIONS = [
-  { value: 'ag-go', label: 'ag-go' },
-  { value: 'studio', label: 'studio' },
-];
-
-type JobSortField = JobSortBy;
-const JOB_SORT_FIELDS: readonly { value: JobSortField; label: string }[] = [
-  { value: 'createdAt', label: 'Tạo lúc' },
-  { value: 'updatedAt', label: 'Cập nhật' },
-  { value: 'priority', label: 'Ưu tiên' },
-  { value: 'status', label: 'Trạng thái' },
-  { value: 'type', label: 'Loại' },
-];
 
 /** Trả true khi trạng thái job cần auto-refresh (đang chờ / đang chạy / tạm dừng nhưng có lease). */
 function needsRefresh(jobs: JobView[]): boolean {
@@ -109,6 +97,22 @@ export function JobsPage() {
 
   const jobs = data?.items ?? [];
   const total = data?.total ?? 0;
+
+  // Bộ lọc ứng dụng lấy từ danh sách ứng dụng thật, không liệt kê cứng.
+  const ownersQuery = useQuery({
+    queryKey: ['owners', 'options'],
+    queryFn: () => listOwners({ pageSize: 200, sortBy: 'name', sortOrder: 'asc' }),
+    staleTime: 5 * 60_000,
+  });
+  const ownerOptions = (ownersQuery.data?.items ?? []).map((o) => ({ value: o.id, label: o.id }));
+
+  const sortFields: readonly { value: JobSortBy; label: string }[] = [
+    { value: 'createdAt', label: t('common.createdAt') },
+    { value: 'updatedAt', label: t('jobs.updatedAt') },
+    { value: 'priority', label: t('jobs.priority') },
+    { value: 'status', label: t('jobs.status') },
+    { value: 'type', label: t('jobs.type') },
+  ];
 
   const selectedJobQuery = useQuery({
     queryKey: ['jobs', 'detail', selectedJobId],
@@ -205,7 +209,7 @@ export function JobsPage() {
 
   const columns: ColumnsType<JobView> = [
     {
-      title: 'ID',
+      title: t('common.id'),
       dataIndex: 'id',
       key: 'id',
       width: 120,
@@ -225,7 +229,7 @@ export function JobsPage() {
       title: t('jobs.owner'),
       dataIndex: 'owner',
       key: 'owner',
-      width: 100,
+      width: 120,
       ellipsis: true,
     },
     {
@@ -304,7 +308,7 @@ export function JobsPage() {
         if (r.progress_percent == null && !r.progress_stage) return <Text type="secondary">-</Text>;
         const pct = r.progress_percent ?? 0;
         return (
-          <Tooltip title={`${Math.round(pct)}% ${r.progress_stage ?? ''}`}>
+          <Tooltip title={`${Math.round(pct)}% ${r.progress_stage ? stageLabel(r.progress_stage) : ''}`}>
             <Progress percent={Math.round(pct)} size="small" style={{ marginBottom: 0 }} />
           </Tooltip>
         );
@@ -406,13 +410,10 @@ export function JobsPage() {
   return (
     <>
       {contextHolder}
-      <Row justify="space-between" align="middle" style={{ marginBottom: 16 }} gutter={[8, 8]}>
-        <Col>
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            {t('jobs.title')}
-          </Typography.Title>
-        </Col>
-        <Col>
+      <PageHeader
+        title={t('jobs.title')}
+        description={t('jobs.description')}
+        extra={
           <Space wrap>
             <Input.Search
               placeholder={t('common.search')}
@@ -446,15 +447,16 @@ export function JobsPage() {
             <Select
               allowClear
               placeholder={t('jobs.owner')}
-              style={{ minWidth: 100 }}
+              style={{ minWidth: 140 }}
               value={query.owner || undefined}
-              options={OWNER_OPTIONS}
+              loading={ownersQuery.isLoading}
+              options={ownerOptions}
               onChange={(val: string | undefined) =>
                 void setQuery({ owner: val ?? '', page: 1 })
               }
             />
             <SortDropdown
-              fields={JOB_SORT_FIELDS}
+              fields={sortFields}
               sortBy={query.sortBy}
               sortOrder={query.sortOrder}
               onChange={(change) => void setQuery({ ...change, page: 1 })}
@@ -469,8 +471,8 @@ export function JobsPage() {
               <Button loading={pauseAllMut.isPending}>{t('jobs.pauseAll')}</Button>
             </Popconfirm>
           </Space>
-        </Col>
-      </Row>
+        }
+      />
 
       {/* Bulk action bar */}
       {selectedRowKeys.length > 0 && (
@@ -584,26 +586,27 @@ export function JobsPage() {
 
 function JobDetailSection({ job }: { job: JobView }) {
   const { t } = useTranslation();
+  const date = (v: string | null | undefined) => (v ? formatDateTime(v) : '-');
   const rows = [
-    ['ID', job.id],
+    [t('common.id'), job.id],
     [t('jobs.owner'), job.owner],
     [t('jobs.type'), `${jobTypeLabel(job.type)} (${job.type})`],
     [t('jobs.lane'), `${laneLabel(job.lane)} (${job.lane})`],
     [t('jobs.status'), statusLabel(job.status)],
     [t('jobs.priority'), String(job.priority)],
-    ['Correlation ID', job.correlation_id],
-    ['Affinity key', job.affinity_key ?? '-'],
-    ['Group key', job.group_key ?? '-'],
+    [t('jobs.correlationId'), job.correlation_id],
+    [t('jobs.affinityKey'), job.affinity_key ?? '-'],
+    [t('jobs.groupKey'), job.group_key ?? '-'],
     [t('jobs.attempts'), `${job.attempt_count}/${job.max_attempts}`],
     [t('jobs.node'), job.node_name ?? job.node_id ?? '-'],
     [t('jobs.progress'), job.progress_percent != null ? `${Math.round(job.progress_percent)}%` : '-'],
-    [t('jobs.stage'), job.progress_stage ?? '-'],
-    [t('jobs.notBeforeLabel'), job.not_before ?? '-'],
-    [t('jobs.leaseExpiresAtLabel'), job.lease_expires_at ?? '-'],
-    [t('common.createdAt'), job.created_at],
-    [t('jobs.updatedAt'), job.updated_at],
-    [t('jobs.finishedAt'), job.finished_at ?? '-'],
-    [t('jobs.ackedAt'), job.acked_at ?? '-'],
+    [t('jobs.stage'), job.progress_stage ? stageLabel(job.progress_stage) : '-'],
+    [t('jobs.notBefore'), date(job.not_before)],
+    [t('jobs.leaseExpiresAt'), date(job.lease_expires_at)],
+    [t('common.createdAt'), date(job.created_at)],
+    [t('jobs.updatedAt'), date(job.updated_at)],
+    [t('jobs.finishedAt'), date(job.finished_at)],
+    [t('jobs.ackedAt'), date(job.acked_at)],
   ];
 
   return (

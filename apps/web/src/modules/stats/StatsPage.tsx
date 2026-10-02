@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Card, Col, Row, Statistic, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { getStats } from '../../api/admin';
+import { PageHeader } from '../../shared/components/PageHeader';
 import { jobTypeLabel } from '../../shared/lib/job-labels';
 import { statusColor, statusLabel } from '../../shared/lib/status';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
@@ -58,9 +59,7 @@ export function StatsPage() {
 
   return (
     <>
-      <Typography.Title level={4} style={{ marginBottom: 16 }}>
-        {t('stats.title')}
-      </Typography.Title>
+      <PageHeader title={t('stats.title')} description={t('stats.description')} />
 
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col xs={12} sm={6}>

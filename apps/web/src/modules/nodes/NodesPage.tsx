@@ -6,14 +6,12 @@ import {
 import {
   Badge,
   Button,
-  Col,
   Dropdown,
   Flex,
   Form,
   Input,
   Modal,
   Popconfirm,
-  Row,
   Select,
   Space,
   Switch,
@@ -28,6 +26,7 @@ import { parseAsInteger, parseAsString, parseAsStringEnum, useQueryStates } from
 import { useState, type ReactNode } from 'react';
 import { createNode, deleteNode, listNodes, patchNode } from '../../api/admin';
 import { SecretModal } from '../../shared/components/SecretModal';
+import { PageHeader } from '../../shared/components/PageHeader';
 import { SortDropdown } from '../../shared/components/SortDropdown';
 import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
 import { jobTypeLabel, jobTypeOptions } from '../../shared/lib/job-labels';
@@ -51,12 +50,6 @@ import {
 import { EnrollModal } from './EnrollModal';
 
 const { Text } = Typography;
-
-const NODE_SORT_FIELDS: readonly { value: NodeSortBy; label: string }[] = [
-  { value: 'createdAt', label: 'Tạo lúc' },
-  { value: 'name', label: 'Tên' },
-  { value: 'lastSeenAt', label: 'Lần cuối thấy' },
-];
 
 const OS_LABELS: Record<string, string> = { windows: 'Windows', linux: 'Linux', darwin: 'macOS' };
 
@@ -172,6 +165,12 @@ export function NodesPage() {
     queryFn: () => listNodes(apiQuery),
     refetchInterval: 10_000,
   });
+
+  const sortFields: readonly { value: NodeSortBy; label: string }[] = [
+    { value: 'createdAt', label: t('common.createdAt') },
+    { value: 'name', label: t('nodes.name') },
+    { value: 'lastSeenAt', label: t('nodes.lastSeen') },
+  ];
 
   const nodes = nodesQuery.data?.items ?? [];
   const total = nodesQuery.data?.total ?? 0;
@@ -373,13 +372,10 @@ export function NodesPage() {
   return (
     <>
       {contextHolder}
-      <Row justify="space-between" align="middle" style={{ marginBottom: 16 }} gutter={[8, 8]}>
-        <Col>
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            {t('nodes.title')}
-          </Typography.Title>
-        </Col>
-        <Col>
+      <PageHeader
+        title={t('nodes.title')}
+        description={t('nodes.description')}
+        extra={
           <Space wrap>
             <Input.Search
               placeholder={t('common.search')}
@@ -389,7 +385,7 @@ export function NodesPage() {
               style={{ width: 200 }}
             />
             <SortDropdown
-              fields={NODE_SORT_FIELDS}
+              fields={sortFields}
               sortBy={query.sortBy}
               sortOrder={query.sortOrder}
               onChange={(change) => void setQuery({ ...change, page: 1 })}
@@ -420,8 +416,8 @@ export function NodesPage() {
               </Button>
             </Dropdown>
           </Space>
-        </Col>
-      </Row>
+        }
+      />
 
       <Table
         rowKey="id"
@@ -487,7 +483,7 @@ export function NodesPage() {
           </Form.Item>
           <Form.Item
             name="kinds"
-            label={`${t('common.jobTypes')} (reported)`}
+            label={t('nodes.reportedKinds')}
             rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}
           >
             <Select mode="multiple" options={jobTypeOptions()} placeholder={t('common.pickJobTypes')} />

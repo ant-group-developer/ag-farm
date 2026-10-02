@@ -17,8 +17,8 @@ describe('i18n', () => {
 
   it('mặc định tiếng Việt có dấu', async () => {
     await i18n.changeLanguage('vi');
-    expect(statusLabel('queued')).toBe('Chờ');
-    expect(i18n.t('nodes.title')).toBe('Máy worker');
+    expect(statusLabel('queued')).toBe('Đang chờ');
+    expect(i18n.t('nodes.deleteConfirm')).toBe('Xóa worker này?');
   });
 
   it('đổi sang tiếng Anh', async () => {
