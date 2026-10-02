@@ -211,24 +211,10 @@
 /* Brand mark */
 .login-logo {
   display: block;
+  flex-shrink: 0;
+  align-self: flex-start;
   width: auto;
   object-fit: contain;
-}
-
-.login-monogram {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 22%;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  color: #fff;
-  background: linear-gradient(
-    135deg,
-    var(--login-accent) 0%,
-    color-mix(in srgb, var(--login-accent) 70%, #7c3aed) 100%
-  );
-  box-shadow: 0 8px 20px color-mix(in srgb, var(--login-accent) 40%, transparent);
 }
 
 /* Language switch, top-right over the backdrop */
