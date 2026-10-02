@@ -35,10 +35,12 @@ import {
 } from '../../api/admin';
 import { SortDropdown } from '../../shared/components/SortDropdown';
 import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
+import { jobTypeLabel, jobTypeOptions, laneLabel } from '../../shared/lib/job-labels';
 import { statusColor, statusLabel } from '../../shared/lib/status';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
-import type { JobSortBy, JobStatus, JobType, JobView, SortOrder } from '../../types/api';
-import { JOB_TYPES, TERMINAL_JOB_STATUSES } from '../../types/api';
+import { SELECTION_COLUMN_WIDTH, columnsWidth } from '../../shared/lib/table-width';
+import type { JobSortBy, JobStatus, JobType, JobView, Lane, SortOrder } from '../../types/api';
+import { TERMINAL_JOB_STATUSES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
 import { Ban, ChevronDown, Eye, Pause, Play, RotateCcw } from 'lucide-react';
@@ -206,12 +208,12 @@ export function JobsPage() {
       title: 'ID',
       dataIndex: 'id',
       key: 'id',
-      width: 110,
+      width: 120,
       ellipsis: true,
       render: (v: string) => (
         <Tooltip title={v}>
           <Text
-            style={{ cursor: 'pointer', fontFamily: 'monospace', fontSize: 11 }}
+            style={{ cursor: 'pointer', fontFamily: 'monospace' }}
             onClick={() => setSelectedJobId(v)}
           >
             {v.slice(0, 8)}…
@@ -223,38 +225,38 @@ export function JobsPage() {
       title: t('jobs.owner'),
       dataIndex: 'owner',
       key: 'owner',
-      width: 80,
+      width: 100,
       ellipsis: true,
     },
     {
       title: t('jobs.type'),
       dataIndex: 'type',
       key: 'type',
-      width: 160,
+      width: 200,
       ellipsis: true,
       render: (v: JobType) => (
         <Tooltip title={v}>
           <Tag color="cyan" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {v}
+            {jobTypeLabel(v)}
           </Tag>
         </Tooltip>
       ),
     },
     {
-      title: 'Lane',
+      title: <Tooltip title={t('jobs.laneHelp')}>{t('jobs.lane')}</Tooltip>,
       dataIndex: 'lane',
       key: 'lane',
-      width: 90,
+      width: 110,
       ellipsis: true,
-      render: (v: string) => (
-        <Tag color={v === 'interactive' ? 'purple' : 'default'}>{v}</Tag>
+      render: (v: Lane) => (
+        <Tag color={v === 'interactive' ? 'purple' : 'default'}>{laneLabel(v)}</Tag>
       ),
     },
     {
       title: t('jobs.status'),
       dataIndex: 'status',
       key: 'status',
-      width: 120,
+      width: 130,
       ellipsis: true,
       render: (v: JobStatus) => (
         <Badge
@@ -267,26 +269,26 @@ export function JobsPage() {
       title: t('jobs.priority'),
       dataIndex: 'priority',
       key: 'priority',
-      width: 70,
+      width: 100,
       ellipsis: true,
     },
     {
       title: t('jobs.attempts'),
       key: 'attempts',
-      width: 80,
+      width: 110,
       ellipsis: true,
       render: (_: unknown, r: JobView) => `${r.attempt_count}/${r.max_attempts}`,
     },
     {
       title: t('jobs.node'),
       key: 'node',
-      width: 120,
+      width: 160,
       ellipsis: true,
       render: (_: unknown, r: JobView) => {
         const name = r.node_name ?? (r.node_id ? r.node_id.slice(0, 8) + '…' : null);
         return name ? (
           <Tooltip title={r.node_id ?? name}>
-            <Text style={{ fontSize: 11 }}>{name}</Text>
+            <Text>{name}</Text>
           </Tooltip>
         ) : (
           <Text type="secondary">-</Text>
@@ -296,7 +298,7 @@ export function JobsPage() {
     {
       title: t('jobs.progress'),
       key: 'progress',
-      width: 130,
+      width: 150,
       ellipsis: true,
       render: (_: unknown, r: JobView) => {
         if (r.progress_percent == null && !r.progress_stage) return <Text type="secondary">-</Text>;
@@ -312,11 +314,11 @@ export function JobsPage() {
       title: t('common.createdAt'),
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 140,
+      width: 200,
       ellipsis: true,
       render: (v: string) => (
         <Tooltip title={v}>
-          <Text style={{ fontSize: 11 }}>{formatDateTime(v)}</Text>
+          <Text>{formatDateTime(v)}</Text>
         </Tooltip>
       ),
     },
@@ -434,9 +436,9 @@ export function JobsPage() {
               mode="multiple"
               allowClear
               placeholder={t('common.jobType')}
-              style={{ minWidth: 180 }}
+              style={{ minWidth: 220 }}
               value={query.type ? query.type.split(',').filter(Boolean) : []}
-              options={JOB_TYPES.map((tp) => ({ value: tp, label: tp }))}
+              options={jobTypeOptions()}
               onChange={(vals: string[]) =>
                 void setQuery({ type: vals.join(',') || '', page: 1 })
               }
@@ -518,7 +520,8 @@ export function JobsPage() {
         loading={isLoading}
         pagination={pagination}
         sticky={PAGE_TABLE_STICKY}
-        scroll={{ x: 1400 }}
+        tableLayout="fixed"
+        scroll={{ x: columnsWidth(columns, SELECTION_COLUMN_WIDTH) }}
         rowSelection={{
           selectedRowKeys,
           onChange: (keys) => setSelectedRowKeys(keys as string[]),
@@ -584,8 +587,8 @@ function JobDetailSection({ job }: { job: JobView }) {
   const rows = [
     ['ID', job.id],
     [t('jobs.owner'), job.owner],
-    [t('jobs.type'), job.type],
-    ['Lane', job.lane],
+    [t('jobs.type'), `${jobTypeLabel(job.type)} (${job.type})`],
+    [t('jobs.lane'), `${laneLabel(job.lane)} (${job.lane})`],
     [t('jobs.status'), statusLabel(job.status)],
     [t('jobs.priority'), String(job.priority)],
     ['Correlation ID', job.correlation_id],

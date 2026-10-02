@@ -58,6 +58,22 @@ export const vi = {
     failed: 'Thất bại',
     cancelled: 'Đã hủy',
   },
+  jobTypeName: {
+    scan: {
+      extract: 'Quét: tách khung hình',
+      ai: 'Quét: AI mô tả',
+    },
+    studio: {
+      tts: 'Studio: đọc lời dẫn (TTS)',
+      render_preview: 'Studio: render xem trước',
+      render_final: 'Studio: render bản cuối',
+      export_premiere: 'Studio: xuất Premiere',
+    },
+  },
+  lane: {
+    interactive: 'Tương tác',
+    batch: 'Chạy nền',
+  },
   secret: {
     warning: 'Lưu ý: sau khi đóng hộp thoại này, bạn không thể xem lại giá trị này.',
     copy: 'Sao chép',
@@ -112,6 +128,8 @@ export const vi = {
     title: 'Hàng việc',
     owner: 'Chủ job',
     type: 'Loại',
+    lane: 'Làn',
+    laneHelp: 'Tương tác: việc người dùng Studio đang chờ, được giao trước. Chạy nền: việc hàng loạt.',
     status: 'Trạng thái',
     priority: 'Ưu tiên',
     attempts: 'Lần thử',

@@ -21,9 +21,10 @@ import { createOwner, listOwners, patchOwner } from '../../api/admin';
 import { SecretModal } from '../../shared/components/SecretModal';
 import { SortDropdown } from '../../shared/components/SortDropdown';
 import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
+import { jobTypeLabel, jobTypeOptions } from '../../shared/lib/job-labels';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
+import { columnsWidth } from '../../shared/lib/table-width';
 import type { CreateOwnerRequest, OwnerSortBy, OwnerView, PatchOwnerRequest, SortOrder } from '../../types/api';
-import { JOB_TYPES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
 import { Pencil, Plus } from 'lucide-react';
@@ -103,48 +104,46 @@ export function OwnersPage() {
       title: 'Sign URL',
       dataIndex: 'sign_url',
       key: 'sign_url',
+      width: 320,
       ellipsis: true,
       render: (v: string) => (
         <Tooltip title={v}>
-          <Text ellipsis style={{ maxWidth: 280, fontSize: 12 }}>
-            {v}
-          </Text>
+          <Text>{v}</Text>
         </Tooltip>
       ),
     },
     {
       title: t('owners.allowedTypes'),
       key: 'allowed_types',
-      width: 280,
-      ellipsis: true,
+      width: 360,
       render: (_: unknown, r: OwnerView) => (
-        <Tooltip title={r.allowed_types.join(', ')}>
-          <Space wrap size={4}>
-            {r.allowed_types.map((tp) => (
-              <Tag key={tp} color="blue" style={{ fontSize: 11 }}>
-                {tp}
+        <Space wrap size={4}>
+          {r.allowed_types.map((tp) => (
+            <Tooltip key={tp} title={tp}>
+              <Tag color="blue" style={{ marginInlineEnd: 0 }}>
+                {jobTypeLabel(tp)}
               </Tag>
-            ))}
-          </Space>
-        </Tooltip>
+            </Tooltip>
+          ))}
+        </Space>
       ),
     },
     {
       title: t('common.createdAt'),
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 140,
+      width: 200,
       ellipsis: true,
       render: (v: string) => (
         <Tooltip title={v}>
-          <Text style={{ fontSize: 11 }}>{formatDateTime(v)}</Text>
+          <Text>{formatDateTime(v)}</Text>
         </Tooltip>
       ),
     },
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 80,
+      width: 100,
       fixed: 'right' as const,
       render: (_: unknown, r: OwnerView) => (
         <Tooltip title={t('common.edit')}>
@@ -223,7 +222,8 @@ export function OwnersPage() {
         loading={ownersQuery.isLoading}
         pagination={pagination}
         sticky={PAGE_TABLE_STICKY}
-        scroll={{ x: 900 }}
+        tableLayout="fixed"
+        scroll={{ x: columnsWidth(columns) }}
       />
 
       {/* Create modal */}
@@ -251,7 +251,7 @@ export function OwnersPage() {
             <Input placeholder="https://api.example.com/farm/sign" />
           </Form.Item>
           <Form.Item name="allowed_types" label={t('owners.allowedTypes')} rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}>
-            <Select mode="multiple" options={JOB_TYPES.map((tp) => ({ value: tp, label: tp }))} placeholder={t('common.pickJobTypes')} />
+            <Select mode="multiple" options={jobTypeOptions()} placeholder={t('common.pickJobTypes')} />
           </Form.Item>
         </Form>
       </Modal>
@@ -278,7 +278,7 @@ export function OwnersPage() {
             <Input />
           </Form.Item>
           <Form.Item name="allowed_types" label={t('owners.allowedTypes')} rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}>
-            <Select mode="multiple" options={JOB_TYPES.map((tp) => ({ value: tp, label: tp }))} />
+            <Select mode="multiple" options={jobTypeOptions()} />
           </Form.Item>
         </Form>
       </Modal>

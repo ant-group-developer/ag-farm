@@ -72,6 +72,7 @@ export function App() {
   return (
     <ProLayout
       title={t('app.title')}
+      logo="/ag.png"
       siderWidth={200}
       layout="mix"
       fixSiderbar

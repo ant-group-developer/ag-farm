@@ -60,6 +60,22 @@ export const en: LocaleMessages = {
     failed: 'Failed',
     cancelled: 'Cancelled',
   },
+  jobTypeName: {
+    scan: {
+      extract: 'Scan: extract frames',
+      ai: 'Scan: AI description',
+    },
+    studio: {
+      tts: 'Studio: voice-over (TTS)',
+      render_preview: 'Studio: preview render',
+      render_final: 'Studio: final render',
+      export_premiere: 'Studio: Premiere export',
+    },
+  },
+  lane: {
+    interactive: 'Interactive',
+    batch: 'Batch',
+  },
   secret: {
     warning: 'Once you close this dialog you cannot see this value again.',
     copy: 'Copy',
@@ -149,6 +165,8 @@ export const en: LocaleMessages = {
     title: 'Job queue',
     owner: 'Owner',
     type: 'Type',
+    lane: 'Lane',
+    laneHelp: 'Interactive: work a Studio user is waiting on, handed out first. Batch: bulk background work.',
     status: 'Status',
     priority: 'Priority',
     attempts: 'Attempts',
