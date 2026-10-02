@@ -17,3 +17,10 @@ body {
   display: inline-flex;
   align-items: center;
 }
+
+/* Tiêu đề cột bảng luôn một dòng; width cột được đặt đủ cho tiêu đề, chữ dài bất thường thì cắt "…" */
+.ant-table-thead > tr > th {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

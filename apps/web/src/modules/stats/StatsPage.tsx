@@ -2,6 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Card, Col, Row, Statistic, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { getStats } from '../../api/admin';
+import { PageHeader } from '../../shared/components/PageHeader';
+import { jobTypeLabel } from '../../shared/lib/job-labels';
 import { statusColor, statusLabel } from '../../shared/lib/status';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import type { JobStatus, JobType } from '../../types/api';
@@ -22,6 +24,7 @@ export function StatsPage() {
       title: t('stats.status'),
       dataIndex: 'status',
       key: 'status',
+      width: 160,
       render: (v: JobStatus) => (
         <Typography.Text>
           <span
@@ -42,21 +45,21 @@ export function StatsPage() {
       title: t('common.jobType'),
       dataIndex: 'type',
       key: 'type',
-      render: (v: JobType) => <Tag color="cyan">{v}</Tag>,
+      width: 240,
+      render: (v: JobType) => <Tag color="cyan">{jobTypeLabel(v)}</Tag>,
     },
     {
       title: t('stats.count'),
       dataIndex: 'count',
       key: 'count',
+      width: 120,
       align: 'right',
     },
   ];
 
   return (
     <>
-      <Typography.Title level={4} style={{ marginBottom: 16 }}>
-        {t('stats.title')}
-      </Typography.Title>
+      <PageHeader title={t('stats.title')} description={t('stats.description')} />
 
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col xs={12} sm={6}>
@@ -101,7 +104,6 @@ export function StatsPage() {
           dataSource={data?.jobs ?? []}
           columns={columns}
           pagination={false}
-          size="small"
           sticky={PAGE_TABLE_STICKY}
         />
       </Card>

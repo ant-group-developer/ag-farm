@@ -101,7 +101,7 @@ export function EnrollModal({ open, onClose }: EnrollModalProps) {
               { max: 60 },
             ]}
           >
-            <Input placeholder="lan-4060ti" autoFocus />
+            <Input placeholder={t('enroll.machinePlaceholder')} autoFocus />
           </Form.Item>
           <Form.Item
             name="roles"

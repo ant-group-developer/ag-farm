@@ -1,11 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Button,
-  Col,
   Form,
   Input,
   Modal,
-  Row,
   Select,
   Space,
   Table,
@@ -19,21 +17,18 @@ import { parseAsInteger, parseAsString, parseAsStringEnum, useQueryStates } from
 import { useState } from 'react';
 import { createOwner, listOwners, patchOwner } from '../../api/admin';
 import { SecretModal } from '../../shared/components/SecretModal';
+import { PageHeader } from '../../shared/components/PageHeader';
 import { SortDropdown } from '../../shared/components/SortDropdown';
 import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
+import { jobTypeLabel, jobTypeOptions } from '../../shared/lib/job-labels';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
+import { columnsWidth } from '../../shared/lib/table-width';
 import type { CreateOwnerRequest, OwnerSortBy, OwnerView, PatchOwnerRequest, SortOrder } from '../../types/api';
-import { JOB_TYPES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
 import { Pencil, Plus } from 'lucide-react';
 
 const { Text } = Typography;
-
-const OWNER_SORT_FIELDS: readonly { value: OwnerSortBy; label: string }[] = [
-  { value: 'createdAt', label: 'Tạo lúc' },
-  { value: 'name', label: 'ID' },
-];
 
 export function OwnersPage() {
   const { t } = useTranslation();
@@ -67,6 +62,11 @@ export function OwnersPage() {
     queryFn: () => listOwners(apiQuery),
   });
 
+  const sortFields: readonly { value: OwnerSortBy; label: string }[] = [
+    { value: 'createdAt', label: t('common.createdAt') },
+    { value: 'name', label: t('common.id') },
+  ];
+
   const owners = ownersQuery.data?.items ?? [];
   const total = ownersQuery.data?.total ?? 0;
 
@@ -92,7 +92,7 @@ export function OwnersPage() {
 
   const columns: ColumnsType<OwnerView> = [
     {
-      title: 'ID',
+      title: t('common.id'),
       dataIndex: 'id',
       key: 'id',
       width: 140,
@@ -100,51 +100,49 @@ export function OwnersPage() {
       render: (v: string) => <Text strong>{v}</Text>,
     },
     {
-      title: 'Sign URL',
+      title: <Tooltip title={t('owners.signUrlHelp')}>{t('owners.signUrl')}</Tooltip>,
       dataIndex: 'sign_url',
       key: 'sign_url',
+      width: 320,
       ellipsis: true,
       render: (v: string) => (
         <Tooltip title={v}>
-          <Text ellipsis style={{ maxWidth: 280, fontSize: 12 }}>
-            {v}
-          </Text>
+          <Text>{v}</Text>
         </Tooltip>
       ),
     },
     {
       title: t('owners.allowedTypes'),
       key: 'allowed_types',
-      width: 280,
-      ellipsis: true,
+      width: 360,
       render: (_: unknown, r: OwnerView) => (
-        <Tooltip title={r.allowed_types.join(', ')}>
-          <Space wrap size={4}>
-            {r.allowed_types.map((tp) => (
-              <Tag key={tp} color="blue" style={{ fontSize: 11 }}>
-                {tp}
+        <Space wrap size={4}>
+          {r.allowed_types.map((tp) => (
+            <Tooltip key={tp} title={tp}>
+              <Tag color="blue" style={{ marginInlineEnd: 0 }}>
+                {jobTypeLabel(tp)}
               </Tag>
-            ))}
-          </Space>
-        </Tooltip>
+            </Tooltip>
+          ))}
+        </Space>
       ),
     },
     {
       title: t('common.createdAt'),
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 140,
+      width: 200,
       ellipsis: true,
       render: (v: string) => (
         <Tooltip title={v}>
-          <Text style={{ fontSize: 11 }}>{formatDateTime(v)}</Text>
+          <Text>{formatDateTime(v)}</Text>
         </Tooltip>
       ),
     },
     {
       title: t('common.actions'),
       key: 'actions',
-      width: 80,
+      width: 100,
       fixed: 'right' as const,
       render: (_: unknown, r: OwnerView) => (
         <Tooltip title={t('common.edit')}>
@@ -177,13 +175,10 @@ export function OwnersPage() {
   return (
     <>
       {contextHolder}
-      <Row justify="space-between" align="middle" style={{ marginBottom: 16 }} gutter={[8, 8]}>
-        <Col>
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            {t('owners.title')}
-          </Typography.Title>
-        </Col>
-        <Col>
+      <PageHeader
+        title={t('owners.title')}
+        description={t('owners.description')}
+        extra={
           <Space wrap>
             <Input.Search
               placeholder={t('common.search')}
@@ -193,7 +188,7 @@ export function OwnersPage() {
               style={{ width: 200 }}
             />
             <SortDropdown
-              fields={OWNER_SORT_FIELDS}
+              fields={sortFields}
               sortBy={query.sortBy}
               sortOrder={query.sortOrder}
               onChange={(change) => void setQuery({ ...change, page: 1 })}
@@ -213,8 +208,8 @@ export function OwnersPage() {
               {t('owners.add')}
             </Button>
           </Space>
-        </Col>
-      </Row>
+        }
+      />
 
       <Table
         rowKey="id"
@@ -223,7 +218,8 @@ export function OwnersPage() {
         loading={ownersQuery.isLoading}
         pagination={pagination}
         sticky={PAGE_TABLE_STICKY}
-        scroll={{ x: 900 }}
+        tableLayout="fixed"
+        scroll={{ x: columnsWidth(columns) }}
       />
 
       {/* Create modal */}
@@ -247,11 +243,11 @@ export function OwnersPage() {
           >
             <Input placeholder={t('owners.idPlaceholder')} />
           </Form.Item>
-          <Form.Item name="sign_url" label="Sign URL" rules={[{ required: true, type: 'url', message: t('owners.signUrlInvalid') }]}>
+          <Form.Item name="sign_url" label={t('owners.signUrl')} tooltip={t('owners.signUrlHelp')} rules={[{ required: true, type: 'url', message: t('owners.signUrlInvalid') }]}>
             <Input placeholder="https://api.example.com/farm/sign" />
           </Form.Item>
           <Form.Item name="allowed_types" label={t('owners.allowedTypes')} rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}>
-            <Select mode="multiple" options={JOB_TYPES.map((tp) => ({ value: tp, label: tp }))} placeholder={t('common.pickJobTypes')} />
+            <Select mode="multiple" options={jobTypeOptions()} placeholder={t('common.pickJobTypes')} />
           </Form.Item>
         </Form>
       </Modal>
@@ -274,11 +270,11 @@ export function OwnersPage() {
             patchMut.mutate({ id: editOwner.id, body: values });
           }}
         >
-          <Form.Item name="sign_url" label="Sign URL" rules={[{ required: true, type: 'url', message: t('owners.signUrlInvalid') }]}>
+          <Form.Item name="sign_url" label={t('owners.signUrl')} tooltip={t('owners.signUrlHelp')} rules={[{ required: true, type: 'url', message: t('owners.signUrlInvalid') }]}>
             <Input />
           </Form.Item>
           <Form.Item name="allowed_types" label={t('owners.allowedTypes')} rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}>
-            <Select mode="multiple" options={JOB_TYPES.map((tp) => ({ value: tp, label: tp }))} />
+            <Select mode="multiple" options={jobTypeOptions()} />
           </Form.Item>
         </Form>
       </Modal>

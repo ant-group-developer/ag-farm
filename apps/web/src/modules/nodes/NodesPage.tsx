@@ -6,14 +6,12 @@ import {
 import {
   Badge,
   Button,
-  Col,
   Dropdown,
   Flex,
   Form,
   Input,
   Modal,
   Popconfirm,
-  Row,
   Select,
   Space,
   Switch,
@@ -28,11 +26,13 @@ import { parseAsInteger, parseAsString, parseAsStringEnum, useQueryStates } from
 import { useState, type ReactNode } from 'react';
 import { createNode, deleteNode, listNodes, patchNode } from '../../api/admin';
 import { SecretModal } from '../../shared/components/SecretModal';
+import { PageHeader } from '../../shared/components/PageHeader';
 import { SortDropdown } from '../../shared/components/SortDropdown';
 import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
+import { jobTypeLabel, jobTypeOptions } from '../../shared/lib/job-labels';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
+import { columnsWidth } from '../../shared/lib/table-width';
 import type { JobType, NodeCapabilities, NodeSortBy, NodeView, SortOrder } from '../../types/api';
-import { JOB_TYPES } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
 import {
@@ -50,12 +50,6 @@ import {
 import { EnrollModal } from './EnrollModal';
 
 const { Text } = Typography;
-
-const NODE_SORT_FIELDS: readonly { value: NodeSortBy; label: string }[] = [
-  { value: 'createdAt', label: 'Tạo lúc' },
-  { value: 'name', label: 'Tên' },
-  { value: 'lastSeenAt', label: 'Lần cuối thấy' },
-];
 
 const OS_LABELS: Record<string, string> = { windows: 'Windows', linux: 'Linux', darwin: 'macOS' };
 
@@ -172,6 +166,12 @@ export function NodesPage() {
     refetchInterval: 10_000,
   });
 
+  const sortFields: readonly { value: NodeSortBy; label: string }[] = [
+    { value: 'createdAt', label: t('common.createdAt') },
+    { value: 'name', label: t('nodes.name') },
+    { value: 'lastSeenAt', label: t('nodes.lastSeen') },
+  ];
+
   const nodes = nodesQuery.data?.items ?? [];
   const total = nodesQuery.data?.total ?? 0;
 
@@ -203,7 +203,7 @@ export function NodesPage() {
     {
       title: t('nodes.connection'),
       key: 'online',
-      width: 110,
+      width: 120,
       render: (_: unknown, r: NodeView) => (
         <Badge
           status={r.online ? 'success' : 'default'}
@@ -228,7 +228,7 @@ export function NodesPage() {
     {
       title: t('nodes.enabled'),
       key: 'status',
-      width: 110,
+      width: 120,
       render: (_: unknown, r: NodeView) => (
         <Switch
           checked={r.status === 'active'}
@@ -244,16 +244,18 @@ export function NodesPage() {
     {
       title: t('common.jobTypes'),
       key: 'kinds',
-      width: 200,
+      width: 210,
       render: (_: unknown, r: NodeView) => {
         const effective = r.allowed_kinds ?? r.kinds;
         const isRestricted = r.allowed_kinds !== null;
         return (
-          <Tooltip title={isRestricted ? `${t('nodes.allowedKinds')}: ${effective.join(', ')}` : undefined}>
+          <Tooltip
+            title={isRestricted ? `${t('nodes.allowedKinds')}: ${effective.map(jobTypeLabel).join(', ')}` : undefined}
+          >
             <Flex wrap gap={4}>
               {effective.map((k) => (
                 <Tag key={k} color={isRestricted ? 'orange' : 'blue'} style={{ marginInlineEnd: 0 }}>
-                  {k}
+                  {jobTypeLabel(k)}
                 </Tag>
               ))}
             </Flex>
@@ -270,7 +272,7 @@ export function NodesPage() {
     {
       title: t('nodes.freeSlots'),
       key: 'slots',
-      width: 140,
+      width: 120,
       render: (_: unknown, r: NodeView) =>
         r.free_slots ? (
           <Flex vertical>
@@ -288,7 +290,7 @@ export function NodesPage() {
     {
       title: t('nodes.running'),
       key: 'running',
-      width: 130,
+      width: 150,
       align: 'center',
       render: (_: unknown, r: NodeView) =>
         r.running_job_ids.length > 0 ? (
@@ -300,7 +302,7 @@ export function NodesPage() {
     {
       title: t('nodes.lastSeen'),
       key: 'last_seen',
-      width: 170,
+      width: 200,
       ellipsis: true,
       render: (_: unknown, r: NodeView) =>
         r.last_seen_at ? (
@@ -315,7 +317,7 @@ export function NodesPage() {
       title: t('nodes.version'),
       dataIndex: 'agent_version',
       key: 'version',
-      width: 110,
+      width: 120,
       ellipsis: true,
       render: (v: string | null) => (v ? <Text>{v}</Text> : <Text type="secondary">-</Text>),
     },
@@ -357,8 +359,6 @@ export function NodesPage() {
       ),
     },
   ];
-  // Every column has a fixed width, so the table scrolls at exactly their sum.
-  const tableWidth = columns.reduce((sum, c) => sum + Number(c.width ?? 0), 0);
 
   const pagination: TablePaginationConfig = {
     current: query.page,
@@ -372,13 +372,10 @@ export function NodesPage() {
   return (
     <>
       {contextHolder}
-      <Row justify="space-between" align="middle" style={{ marginBottom: 16 }} gutter={[8, 8]}>
-        <Col>
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            {t('nodes.title')}
-          </Typography.Title>
-        </Col>
-        <Col>
+      <PageHeader
+        title={t('nodes.title')}
+        description={t('nodes.description')}
+        extra={
           <Space wrap>
             <Input.Search
               placeholder={t('common.search')}
@@ -388,7 +385,7 @@ export function NodesPage() {
               style={{ width: 200 }}
             />
             <SortDropdown
-              fields={NODE_SORT_FIELDS}
+              fields={sortFields}
               sortBy={query.sortBy}
               sortOrder={query.sortOrder}
               onChange={(change) => void setQuery({ ...change, page: 1 })}
@@ -419,8 +416,8 @@ export function NodesPage() {
               </Button>
             </Dropdown>
           </Space>
-        </Col>
-      </Row>
+        }
+      />
 
       <Table
         rowKey="id"
@@ -430,7 +427,7 @@ export function NodesPage() {
         pagination={pagination}
         sticky={PAGE_TABLE_STICKY}
         tableLayout="fixed"
-        scroll={{ x: tableWidth }}
+        scroll={{ x: columnsWidth(columns) }}
       />
 
       {/* Create modal */}
@@ -455,7 +452,7 @@ export function NodesPage() {
             label={t('common.jobTypes')}
             rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}
           >
-            <Select mode="multiple" options={JOB_TYPES.map((tp) => ({ value: tp, label: tp }))} placeholder={t('common.pickJobTypes')} />
+            <Select mode="multiple" options={jobTypeOptions()} placeholder={t('common.pickJobTypes')} />
           </Form.Item>
         </Form>
       </Modal>
@@ -486,10 +483,10 @@ export function NodesPage() {
           </Form.Item>
           <Form.Item
             name="kinds"
-            label={`${t('common.jobTypes')} (reported)`}
+            label={t('nodes.reportedKinds')}
             rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}
           >
-            <Select mode="multiple" options={JOB_TYPES.map((tp) => ({ value: tp, label: tp }))} placeholder={t('common.pickJobTypes')} />
+            <Select mode="multiple" options={jobTypeOptions()} placeholder={t('common.pickJobTypes')} />
           </Form.Item>
           <Form.Item
             name="allowed_kinds"
@@ -501,8 +498,8 @@ export function NodesPage() {
               allowClear
               options={
                 editNode
-                  ? editNode.kinds.map((k) => ({ value: k, label: k }))
-                  : JOB_TYPES.map((tp) => ({ value: tp, label: tp }))
+                  ? jobTypeOptions(editNode.kinds)
+                  : jobTypeOptions()
               }
               placeholder={t('nodes.allowedKindsAll')}
               onChange={(vals: JobType[]) => {
