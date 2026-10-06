@@ -31,6 +31,13 @@ describe('detectPython', () => {
     expect(calls).toEqual(['python', 'python3']);
   });
 
+  it('gives a cold torch import 30 s, not the 8 s of the other probes', async () => {
+    const timeouts: (number | undefined)[] = [];
+    const exec: PythonExec = async (_file, _args, opts) => { timeouts.push(opts?.timeout); return { stdout: '3.11.9' }; };
+    await detectPython('E:/venv/Scripts/python.exe', exec);
+    expect(timeouts).toEqual([30_000]);
+  });
+
   it('reports nothing when no interpreter has torch', async () => {
     const { exec } = fakeExec({});
     await expect(detectPython(undefined, exec)).resolves.toBeNull();

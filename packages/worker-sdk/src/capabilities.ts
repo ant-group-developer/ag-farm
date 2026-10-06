@@ -130,6 +130,8 @@ async function detectOllamaModels(ollamaUrl = 'http://localhost:11434'): Promise
 export type PythonExec = (file: string, args: string[], options: { timeout: number }) => Promise<{ stdout: string }>;
 
 const PYTHON_TORCH_PROBE = ['-c', 'import torch,sys;print(sys.version.split()[0])'];
+/** Một lần import torch nguội (lúc máy vừa bật, ổ chậm) mất hơn 8 s của các phép dò khác. */
+const PYTHON_DETECT_TIMEOUT_MS = 30_000;
 
 /**
  * Phiên bản Python của máy nếu nó import được torch. Có `pythonBin` thì chỉ dò đúng file đó (venv của handler),
@@ -140,7 +142,7 @@ export async function detectPython(pythonBin?: string, exec: PythonExec = execFi
   const candidates = pythonBin ? [pythonBin] : ['python', 'python3'];
   for (const file of candidates) {
     try {
-      const { stdout } = await exec(file, PYTHON_TORCH_PROBE, { timeout: DETECT_TIMEOUT_MS });
+      const { stdout } = await exec(file, PYTHON_TORCH_PROBE, { timeout: PYTHON_DETECT_TIMEOUT_MS });
       const version = String(stdout).trim();
       if (version) return version;
     } catch {
