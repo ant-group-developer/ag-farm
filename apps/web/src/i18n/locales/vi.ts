@@ -69,6 +69,7 @@ export const vi = {
       render_preview: 'Studio: render xem trước',
       render_final: 'Studio: render bản cuối',
       export_premiere: 'Studio: xuất Premiere',
+      transcribe: 'Studio: nhận dạng lời nói',
     },
   },
   lane: {

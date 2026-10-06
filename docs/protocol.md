@@ -49,8 +49,12 @@ Worker gửi danh sách thao tác, chủ job trả kết quả theo đúng thứ
 |---|---|---|---|---|
 | `scan.extract` | `ag-go` | batch | cpu | `ScanExtractPayload` → `extract.json` (`ExtractManifest`) |
 | `scan.ai` | `ag-go` | batch | gpu | `ScanAiPayload` (≤ 30 đoạn) → `ai-<chunk>.json` (`AiManifest`) |
-| `studio.tts` | `studio` | interactive | gpu | chốt ở GĐ3 |
-| `studio.render_preview` | `studio` | interactive | cpu | chốt ở GĐ3 |
-| `studio.render_final` | `studio` | interactive | cpu | chốt ở GĐ3 |
+| `studio.tts` | `studio` | interactive | gpu | `StudioTtsPayload` → `tts.json` (`TtsManifest`) + `tts/<line_id>.wav` |
+| `studio.render_preview` | `studio` | interactive | cpu | `StudioRenderPayload` → `render.json` (`RenderManifest`) + video |
+| `studio.render_final` | `studio` | interactive | cpu | `StudioRenderPayload` → `render.json` (`RenderManifest`) + video, thumbnail |
+| `studio.export_premiere` | `studio` | interactive | cpu | `StudioExportPremierePayload` → `premiere.json` (`PremiereManifest`) + zip |
+| `studio.transcribe` | `studio` | interactive | gpu | `StudioTranscribePayload` (WAV 16 kHz mono mỗi nguồn, `stage:`) → `transcribe.json` (`TranscribeManifest`) |
+
+`studio.tts` và `studio.transcribe` cần máy khai `gpu` và `python` (worker dò `import torch` bằng `python_bin` của nó).
 
 Kết quả job (`JobResult`) chỉ gồm đường dẫn manifest và vài con số; dữ liệu đầy đủ nằm trong manifest ở bucket của chủ job.

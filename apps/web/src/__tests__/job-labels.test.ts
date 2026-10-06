@@ -21,6 +21,14 @@ describe('jobTypeLabel', () => {
     await i18n.changeLanguage('vi');
   });
 
+  it('có tên cho nhận dạng giọng nói của Studio', async () => {
+    await i18n.changeLanguage('vi');
+    expect(jobTypeLabel('studio.transcribe')).toBe('Studio: nhận dạng lời nói');
+    await i18n.changeLanguage('en');
+    expect(jobTypeLabel('studio.transcribe')).toBe('Studio: speech transcription');
+    await i18n.changeLanguage('vi');
+  });
+
   it('loại lạ thì trả nguyên giá trị', () => {
     expect(jobTypeLabel('scan.unknown' as JobType)).toBe('scan.unknown');
   });

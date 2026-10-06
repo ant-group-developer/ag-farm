@@ -6,7 +6,8 @@ export type JobType =
   | 'studio.tts'
   | 'studio.render_preview'
   | 'studio.render_final'
-  | 'studio.export_premiere';
+  | 'studio.export_premiere'
+  | 'studio.transcribe';
 
 export const JOB_TYPES: JobType[] = [
   'scan.extract',
@@ -15,6 +16,7 @@ export const JOB_TYPES: JobType[] = [
   'studio.render_preview',
   'studio.render_final',
   'studio.export_premiere',
+  'studio.transcribe',
 ];
 
 export type JobStatus = 'queued' | 'leased' | 'paused' | 'completed' | 'failed' | 'cancelled';

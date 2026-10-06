@@ -197,3 +197,79 @@ export const PremiereManifestSchema = z.strictObject({
   warnings: z.array(z.string()).default([]),
 });
 export type PremiereManifest = z.infer<typeof PremiereManifestSchema>;
+
+// ---------------------------------------------------------------------------------------------
+// studio.transcribe: nhận dạng lời nói trong footage (WhisperX), cho kiểu dựng cắt theo shot.
+// Studio tách sẵn tiếng của từng nguồn thành WAV 16 kHz mono (`stage:audio/<source_id>.wav`), nên máy farm
+// không phải tải file video gốc. Output `transcribe.json`.
+// ---------------------------------------------------------------------------------------------
+
+export const StudioTranscribePayloadSchema = z
+  .strictObject({
+    production_id: z.string().min(1).max(100),
+    /** Tên mô hình faster-whisper. */
+    model: z
+      .string()
+      .min(1)
+      .max(60)
+      .regex(/^[A-Za-z0-9._-]+$/)
+      .default('large-v3'),
+    sources: z
+      .array(
+        z.strictObject({
+          /** Id nguồn của Studio, trả lại nguyên trong manifest. */
+          source_id: z
+            .string()
+            .min(1)
+            .max(100)
+            .regex(/^[A-Za-z0-9_-]+$/),
+          /** WAV 16 kHz mono, ví dụ `stage:audio/src_01HZX.wav`. */
+          audio: InputNameSchema,
+          /** Mã ngôn ngữ (`vi`, `en`); `null` = để mô hình tự nhận. */
+          language: z.string().min(2).max(10).nullable().default(null),
+        }),
+      )
+      .min(1)
+      .max(200),
+    /** Căn mốc từng từ bằng mô hình căn chỉnh của WhisperX; tắt thì chỉ có mốc theo câu. */
+    align_words: z.boolean().default(true),
+  })
+  .refine((p) => new Set(p.sources.map((s) => s.source_id)).size === p.sources.length, {
+    message: 'source_id must be unique',
+    path: ['sources'],
+  });
+export type StudioTranscribePayload = z.infer<typeof StudioTranscribePayloadSchema>;
+
+export const TRANSCRIBE_MANIFEST_SCHEMA = 'ag.studio.transcribe/v1';
+export const TRANSCRIBE_MANIFEST_PATH = 'transcribe.json';
+
+const TranscribeWordSchema = z.strictObject({
+  word: z.string().min(1),
+  start: z.number().min(0),
+  end: z.number().min(0),
+  score: z.number().min(0).max(1).optional(),
+});
+
+export const TranscribeManifestSchema = z.strictObject({
+  schema: z.literal(TRANSCRIBE_MANIFEST_SCHEMA),
+  production_id: z.string(),
+  engine: z.strictObject({ name: z.string(), version: z.string().nullable() }),
+  sources: z.array(
+    z.strictObject({
+      source_id: z.string(),
+      /** Ngôn ngữ nhận ra (hoặc đã cho); `null` khi nguồn không có lời. */
+      language: z.string().nullable(),
+      /** `word` khi căn được từng từ, `segment` khi chỉ có mốc theo câu. */
+      alignment: z.enum(['word', 'segment']),
+      segments: z.array(
+        z.strictObject({
+          start: z.number().min(0),
+          end: z.number().min(0),
+          text: z.string(),
+          words: z.array(TranscribeWordSchema).default([]),
+        }),
+      ),
+    }),
+  ),
+});
+export type TranscribeManifest = z.infer<typeof TranscribeManifestSchema>;

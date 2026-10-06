@@ -15,6 +15,11 @@ import {
   SignRequestSchema,
   StudioRenderPayloadSchema,
   StudioExportPremierePayloadSchema,
+  StudioTranscribePayloadSchema,
+  TranscribeManifestSchema,
+  TRANSCRIBE_MANIFEST_SCHEMA,
+  JOB_TYPE_SPECS,
+  ROLE_KINDS,
   RenderManifestSchema,
   RENDER_MANIFEST_SCHEMA,
   thumbnailOutputPath,
@@ -150,6 +155,17 @@ describe('requirements', () => {
       python: true,
       min_vram_mb: 6000,
     });
+    expect(mergeRequirements('studio.transcribe', {})).toEqual({ gpu: true, python: true });
+  });
+
+  it('studio.transcribe is a studio job on a GPU slot', () => {
+    expect(JOB_TYPE_SPECS['studio.transcribe']).toMatchObject({ owner: 'studio', lane: 'interactive', slot: 'gpu' });
+  });
+
+  it('a render node takes every studio job type', () => {
+    expect([...ROLE_KINDS.render].sort()).toEqual(
+      ['studio.export_premiere', 'studio.render_final', 'studio.render_preview', 'studio.transcribe', 'studio.tts'],
+    );
   });
 });
 
@@ -273,6 +289,55 @@ describe('payloads', () => {
         ],
       }).success,
     ).toBe(false);
+  });
+
+  describe('studio.transcribe', () => {
+    const base = {
+      production_id: 'p1',
+      sources: [{ source_id: 'src_01HZX', audio: 'stage:audio/src_01HZX.wav' }],
+    };
+
+    it('fills the defaults', () => {
+      const p = StudioTranscribePayloadSchema.parse(base);
+      expect(p.model).toBe('large-v3');
+      expect(p.align_words).toBe(true);
+      expect(p.sources[0]?.language).toBeNull();
+    });
+
+    it('takes a language per source', () => {
+      const p = StudioTranscribePayloadSchema.parse({ ...base, sources: [{ ...base.sources[0], language: 'vi' }] });
+      expect(p.sources[0]?.language).toBe('vi');
+    });
+
+    it('rejects a bad source id, a bad audio input, a repeated source and an empty list', () => {
+      const one = base.sources[0];
+      expect(StudioTranscribePayloadSchema.safeParse({ ...base, sources: [{ ...one, source_id: 'a b' }] }).success).toBe(false);
+      expect(StudioTranscribePayloadSchema.safeParse({ ...base, sources: [{ ...one, audio: 'stage:../x.wav' }] }).success).toBe(false);
+      expect(StudioTranscribePayloadSchema.safeParse({ ...base, sources: [one, one] }).success).toBe(false);
+      expect(StudioTranscribePayloadSchema.safeParse({ ...base, sources: [] }).success).toBe(false);
+      expect(StudioTranscribePayloadSchema.safeParse({ ...base, extra: 1 }).success).toBe(false);
+    });
+
+    it('reads a manifest with word timings', () => {
+      const m = TranscribeManifestSchema.parse({
+        schema: TRANSCRIBE_MANIFEST_SCHEMA,
+        production_id: 'p1',
+        engine: { name: 'whisperx:large-v3', version: null },
+        sources: [
+          {
+            source_id: 'src_01HZX',
+            language: 'vi',
+            alignment: 'word',
+            segments: [{ start: 0.5, end: 2, text: 'Xin chào', words: [{ word: 'Xin', start: 0.5, end: 0.9, score: 0.9 }] }],
+          },
+          { source_id: 'src_02', language: null, alignment: 'segment', segments: [] },
+        ],
+      });
+      expect(m.sources[0]?.segments[0]?.words[0]?.word).toBe('Xin');
+      expect(
+        TranscribeManifestSchema.safeParse({ ...m, sources: [{ ...m.sources[1]!, alignment: 'line' }] }).success,
+      ).toBe(false);
+    });
   });
 
   it('StudioExportPremierePayloadSchema: media_names defaults to {} and keeps given names', () => {
