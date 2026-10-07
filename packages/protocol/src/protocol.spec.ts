@@ -359,6 +359,20 @@ describe('payloads', () => {
     ).toBe(false);
   });
 
+  it('StudioExportPremierePayloadSchema: edit_style is optional and only whole|cut', () => {
+    const base = {
+      production_id: 'p1',
+      episode_id: 'e1',
+      composition: 'stage:composition.json',
+      media: 'proxy',
+      name: 'Tập 1',
+      output: 'episodes/e1/premiere/j1.zip',
+    };
+    expect(StudioExportPremierePayloadSchema.parse(base).edit_style).toBeUndefined();
+    expect(StudioExportPremierePayloadSchema.parse({ ...base, edit_style: 'cut' }).edit_style).toBe('cut');
+    expect(StudioExportPremierePayloadSchema.safeParse({ ...base, edit_style: 'trim' }).success).toBe(false);
+  });
+
   it('RenderManifestSchema: fills thumbnails default', () => {
     const manifest = RenderManifestSchema.parse({
       schema: RENDER_MANIFEST_SCHEMA,
