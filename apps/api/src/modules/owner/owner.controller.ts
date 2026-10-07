@@ -61,6 +61,12 @@ export class OwnerController {
     return this.svc.list(req.ownerContext!.owner, query);
   }
 
+  /** Máy farm chủ job dùng được (tên, loại job, GPU, đang bận bao nhiêu job): để hiện và ghim job vào một máy. */
+  @Get('v1/owner/nodes')
+  async listNodes(@Req() req: Request) {
+    return this.svc.listNodes(req.ownerContext!.owner);
+  }
+
   @Get('v1/owner/jobs/:id')
   async getJob(@Req() req: Request, @Param('id') jobId: string) {
     return this.svc.get(req.ownerContext!.owner, jobId);

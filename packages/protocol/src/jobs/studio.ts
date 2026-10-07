@@ -175,6 +175,12 @@ export const StudioExportPremierePayloadSchema = z.strictObject({
     .default({}),
   /** Đường dẫn file zip kết quả, ví dụ `episodes/<eid>/premiere/<job>.zip`. */
   output: RelativePathSchema,
+  /**
+   * Kiểu dựng của tập. Studio chỉ gửi `cut` (cắt theo shot: clip có điểm vào/ra, chuyển cảnh, lời dẫn). Worker cũ
+   * (trước khi đọc được timeline v4) không biết trường này nên từ chối payload (`strictObject`), thay vì xuất một
+   * project bỏ mất điểm cắt, chuyển cảnh và lời dẫn mà không báo.
+   */
+  edit_style: z.enum(['whole', 'cut']).optional(),
 });
 export type StudioExportPremierePayload = z.infer<typeof StudioExportPremierePayloadSchema>;
 

@@ -99,3 +99,22 @@ export const JobControlResponseSchema = z.strictObject({
   affected: z.int().nonnegative(),
 });
 export type JobControlResponse = z.infer<typeof JobControlResponseSchema>;
+
+/**
+ * Một máy farm như chủ job thấy (`GET /v1/owner/nodes`): để hiện danh sách máy, tên máy của job (`JobView.node_id`)
+ * và ghim job vào một máy (`requirements.node_id`). Chỉ máy đang bật nhận được ít nhất một loại job của chủ job.
+ */
+export const OwnerNodeViewSchema = z.strictObject({
+  id: z.uuid(),
+  name: z.string(),
+  online: z.boolean(),
+  /** Loại job máy nhận, trong các loại chủ job được gửi. */
+  kinds: z.array(JobTypeSchema),
+  gpus: z.array(z.strictObject({ name: z.string(), vram_mb: z.int().nonnegative(), nvenc: z.boolean() })),
+  running_jobs: z.int().nonnegative(),
+  last_seen_at: IsoDateTimeSchema.nullable(),
+});
+export type OwnerNodeView = z.infer<typeof OwnerNodeViewSchema>;
+
+export const ListOwnerNodesResponseSchema = z.strictObject({ nodes: z.array(OwnerNodeViewSchema) });
+export type ListOwnerNodesResponse = z.infer<typeof ListOwnerNodesResponseSchema>;
