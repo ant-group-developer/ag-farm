@@ -5,6 +5,8 @@ import {
   InputNameSchema,
   meetsRequirements,
   mergeRequirements,
+  nodeMeetsRequirements,
+  OwnerNodeViewSchema,
   RelativePathSchema,
   ScanAiPayloadSchema,
   ScanExtractPayloadSchema,
@@ -156,6 +158,24 @@ describe('requirements', () => {
       min_vram_mb: 6000,
     });
     expect(mergeRequirements('studio.transcribe', {})).toEqual({ gpu: true, python: true });
+  });
+
+  it('a job pinned to a node is for that node only, and keeps its other requirements', () => {
+    const id = randomUUID();
+    expect(nodeMeetsRequirements(id, gpuBox, { node_id: id, nvenc: true })).toBe(true);
+    expect(nodeMeetsRequirements(randomUUID(), gpuBox, { node_id: id })).toBe(false);
+    expect(nodeMeetsRequirements(id, cpuBox, { node_id: id, gpu: true })).toBe(false);
+    expect(nodeMeetsRequirements(randomUUID(), gpuBox, {})).toBe(true);
+    expect(mergeRequirements('studio.render_final', { node_id: id })).toEqual({ node_id: id });
+  });
+
+  it('an owner sees a node by name, kinds, GPUs and load', () => {
+    const view = {
+      id: randomUUID(), name: 'render-01', online: true, kinds: ['studio.render_final'],
+      gpus: [{ name: 'RTX 3060', vram_mb: 12288, nvenc: true }], running_jobs: 1, last_seen_at: '2026-10-07T10:00:00.000Z',
+    };
+    expect(OwnerNodeViewSchema.parse(view)).toEqual(view);
+    expect(OwnerNodeViewSchema.safeParse({ ...view, token_hash: 'x' }).success).toBe(false);
   });
 
   it('studio.transcribe is a studio job on a GPU slot', () => {
