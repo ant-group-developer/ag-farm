@@ -24,6 +24,11 @@ export const StudioTtsPayloadSchema = z.strictObject({
     /** Lời đọc của giọng mẫu (OmniVoice cần khi clone). */
     reference_text: z.string().max(2000).nullable(),
     speed: z.number().min(0.5).max(2).default(1),
+    /**
+     * Không có giọng mẫu (`reference: null`): mô tả giọng cho OmniVoice "voice design", các nhãn cách nhau bằng dấu
+     * phẩy, ví dụ `female, young adult, moderate pitch`. Worker cũ không biết trường này nên từ chối payload.
+     */
+    instruct: z.string().min(1).max(200).nullable().optional(),
   }),
   lines: z
     .array(
