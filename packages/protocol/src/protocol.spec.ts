@@ -17,6 +17,7 @@ import {
   SignRequestSchema,
   StudioRenderPayloadSchema,
   StudioExportPremierePayloadSchema,
+  StudioTtsPayloadSchema,
   StudioTranscribePayloadSchema,
   TranscribeManifestSchema,
   TRANSCRIBE_MANIFEST_SCHEMA,
@@ -377,6 +378,14 @@ describe('payloads', () => {
     expect(
       StudioExportPremierePayloadSchema.safeParse({ ...base, media_names: { 'asset:a1': '' } }).success,
     ).toBe(false);
+  });
+
+  it('StudioTtsPayloadSchema: a voice designed from an instruct, without a sample', () => {
+    const base = { production_id: 'p1', language: 'vi', lines: [{ line_id: 'L001', text: 'Xin chào' }] };
+    const designed = StudioTtsPayloadSchema.parse({ ...base, voice: { reference: null, reference_text: null, instruct: 'female, young adult' } });
+    expect(designed.voice.instruct).toBe('female, young adult');
+    expect(StudioTtsPayloadSchema.parse({ ...base, voice: { reference: null, reference_text: null } }).voice.instruct).toBeUndefined();
+    expect(StudioTtsPayloadSchema.safeParse({ ...base, voice: { reference: null, reference_text: null, instruct: '' } }).success).toBe(false);
   });
 
   it('StudioExportPremierePayloadSchema: edit_style is optional and only whole|cut', () => {
