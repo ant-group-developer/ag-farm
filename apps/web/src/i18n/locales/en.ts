@@ -71,6 +71,7 @@ export const en: LocaleMessages = {
       render_preview: 'Studio: preview render',
       render_final: 'Studio: final render',
       export_premiere: 'Studio: Premiere export',
+      transcribe: 'Studio: speech transcription',
     },
   },
   lane: {

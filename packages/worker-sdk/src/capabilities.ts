@@ -127,26 +127,29 @@ async function detectOllamaModels(ollamaUrl = 'http://localhost:11434'): Promise
 
 // ---- Python / torch ----
 
-async function detectPython(): Promise<string | null> {
-  try {
-    const { stdout } = await execFileAsync(
-      'python',
-      ['-c', 'import torch,sys;print(sys.version.split()[0])'],
-      { timeout: DETECT_TIMEOUT_MS },
-    );
-    return stdout.trim() || null;
-  } catch {
+export type PythonExec = (file: string, args: string[], options: { timeout: number }) => Promise<{ stdout: string }>;
+
+const PYTHON_TORCH_PROBE = ['-c', 'import torch,sys;print(sys.version.split()[0])'];
+/** Một lần import torch nguội (lúc máy vừa bật, ổ chậm) mất hơn 8 s của các phép dò khác. */
+const PYTHON_DETECT_TIMEOUT_MS = 30_000;
+
+/**
+ * Phiên bản Python của máy nếu nó import được torch. Có `pythonBin` thì chỉ dò đúng file đó (venv của handler),
+ * không lùi về PATH: máy khai `python` phải là máy chạy được chính interpreter mà handler sẽ dùng.
+ * Không có thì thử `python` rồi `python3` trên PATH.
+ */
+export async function detectPython(pythonBin?: string, exec: PythonExec = execFileAsync): Promise<string | null> {
+  const candidates = pythonBin ? [pythonBin] : ['python', 'python3'];
+  for (const file of candidates) {
     try {
-      const { stdout } = await execFileAsync(
-        'python3',
-        ['-c', 'import torch,sys;print(sys.version.split()[0])'],
-        { timeout: DETECT_TIMEOUT_MS },
-      );
-      return stdout.trim() || null;
+      const { stdout } = await exec(file, PYTHON_TORCH_PROBE, { timeout: PYTHON_DETECT_TIMEOUT_MS });
+      const version = String(stdout).trim();
+      if (version) return version;
     } catch {
-      return null;
+      // thử interpreter kế tiếp
     }
   }
+  return null;
 }
 
 // ---- Public API ----
@@ -156,6 +159,8 @@ export interface CapabilitiesOptions {
   ollamaUrl?: string;
   /** Nếu false thì bỏ qua Python/torch (mặc định false). */
   detectPythonTorch?: boolean;
+  /** Interpreter handler sẽ chạy (vd `extra.python_bin`); không có thì dò `python`/`python3` trên PATH. */
+  pythonBin?: string;
 }
 
 export async function detectCapabilities(options: CapabilitiesOptions = {}): Promise<Capabilities> {
@@ -163,7 +168,7 @@ export async function detectCapabilities(options: CapabilitiesOptions = {}): Pro
     detectGpus(),
     detectFfmpeg(options.ffmpegPath),
     detectOllamaModels(options.ollamaUrl),
-    options.detectPythonTorch ? detectPython() : Promise.resolve<string | null>(null),
+    options.detectPythonTorch ? detectPython(options.pythonBin) : Promise.resolve<string | null>(null),
   ]);
 
   // Cập nhật nvenc/nvdec cho từng GPU
