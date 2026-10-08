@@ -402,6 +402,21 @@ describe('payloads', () => {
     expect(StudioExportPremierePayloadSchema.safeParse({ ...base, edit_style: 'trim' }).success).toBe(false);
   });
 
+  it('StudioExportPremierePayloadSchema: audio is optional and only per_segment', () => {
+    const base = {
+      production_id: 'p1',
+      episode_id: 'e1',
+      composition: 'stage:composition.json',
+      media: 'proxy',
+      name: 'Tập 1',
+      output: 'episodes/e1/premiere/j1.zip',
+      edit_style: 'cut',
+    };
+    expect(StudioExportPremierePayloadSchema.parse(base).audio).toBeUndefined();
+    expect(StudioExportPremierePayloadSchema.parse({ ...base, audio: 'per_segment' }).audio).toBe('per_segment');
+    expect(StudioExportPremierePayloadSchema.safeParse({ ...base, audio: 'mixed' }).success).toBe(false);
+  });
+
   it('RenderManifestSchema: fills thumbnails default', () => {
     const manifest = RenderManifestSchema.parse({
       schema: RENDER_MANIFEST_SCHEMA,
