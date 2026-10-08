@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   JOB_TYPE_SPECS,
@@ -11,6 +12,7 @@ import {
   JobControlResponse,
   JobView,
   ListJobsQuery,
+  ListOwnerNodesResponse,
   ListJobsResponse,
   SubmitJobRequest,
   SubmitJobResponse,
@@ -18,9 +20,11 @@ import {
 } from '@ag-farm/protocol';
 import { Repository } from 'typeorm';
 import { FarmJobEntity } from '../../database/entities/farm-job.entity';
+import { FarmNodeEntity } from '../../database/entities/farm-node.entity';
 import { FarmOwnerEntity } from '../../database/entities/farm-owner.entity';
 import { controlJobs, type JobControlAction } from '../../common/job-control';
 import { toJobView } from '../../common/job-view';
+import { toOwnerNodeView } from './owner.views';
 
 /** Encode cursor: base64(json({updated_at, id})) */
 function encodeCursor(updatedAt: Date, id: string): string {
@@ -46,7 +50,22 @@ export class OwnerService {
   constructor(
     @InjectRepository(FarmJobEntity)
     private readonly jobRepo: Repository<FarmJobEntity>,
+    @InjectRepository(FarmNodeEntity)
+    private readonly nodeRepo: Repository<FarmNodeEntity>,
+    private readonly config: ConfigService,
   ) {}
+
+  /** The active nodes that take at least one of the owner's job types, by name. */
+  async listNodes(owner: FarmOwnerEntity): Promise<ListOwnerNodesResponse> {
+    const offlineSeconds = this.config.get<number>('NODE_OFFLINE_AFTER_SECONDS') ?? 90;
+    const threshold = Date.now() - offlineSeconds * 1000;
+    const nodes = await this.nodeRepo.find({ where: { status: 'active' }, order: { name: 'ASC' } });
+    return {
+      nodes: nodes
+        .map((n) => toOwnerNodeView(n, n.lastSeenAt != null && n.lastSeenAt.getTime() >= threshold, owner.allowedTypes))
+        .filter((v): v is NonNullable<typeof v> => v !== null),
+    };
+  }
 
   async submit(owner: FarmOwnerEntity, req: SubmitJobRequest): Promise<SubmitJobResponse> {
     const spec = JOB_TYPE_SPECS[req.type];

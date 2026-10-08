@@ -5,6 +5,8 @@ import {
   InputNameSchema,
   meetsRequirements,
   mergeRequirements,
+  nodeMeetsRequirements,
+  OwnerNodeViewSchema,
   RelativePathSchema,
   ScanAiPayloadSchema,
   ScanExtractPayloadSchema,
@@ -15,6 +17,7 @@ import {
   SignRequestSchema,
   StudioRenderPayloadSchema,
   StudioExportPremierePayloadSchema,
+  StudioTtsPayloadSchema,
   StudioTranscribePayloadSchema,
   TranscribeManifestSchema,
   TRANSCRIBE_MANIFEST_SCHEMA,
@@ -156,6 +159,24 @@ describe('requirements', () => {
       min_vram_mb: 6000,
     });
     expect(mergeRequirements('studio.transcribe', {})).toEqual({ gpu: true, python: true });
+  });
+
+  it('a job pinned to a node is for that node only, and keeps its other requirements', () => {
+    const id = randomUUID();
+    expect(nodeMeetsRequirements(id, gpuBox, { node_id: id, nvenc: true })).toBe(true);
+    expect(nodeMeetsRequirements(randomUUID(), gpuBox, { node_id: id })).toBe(false);
+    expect(nodeMeetsRequirements(id, cpuBox, { node_id: id, gpu: true })).toBe(false);
+    expect(nodeMeetsRequirements(randomUUID(), gpuBox, {})).toBe(true);
+    expect(mergeRequirements('studio.render_final', { node_id: id })).toEqual({ node_id: id });
+  });
+
+  it('an owner sees a node by name, kinds, GPUs and load', () => {
+    const view = {
+      id: randomUUID(), name: 'render-01', online: true, kinds: ['studio.render_final'],
+      gpus: [{ name: 'RTX 3060', vram_mb: 12288, nvenc: true }], running_jobs: 1, last_seen_at: '2026-10-07T10:00:00.000Z',
+    };
+    expect(OwnerNodeViewSchema.parse(view)).toEqual(view);
+    expect(OwnerNodeViewSchema.safeParse({ ...view, token_hash: 'x' }).success).toBe(false);
   });
 
   it('studio.transcribe is a studio job on a GPU slot', () => {
@@ -357,6 +378,28 @@ describe('payloads', () => {
     expect(
       StudioExportPremierePayloadSchema.safeParse({ ...base, media_names: { 'asset:a1': '' } }).success,
     ).toBe(false);
+  });
+
+  it('StudioTtsPayloadSchema: a voice designed from an instruct, without a sample', () => {
+    const base = { production_id: 'p1', language: 'vi', lines: [{ line_id: 'L001', text: 'Xin chào' }] };
+    const designed = StudioTtsPayloadSchema.parse({ ...base, voice: { reference: null, reference_text: null, instruct: 'female, young adult' } });
+    expect(designed.voice.instruct).toBe('female, young adult');
+    expect(StudioTtsPayloadSchema.parse({ ...base, voice: { reference: null, reference_text: null } }).voice.instruct).toBeUndefined();
+    expect(StudioTtsPayloadSchema.safeParse({ ...base, voice: { reference: null, reference_text: null, instruct: '' } }).success).toBe(false);
+  });
+
+  it('StudioExportPremierePayloadSchema: edit_style is optional and only whole|cut', () => {
+    const base = {
+      production_id: 'p1',
+      episode_id: 'e1',
+      composition: 'stage:composition.json',
+      media: 'proxy',
+      name: 'Tập 1',
+      output: 'episodes/e1/premiere/j1.zip',
+    };
+    expect(StudioExportPremierePayloadSchema.parse(base).edit_style).toBeUndefined();
+    expect(StudioExportPremierePayloadSchema.parse({ ...base, edit_style: 'cut' }).edit_style).toBe('cut');
+    expect(StudioExportPremierePayloadSchema.safeParse({ ...base, edit_style: 'trim' }).success).toBe(false);
   });
 
   it('RenderManifestSchema: fills thumbnails default', () => {

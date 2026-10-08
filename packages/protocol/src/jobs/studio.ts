@@ -24,6 +24,11 @@ export const StudioTtsPayloadSchema = z.strictObject({
     /** Lời đọc của giọng mẫu (OmniVoice cần khi clone). */
     reference_text: z.string().max(2000).nullable(),
     speed: z.number().min(0.5).max(2).default(1),
+    /**
+     * Không có giọng mẫu (`reference: null`): mô tả giọng cho OmniVoice "voice design", các nhãn cách nhau bằng dấu
+     * phẩy, ví dụ `female, young adult, moderate pitch`. Worker cũ không biết trường này nên từ chối payload.
+     */
+    instruct: z.string().min(1).max(200).nullable().optional(),
   }),
   lines: z
     .array(
@@ -175,6 +180,12 @@ export const StudioExportPremierePayloadSchema = z.strictObject({
     .default({}),
   /** Đường dẫn file zip kết quả, ví dụ `episodes/<eid>/premiere/<job>.zip`. */
   output: RelativePathSchema,
+  /**
+   * Kiểu dựng của tập. Studio chỉ gửi `cut` (cắt theo shot: clip có điểm vào/ra, chuyển cảnh, lời dẫn). Worker cũ
+   * (trước khi đọc được timeline v4) không biết trường này nên từ chối payload (`strictObject`), thay vì xuất một
+   * project bỏ mất điểm cắt, chuyển cảnh và lời dẫn mà không báo.
+   */
+  edit_style: z.enum(['whole', 'cut']).optional(),
 });
 export type StudioExportPremierePayload = z.infer<typeof StudioExportPremierePayloadSchema>;
 

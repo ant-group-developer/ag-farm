@@ -38,6 +38,11 @@ export const RequirementsSchema = z.strictObject({
   ollama_models: z.array(z.string().max(200)).max(10).optional(),
   python: z.boolean().optional(),
   os: z.enum(['windows', 'linux']).optional(),
+  /**
+   * Chỉ máy có id này nhận job (chủ job ghim một máy cụ thể, xem `GET /v1/owner/nodes`). Hub và worker build trước
+   * khi có trường này từ chối requirements có nó (`strictObject`).
+   */
+  node_id: z.uuid().optional(),
 });
 export type Requirements = z.infer<typeof RequirementsSchema>;
 
@@ -59,6 +64,12 @@ export function meetsRequirements(capabilities: Capabilities, requirements: Requ
     }
   }
   return true;
+}
+
+/** `meetsRequirements` cộng thêm việc ghim máy: job có `node_id` chỉ cho đúng máy đó. Hub dùng khi claim. */
+export function nodeMeetsRequirements(nodeId: string, capabilities: Capabilities, requirements: Requirements): boolean {
+  if (requirements.node_id && requirements.node_id !== nodeId) return false;
+  return meetsRequirements(capabilities, requirements);
 }
 
 /** Ollama coi `qwen2.5vl` và `qwen2.5vl:latest` là một. */

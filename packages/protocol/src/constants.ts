@@ -29,4 +29,5 @@ export const OWNER_API = {
   job: (jobId: string) => `/v1/owner/jobs/${jobId}`,
   ack: (jobId: string) => `/v1/owner/jobs/${jobId}/ack`,
   cancel: (jobId: string) => `/v1/owner/jobs/${jobId}/cancel`,
+  nodes: '/v1/owner/nodes',
 } as const;

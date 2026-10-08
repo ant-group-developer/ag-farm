@@ -165,6 +165,22 @@ describe('FarmOwnerClient', () => {
     }
   });
 
+  it('listNodes calls GET /v1/owner/nodes', async () => {
+    const node = {
+      id: '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b', name: 'render-01', online: true, kinds: ['studio.render_final'],
+      gpus: [{ name: 'RTX 3060', vram_mb: 12288, nvenc: true }], running_jobs: 0, last_seen_at: TS,
+    };
+    let path = '';
+    const srv = await makeServer((req, res) => { path = `${req.method} ${req.url}`; jsonRes(res, 200, envelope({ nodes: [node] })); });
+    try {
+      const client = new FarmOwnerClient({ baseUrl: srv.url, ownerKey: 'k' });
+      expect(await client.listNodes()).toEqual({ nodes: [node] });
+      expect(path).toBe('GET /v1/owner/nodes');
+    } finally {
+      await srv.close();
+    }
+  });
+
   it('throws FarmHttpError on 404', async () => {
     const { url, close } = await makeServer((req, res) => {
       jsonRes(res, 404, { message: 'Not found' });

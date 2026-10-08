@@ -19,7 +19,8 @@ import {
   ProgressResponse,
   TICKET_GRACE_SECONDS,
   WorkerMeResponse,
-  meetsRequirements,
+  nodeMeetsRequirements,
+  type Requirements,
   signTicket,
   JOB_TYPE_SPECS,
 } from '@ag-farm/protocol';
@@ -162,8 +163,8 @@ export class WorkerService {
         if (!spec) continue;
 
         // Kiểm requirements
-        const reqs = candidate.requirements as Parameters<typeof meetsRequirements>[1];
-        if (!meetsRequirements(caps, reqs)) continue;
+        const reqs = candidate.requirements as Requirements;
+        if (!nodeMeetsRequirements(freshNode.id, caps, reqs)) continue;
 
         // Kiểm slot
         const slotKind = spec.slot;
