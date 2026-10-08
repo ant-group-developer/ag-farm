@@ -186,6 +186,12 @@ export const StudioExportPremierePayloadSchema = z.strictObject({
    * project bỏ mất điểm cắt, chuyển cảnh và lời dẫn mà không báo.
    */
   edit_style: z.enum(['whole', 'cut']).optional(),
+  /**
+   * Tiếng theo từng clip: Studio gửi `per_segment` khi có clip tắt tiếng riêng (`segments[].has_audio` của
+   * composition không giống nhau). Worker đọc được thì chỉ đặt tiếng (A1) cho clip có tiếng; worker cũ không biết trường
+   * này nên từ chối payload, thay vì xuất project vẫn giữ tiếng của clip đã tắt mà không báo.
+   */
+  audio: z.enum(['per_segment']).optional(),
 });
 export type StudioExportPremierePayload = z.infer<typeof StudioExportPremierePayloadSchema>;
 
