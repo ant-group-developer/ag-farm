@@ -8,6 +8,8 @@ import {
   ListJobsQuery,
   ListJobsResponse,
   ListJobsResponseSchema,
+  ListOwnerNodesResponseSchema,
+  type ListOwnerNodesResponse,
   RelativePathSchema,
   SubmitJobRequest,
   SubmitJobResponse,
@@ -128,6 +130,12 @@ export class FarmOwnerClient {
       `/v1/owner/jobs/${encodeURIComponent(jobId)}/cancel`,
     );
     return JobViewSchema.parse(raw);
+  }
+
+  /** Máy farm chủ job này dùng được: tên, loại job, GPU, số job đang chạy. */
+  async listNodes(): Promise<ListOwnerNodesResponse> {
+    const raw = await this.req<unknown>('GET', '/v1/owner/nodes');
+    return ListOwnerNodesResponseSchema.parse(raw);
   }
 
   /** Tạm dừng / chạy tiếp / huỷ job của chủ job này theo id hoặc cả nhóm `group_key`. */

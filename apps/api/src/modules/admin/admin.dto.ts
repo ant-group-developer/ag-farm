@@ -39,8 +39,8 @@ export const AdminJobControlSchema = z
     types: z.array(JobTypeSchema).min(1).optional(),
     statuses: z.array(JobStatusSchema).min(1).optional(),
   })
-  .refine((v) => Boolean(v.ids || v.group_key || v.owner || v.types), {
-    message: 'Pick jobs by ids, group_key, owner or types',
+  .refine((v) => Boolean(v.ids || v.group_key || v.owner || v.types || v.statuses), {
+    message: 'Pick jobs by ids, group_key, owner, types or statuses',
   });
 export type AdminJobControlDto = z.infer<typeof AdminJobControlSchema>;
 
