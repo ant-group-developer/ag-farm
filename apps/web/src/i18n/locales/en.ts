@@ -201,6 +201,7 @@ export const en: LocaleMessages = {
     tokenTitle: 'Worker token',
     tokenLabel: 'Token (save it now)',
     reportedKinds: 'Job types the worker reports',
+    reportedKindsHelp: 'The worker reports these itself each time it connects, so they cannot be edited here. To limit them, use "Job types it is given".',
     allowedKinds: 'Job types it is given',
     allowedKindsHelp: 'Leave empty to give the worker every job type it reports.',
     allowedKindsAll: 'All reported types',

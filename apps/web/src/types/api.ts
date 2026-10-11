@@ -222,7 +222,6 @@ export interface CreateNodeRequest {
 
 export interface PatchNodeRequest {
   name?: string;
-  kinds?: JobType[];
   allowed_kinds?: JobType[] | null;
   status?: 'active' | 'disabled';
 }
