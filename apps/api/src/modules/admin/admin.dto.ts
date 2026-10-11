@@ -10,7 +10,7 @@ export type CreateNodeDto = z.infer<typeof CreateNodeSchema>;
 
 export const PatchNodeSchema = z.strictObject({
   name: z.string().min(1).max(200).optional(),
-  kinds: z.array(JobTypeSchema).min(1).optional(),
+  // Không có `kinds`: worker tự báo qua heartbeat (ghi đè mỗi lần), admin giới hạn bằng allowed_kinds.
   allowed_kinds: z.array(JobTypeSchema).nullable().optional(),
   status: z.enum(['active', 'disabled']).optional(),
   schedule: z.unknown().optional(),
