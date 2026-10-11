@@ -15,6 +15,7 @@ import type {
   AdminListJobsQuery,
   AdminListNodesQuery,
   AdminListOwnersQuery,
+  AdminStatsPeriodQuery,
   CreateNodeDto,
   CreateOwnerDto,
   PatchNodeDto,
@@ -274,6 +275,114 @@ export class AdminService {
     return {
       jobs: jobRows.map((r) => ({ status: r.status, type: r.type, count: Number(r.count) })),
       nodes: { total: totalNodes, online: onlineNodes },
+    };
+  }
+
+  /**
+   * Thống kê trong kỳ [from, to): job tạo ra (theo created_at) và job kết thúc (theo finished_at, trạng thái cuối),
+   * thời gian chạy của job hoàn tất (lần chạy cuối: finished_at - started_at), gom theo loại và theo ô thời gian.
+   * Ô thời gian tính trong múi giờ `tz`; mọi ô trong kỳ đều có mặt, kể cả ô trống.
+   */
+  async getStatsPeriod(query: AdminStatsPeriodQuery) {
+    const { from, to, bucket, tz } = query;
+    // bucket đã qua enum nên ghép thẳng được vào interval; from/to/tz đi qua tham số.
+    const step = `1 ${bucket}`;
+
+    const [seriesRows, typeRows] = await Promise.all([
+      this.jobRepo.query(
+        `WITH buckets AS (
+           SELECT generate_series(
+             date_trunc('${bucket}', $1::timestamptz AT TIME ZONE $3),
+             date_trunc('${bucket}', ($2::timestamptz - interval '1 microsecond') AT TIME ZONE $3),
+             interval '${step}'
+           ) AS b
+         ),
+         created AS (
+           SELECT date_trunc('${bucket}', created_at AT TIME ZONE $3) AS b, COUNT(*) AS n
+           FROM farm_jobs
+           WHERE created_at >= $1 AND created_at < $2
+           GROUP BY 1
+         ),
+         finished AS (
+           SELECT date_trunc('${bucket}', finished_at AT TIME ZONE $3) AS b,
+                  COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+                  COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+                  COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled
+           FROM farm_jobs
+           WHERE finished_at >= $1 AND finished_at < $2
+             AND status IN ('completed', 'failed', 'cancelled')
+           GROUP BY 1
+         )
+         SELECT to_char(buckets.b, 'YYYY-MM-DD"T"HH24:MI:SS') AS t,
+                COALESCE(created.n, 0) AS created,
+                COALESCE(finished.completed, 0) AS completed,
+                COALESCE(finished.failed, 0) AS failed,
+                COALESCE(finished.cancelled, 0) AS cancelled
+         FROM buckets
+         LEFT JOIN created ON created.b = buckets.b
+         LEFT JOIN finished ON finished.b = buckets.b
+         ORDER BY buckets.b`,
+        [from, to, tz],
+      ) as Promise<Array<Record<'t' | 'created' | 'completed' | 'failed' | 'cancelled', string>>>,
+      this.jobRepo.query(
+        `WITH j AS (
+           SELECT type, status,
+                  created_at >= $1 AND created_at < $2 AS created_in,
+                  finished_at >= $1 AND finished_at < $2 AS finished_in,
+                  EXTRACT(EPOCH FROM finished_at - started_at) * 1000 AS run_ms
+           FROM farm_jobs
+           WHERE (created_at >= $1 AND created_at < $2) OR (finished_at >= $1 AND finished_at < $2)
+         )
+         SELECT type,
+                COUNT(*) FILTER (WHERE created_in) AS created,
+                COUNT(*) FILTER (WHERE finished_in AND status = 'completed') AS completed,
+                COUNT(*) FILTER (WHERE finished_in AND status = 'failed') AS failed,
+                COUNT(*) FILTER (WHERE finished_in AND status = 'cancelled') AS cancelled,
+                AVG(run_ms) FILTER (WHERE finished_in AND status = 'completed') AS avg_ms,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY run_ms)
+                  FILTER (WHERE finished_in AND status = 'completed') AS p95_ms
+         FROM j
+         GROUP BY GROUPING SETS ((type), ())
+         ORDER BY type NULLS FIRST`,
+        [from, to],
+      ) as Promise<
+        Array<{
+          type: string | null;
+          created: string;
+          completed: string;
+          failed: string;
+          cancelled: string;
+          avg_ms: string | number | null;
+          p95_ms: string | number | null;
+        }>
+      >,
+    ]);
+
+    const toMs = (v: string | number | null) => (v == null ? null : Math.round(Number(v)));
+    const toTotals = (r: (typeof typeRows)[number]) => ({
+      created: Number(r.created),
+      completed: Number(r.completed),
+      failed: Number(r.failed),
+      cancelled: Number(r.cancelled),
+      avg_duration_ms: toMs(r.avg_ms),
+      p95_duration_ms: toMs(r.p95_ms),
+    });
+    // GROUPING SETS: dòng type = null là tổng của cả kỳ (luôn có, kể cả khi không có job nào).
+    const totalRow = typeRows.find((r) => r.type == null);
+
+    return {
+      range: { from, to, bucket, tz },
+      summary: totalRow
+        ? toTotals(totalRow)
+        : { created: 0, completed: 0, failed: 0, cancelled: 0, avg_duration_ms: null, p95_duration_ms: null },
+      series: seriesRows.map((r) => ({
+        t: r.t,
+        created: Number(r.created),
+        completed: Number(r.completed),
+        failed: Number(r.failed),
+        cancelled: Number(r.cancelled),
+      })),
+      by_type: typeRows.filter((r) => r.type != null).map((r) => ({ type: r.type as string, ...toTotals(r) })),
     };
   }
 

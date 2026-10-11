@@ -2,6 +2,7 @@ import {
   AdminListJobsQuerySchema,
   AdminListNodesQuerySchema,
   AdminListOwnersQuerySchema,
+  AdminStatsPeriodQuerySchema,
 } from './admin.dto';
 
 describe('AdminListJobsQuerySchema', () => {
@@ -79,5 +80,46 @@ describe('AdminListOwnersQuerySchema', () => {
 
   it('từ chối pageSize vượt max', () => {
     expect(() => AdminListOwnersQuerySchema.parse({ pageSize: '300' })).toThrow();
+  });
+});
+
+describe('AdminStatsPeriodQuerySchema', () => {
+  const day = { from: '2026-10-10T17:00:00.000Z', to: '2026-10-11T17:00:00.000Z', bucket: 'hour' };
+
+  it('chấp nhận một ngày theo giờ, tz mặc định UTC', () => {
+    const result = AdminStatsPeriodQuerySchema.parse(day);
+    expect(result.bucket).toBe('hour');
+    expect(result.tz).toBe('UTC');
+  });
+
+  it('chấp nhận múi giờ IANA và mốc có offset', () => {
+    const result = AdminStatsPeriodQuerySchema.parse({
+      from: '2026-01-01T00:00:00+07:00',
+      to: '2027-01-01T00:00:00+07:00',
+      bucket: 'month',
+      tz: 'Asia/Ho_Chi_Minh',
+    });
+    expect(result.tz).toBe('Asia/Ho_Chi_Minh');
+  });
+
+  it('từ chối múi giờ không tồn tại', () => {
+    expect(() => AdminStatsPeriodQuerySchema.parse({ ...day, tz: 'Mars/Olympus' })).toThrow();
+  });
+
+  it('từ chối from không trước to', () => {
+    expect(() => AdminStatsPeriodQuerySchema.parse({ ...day, to: day.from })).toThrow();
+  });
+
+  it('từ chối kỳ quá dài so với đơn vị gom (quá 1000 ô)', () => {
+    expect(() =>
+      AdminStatsPeriodQuerySchema.parse({ from: '2026-01-01T00:00:00Z', to: '2026-03-01T00:00:00Z', bucket: 'hour' }),
+    ).toThrow();
+    expect(
+      AdminStatsPeriodQuerySchema.parse({ from: '2026-01-01T00:00:00Z', to: '2026-03-01T00:00:00Z', bucket: 'day' }).bucket,
+    ).toBe('day');
+  });
+
+  it('từ chối bucket lạ (bucket được ghép vào SQL)', () => {
+    expect(() => AdminStatsPeriodQuerySchema.parse({ ...day, bucket: "hour'; DROP TABLE farm_jobs; --" })).toThrow();
   });
 });

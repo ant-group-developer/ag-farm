@@ -13,6 +13,8 @@ import type {
   PagedResponse,
   PatchNodeRequest,
   PatchOwnerRequest,
+  StatsPeriodQuery,
+  StatsPeriodResponse,
   StatsResponse,
 } from '../types/api';
 
@@ -84,6 +86,10 @@ export function cancelJobs(body: Record<string, unknown>): Promise<{ affected: n
 
 export function getStats(): Promise<StatsResponse> {
   return api.get<StatsResponse>('/v1/admin/stats');
+}
+
+export function getStatsPeriod(query: StatsPeriodQuery): Promise<StatsPeriodResponse> {
+  return api.get<StatsPeriodResponse>(`/v1/admin/stats/period${toParams({ ...query })}`);
 }
 
 // ---- Owners ----
