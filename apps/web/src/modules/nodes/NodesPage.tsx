@@ -141,7 +141,7 @@ export function NodesPage() {
   const [editNode, setEditNode] = useState<NodeView | null>(null);
   const [secret, setSecret] = useState<{ title: string; label: string; value: string } | null>(null);
   const [form] = Form.useForm<{ name: string; machine?: string; kinds: JobType[] }>();
-  const [editForm] = Form.useForm<{ name: string; kinds: JobType[]; allowed_kinds: JobType[] | null }>();
+  const [editForm] = Form.useForm<{ name: string; allowed_kinds: JobType[] | null }>();
 
   // URL state via nuqs
   const [query, setQuery] = useQueryStates({
@@ -337,7 +337,6 @@ export function NodesPage() {
                 setEditNode(r);
                 editForm.setFieldsValue({
                   name: r.name,
-                  kinds: r.kinds,
                   allowed_kinds: r.allowed_kinds ?? undefined,
                 });
               }}
@@ -481,12 +480,19 @@ export function NodesPage() {
           <Form.Item name="name" label={t('nodes.nameLabel')} rules={[{ required: true, message: t('nodes.nameRequired') }]}>
             <Input placeholder={t('nodes.namePlaceholder')} />
           </Form.Item>
-          <Form.Item
-            name="kinds"
-            label={t('nodes.reportedKinds')}
-            rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}
-          >
-            <Select mode="multiple" options={jobTypeOptions()} placeholder={t('common.pickJobTypes')} />
+          {/* Chỉ xem: worker ghi đè `kinds` ở mỗi heartbeat, admin giới hạn bằng `allowed_kinds`. */}
+          <Form.Item label={t('nodes.reportedKinds')} tooltip={t('nodes.reportedKindsHelp')}>
+            {editNode && editNode.kinds.length > 0 ? (
+              <Flex wrap gap={4}>
+                {editNode.kinds.map((k) => (
+                  <Tag key={k} style={{ marginInlineEnd: 0 }}>
+                    {jobTypeLabel(k)}
+                  </Tag>
+                ))}
+              </Flex>
+            ) : (
+              <Text type="secondary">-</Text>
+            )}
           </Form.Item>
           <Form.Item
             name="allowed_kinds"

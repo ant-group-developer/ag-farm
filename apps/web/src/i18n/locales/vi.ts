@@ -267,6 +267,7 @@ export const vi = {
     tokenTitle: 'Token của worker',
     tokenLabel: 'Token (lưu ngay bây giờ)',
     reportedKinds: 'Loại job worker báo làm được',
+    reportedKindsHelp: 'Worker tự báo mỗi lần kết nối, không sửa ở đây được. Muốn giới hạn thì chọn ở "Loại job được giao".',
     allowedKinds: 'Loại job được giao',
     allowedKindsHelp: 'Để trống thì worker được giao mọi loại job nó báo làm được.',
     allowedKindsAll: 'Tất cả loại worker báo',
