@@ -166,6 +166,46 @@ export interface StatsResponse {
   nodes: { total: number; online: number };
 }
 
+/** Đơn vị gom nhóm của biểu đồ theo thời gian (GET /v1/admin/stats/period). */
+export type StatsBucket = 'hour' | 'day' | 'month';
+
+export interface StatsPeriodQuery {
+  /** ISO, tính từ (gồm) */
+  from: string;
+  /** ISO, đến (không gồm) */
+  to: string;
+  bucket: StatsBucket;
+  /** Múi giờ IANA để chia ngày/tháng theo lịch người xem */
+  tz: string;
+}
+
+/** Số job trong kỳ: tạo ra theo created_at, kết thúc theo finished_at; thời gian chạy của job hoàn tất (lần chạy cuối). */
+export interface StatsPeriodTotals {
+  created: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  avg_duration_ms: number | null;
+  p95_duration_ms: number | null;
+}
+
+export interface StatsPeriodPoint {
+  /** Đầu ô theo giờ địa phương của tz, dạng YYYY-MM-DDTHH:mm:ss (không có offset) */
+  t: string;
+  created: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+}
+
+export interface StatsPeriodResponse {
+  range: StatsPeriodQuery;
+  summary: StatsPeriodTotals;
+  /** Đủ mọi ô trong kỳ, kể cả ô trống */
+  series: StatsPeriodPoint[];
+  by_type: Array<StatsPeriodTotals & { type: JobType }>;
+}
+
 export interface OwnerView {
   id: string;
   sign_url: string;

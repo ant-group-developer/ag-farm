@@ -17,6 +17,7 @@ import {
   AdminListJobsQuerySchema,
   AdminListNodesQuerySchema,
   AdminListOwnersQuerySchema,
+  AdminStatsPeriodQuerySchema,
   CreateNodeSchema,
   CreateOwnerSchema,
   PatchNodeSchema,
@@ -127,6 +128,11 @@ export class AdminController {
   @Get('stats')
   async getStats() {
     return this.svc.getStats();
+  }
+
+  @Get('stats/period')
+  async getStatsPeriod(@Query(new ZodValidationPipe(AdminStatsPeriodQuerySchema)) query: any) {
+    return this.svc.getStatsPeriod(query);
   }
 
   // ---- Owners ----
