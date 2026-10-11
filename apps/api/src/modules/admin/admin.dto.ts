@@ -85,3 +85,45 @@ export const AdminListOwnersQuerySchema = z.strictObject({
   q: z.string().max(200).optional(),
 });
 export type AdminListOwnersQuery = z.infer<typeof AdminListOwnersQuerySchema>;
+
+/** Đơn vị gom nhóm của biểu đồ theo thời gian. */
+export const STATS_BUCKETS = ['hour', 'day', 'month'] as const;
+export type StatsBucket = (typeof STATS_BUCKETS)[number];
+
+/** Độ dài tối thiểu của một ô (tháng ngắn nhất 28 ngày) để chặn số ô trên biểu đồ. */
+const BUCKET_MIN_MS: Record<StatsBucket, number> = {
+  hour: 3_600_000,
+  day: 86_400_000,
+  month: 28 * 86_400_000,
+};
+const MAX_STATS_BUCKETS = 1000;
+
+function isTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Query thống kê theo kỳ: [from, to) theo giờ tuyệt đối, gom nhóm theo `bucket` tính trong múi giờ `tz`
+ * (để "ngày" và "tháng" khớp với lịch của người xem).
+ */
+export const AdminStatsPeriodQuerySchema = z
+  .strictObject({
+    from: z.iso.datetime({ offset: true }),
+    to: z.iso.datetime({ offset: true }),
+    bucket: z.enum(STATS_BUCKETS),
+    tz: z.string().max(64).refine(isTimeZone, { message: 'Unknown time zone' }).default('UTC'),
+  })
+  .refine((v) => Date.parse(v.from) < Date.parse(v.to), {
+    message: '`from` must be before `to`',
+    path: ['to'],
+  })
+  .refine(
+    (v) => (Date.parse(v.to) - Date.parse(v.from)) / BUCKET_MIN_MS[v.bucket] <= MAX_STATS_BUCKETS,
+    { message: `Range is too long for this bucket (max ${MAX_STATS_BUCKETS} buckets)`, path: ['bucket'] },
+  );
+export type AdminStatsPeriodQuery = z.infer<typeof AdminStatsPeriodQuerySchema>;

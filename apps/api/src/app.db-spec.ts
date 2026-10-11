@@ -1375,6 +1375,75 @@ describe('ag-farm GĐ4 DB integration', () => {
     expect(res.body.data.total).toBe(3);
   });
 
+  // ---- GET /v1/admin/stats/period ----
+  it('GET /v1/admin/stats/period buckets created and finished jobs in the viewer time zone', async () => {
+    const { key } = await createOwner(ds, 'ag-go');
+    await seedJobs(key, 4);
+    const ids: string[] = (await ds.query(`SELECT id FROM farm_jobs ORDER BY priority`)).map(
+      (r: { id: string }) => r.id,
+    );
+    const set = (id: string, sql: string) => ds.query(`UPDATE farm_jobs SET ${sql} WHERE id = $1`, [id]);
+    // Giờ +07: hoàn tất 02:31 → 02:33 ngày 11/10, chạy 2 phút
+    await set(ids[0]!, `created_at = '2026-10-11T02:30:00+07', started_at = '2026-10-11T02:31:00+07',
+      finished_at = '2026-10-11T02:33:00+07', status = 'completed'`);
+    // Tạo hôm trước (ngoài kỳ), thất bại trong kỳ lúc 05:10
+    await set(ids[1]!, `created_at = '2026-10-10T23:00:00+07', started_at = '2026-10-11T05:00:00+07',
+      finished_at = '2026-10-11T05:10:00+07', status = 'failed'`);
+    // Tạo trong kỳ lúc 05:00, vẫn chờ, loại khác
+    await set(ids[2]!, `created_at = '2026-10-11T05:00:00+07', type = 'scan.ai'`);
+    // Ngoài kỳ ngày, nhưng vẫn trong tháng 10
+    await set(ids[3]!, `created_at = '2026-10-12T09:00:00+07'`);
+
+    const day = await request(app.getHttpServer())
+      .get('/v1/admin/stats/period')
+      .query({ from: '2026-10-11T00:00:00+07:00', to: '2026-10-12T00:00:00+07:00', bucket: 'hour', tz: 'Asia/Ho_Chi_Minh' });
+    expect(day.status).toBe(200);
+    const d = day.body.data;
+    expect(d.summary).toEqual({
+      created: 2,
+      completed: 1,
+      failed: 1,
+      cancelled: 0,
+      avg_duration_ms: 120000,
+      p95_duration_ms: 120000,
+    });
+    expect(d.series).toHaveLength(24);
+    expect(d.series[0].t).toBe('2026-10-11T00:00:00');
+    expect(d.series[2]).toEqual({ t: '2026-10-11T02:00:00', created: 1, completed: 1, failed: 0, cancelled: 0 });
+    expect(d.series[5]).toEqual({ t: '2026-10-11T05:00:00', created: 1, completed: 0, failed: 1, cancelled: 0 });
+    expect(d.by_type).toEqual([
+      { type: 'scan.ai', created: 1, completed: 0, failed: 0, cancelled: 0, avg_duration_ms: null, p95_duration_ms: null },
+      { type: 'scan.extract', created: 1, completed: 1, failed: 1, cancelled: 0, avg_duration_ms: 120000, p95_duration_ms: 120000 },
+    ]);
+
+    const year = await request(app.getHttpServer())
+      .get('/v1/admin/stats/period')
+      .query({ from: '2026-01-01T00:00:00+07:00', to: '2027-01-01T00:00:00+07:00', bucket: 'month', tz: 'Asia/Ho_Chi_Minh' });
+    expect(year.status).toBe(200);
+    expect(year.body.data.series).toHaveLength(12);
+    expect(year.body.data.series[9]).toEqual({ t: '2026-10-01T00:00:00', created: 4, completed: 1, failed: 1, cancelled: 0 });
+
+    // Kỳ không có job nào vẫn trả đủ ô và tổng bằng 0
+    const empty = await request(app.getHttpServer())
+      .get('/v1/admin/stats/period')
+      .query({ from: '2025-03-01T00:00:00Z', to: '2025-03-08T00:00:00Z', bucket: 'day' });
+    expect(empty.status).toBe(200);
+    expect(empty.body.data.series).toHaveLength(7);
+    expect(empty.body.data.summary.created).toBe(0);
+    expect(empty.body.data.by_type).toEqual([]);
+  });
+
+  it('GET /v1/admin/stats/period rejects unknown time zones and over-long ranges', async () => {
+    const tz = await request(app.getHttpServer())
+      .get('/v1/admin/stats/period')
+      .query({ from: '2026-10-11T00:00:00Z', to: '2026-10-12T00:00:00Z', bucket: 'hour', tz: 'Mars/Olympus' });
+    expect(tz.status).toBe(400);
+    const long = await request(app.getHttpServer())
+      .get('/v1/admin/stats/period')
+      .query({ from: '2020-01-01T00:00:00Z', to: '2026-01-01T00:00:00Z', bucket: 'hour' });
+    expect(long.status).toBe(400);
+  });
+
   // ---- Node kinds intersection: allowed_kinds restricts claim ----
   it('allowed_kinds intersection: intersection is empty → no jobs claimed', async () => {
     const { key } = await createOwner(ds, 'ag-go');
