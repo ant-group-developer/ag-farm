@@ -1,6 +1,6 @@
 /**
  * Tự dò năng lực của máy: os/cpu/ram, GPU qua nvidia-smi,
- * ffmpeg, Ollama models, Python+torch.
+ * ffmpeg, Ollama models, Python+torch, yt-dlp.
  * Tất cả đều có timeout ngắn; lỗi → coi như không có.
  */
 import { execFile } from 'node:child_process';
@@ -152,23 +152,49 @@ export async function detectPython(pythonBin?: string, exec: PythonExec = execFi
   return null;
 }
 
+// ---- yt-dlp ----
+
+/** yt-dlp cài bằng pip là một exe gọi Python: lần chạy nguội chậm hơn ffmpeg. */
+const YTDLP_DETECT_TIMEOUT_MS = 20_000;
+
+/** Phiên bản yt-dlp (`yt-dlp --version`, vd `2026.08.19`) của đúng file `ytdlpBin`, hoặc `null`. */
+export async function detectYtdlp(ytdlpBin: string, exec: PythonExec = execFileAsync): Promise<string | null> {
+  try {
+    const { stdout } = await exec(ytdlpBin, ['--version'], { timeout: YTDLP_DETECT_TIMEOUT_MS });
+    const version = String(stdout).trim().split(/\r?\n/)[0]?.trim();
+    return version ? version.slice(0, 100) : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---- Public API ----
 
 export interface CapabilitiesOptions {
+  /**
+   * ffmpeg worker thật sự dùng (vd bản `ffmpeg-static` kèm trong gói). Không có thì dò `ffmpeg` trên PATH, thường
+   * không có trên máy worker (máy sẽ khai `ffmpeg: null`, NVENC false).
+   */
   ffmpegPath?: string;
   ollamaUrl?: string;
   /** Nếu false thì bỏ qua Python/torch (mặc định false). */
   detectPythonTorch?: boolean;
   /** Interpreter handler sẽ chạy (vd `extra.python_bin`); không có thì dò `python`/`python3` trên PATH. */
   pythonBin?: string;
+  /**
+   * yt-dlp worker sẽ chạy (đường dẫn, hoặc `yt-dlp` trên PATH). Có thì dò và khai `engines.ytdlp` khi chạy được;
+   * không có thì không dò. Không tìm thấy thì không gửi trường này (hub cũ không biết nó).
+   */
+  ytdlpBin?: string;
 }
 
 export async function detectCapabilities(options: CapabilitiesOptions = {}): Promise<Capabilities> {
-  const [gpus, ffmpegInfo, ollamaModels, python] = await Promise.all([
+  const [gpus, ffmpegInfo, ollamaModels, python, ytdlp] = await Promise.all([
     detectGpus(),
     detectFfmpeg(options.ffmpegPath),
     detectOllamaModels(options.ollamaUrl),
     options.detectPythonTorch ? detectPython(options.pythonBin) : Promise.resolve<string | null>(null),
+    options.ytdlpBin ? detectYtdlp(options.ytdlpBin) : Promise.resolve<string | null>(null),
   ]);
 
   // Cập nhật nvenc/nvdec cho từng GPU
@@ -187,6 +213,7 @@ export async function detectCapabilities(options: CapabilitiesOptions = {}): Pro
       ffmpeg: ffmpegInfo.version,
       ollama_models: ollamaModels,
       python,
+      ...(ytdlp ? { ytdlp } : {}),
     },
   };
 }

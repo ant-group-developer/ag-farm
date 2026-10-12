@@ -160,7 +160,11 @@ Assert-Equal 'unknown package needs kinds' (Test-AgKindsOptional 'other' '9.9.9'
 
 if ($OutDir) {
   New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+  # Gói cũ: có kinds (config.yaml); gói mới: không có (config-nokinds.yaml)
   [IO.File]::WriteAllText((Join-Path $OutDir 'config.yaml'), $yaml, (New-Object Text.UTF8Encoding($false)))
+  $noKinds = New-AgConfigYaml -Hub 'http://192.168.1.2:3010' -Node $node -RoleDir 'C:\ag-farm\scan' -CacheDir 'C:\ag-farm\cache\scan' -CacheGb 50 `
+    -MachineFile 'C:\ProgramData\ag-farm\machine.yaml' -Extra ([ordered]@{ ollama_url = 'http://127.0.0.1:11434'; unload_ollama_before_tts = $true }) -OmitKinds
+  [IO.File]::WriteAllText((Join-Path $OutDir 'config-nokinds.yaml'), $noKinds, (New-Object Text.UTF8Encoding($false)))
   $plan = Get-AgSlotPlan -Cores 28 -Gpus $gpu16 -Roles @('scan', 'render')
   [IO.File]::WriteAllText((Join-Path $OutDir 'machine.yaml'), (New-AgMachineYaml $plan), (New-Object Text.UTF8Encoding($false)))
 }

@@ -58,4 +58,11 @@ Worker gửi danh sách thao tác, chủ job trả kết quả theo đúng thứ
 
 `studio.tts` và `studio.transcribe` cần máy khai `gpu` và `python` (worker dò `import torch` bằng `python_bin` của nó).
 
+Loại job worker báo (`kinds` ở heartbeat và claim): `kinds` trong config.yaml của worker là tuỳ chọn. Không khai thì
+worker-sdk (`workerKinds`) báo mọi loại có handler mà máy đáp ứng `JOB_TYPE_SPECS[type].baseRequirements` (GPU, Python
+có torch, NVENC, yt-dlp), dò một lần lúc khởi động; khai thì là danh sách ép (giao với handler). Năng lực máy có thêm
+`engines.ytdlp` (tuỳ chọn, phiên bản `yt-dlp --version`; requirement `ytdlp: true`). Hub build trước khi có trường này
+từ chối heartbeat có nó (`strictObject`), nên **lên hub trước, rồi mới lên worker**. Worker chỉ gửi trường này khi dò
+thấy yt-dlp, và dò ffmpeg bằng chính binary nó chạy (`ffmpeg-static` trong gói), không phải `ffmpeg` trên PATH.
+
 Kết quả job (`JobResult`) chỉ gồm đường dẫn manifest và vài con số; dữ liệu đầy đủ nằm trong manifest ở bucket của chủ job.

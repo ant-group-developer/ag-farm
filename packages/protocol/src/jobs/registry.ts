@@ -81,6 +81,7 @@ export function mergeRequirements(type: JobType, extra: Requirements): Requireme
   if (base.gpu) merged.gpu = true;
   if (base.python) merged.python = true;
   if (base.nvenc) merged.nvenc = true;
+  if (base.ytdlp) merged.ytdlp = true;
   if (base.os) merged.os = base.os;
   if (base.min_vram_mb !== undefined) {
     merged.min_vram_mb = Math.max(base.min_vram_mb, extra.min_vram_mb ?? 0);

@@ -23,6 +23,9 @@ expect(cfg.token === "tok'en-000000000000000000000", 'token with a quote survive
 expect(cfg.kinds.join(',') === 'scan.extract,scan.ai', 'kinds list');
 expect(cfg.cache.max_gb === 50, 'cache.max_gb is a number');
 expect(cfg.extra.unload_ollama_before_tts === true, 'boolean extra stays boolean');
+const noKinds = sdk.loadConfig(join(dir, 'config-nokinds.yaml'));
+expect(noKinds.kinds === undefined, 'config without kinds loads (the worker computes its kinds)');
+expect(noKinds.extra.ollama_url === 'http://127.0.0.1:11434', 'config without kinds keeps extra');
 expect(machine.cpu_slots === 4 && machine.gpu_slots === 1, 'machine slots');
 expect(machine.reserve_interactive.cpu === 1 && machine.reserve_interactive.gpu === 0, 'reserve_interactive');
 console.log('config do install.ps1 sinh ra hop le voi worker-sdk');

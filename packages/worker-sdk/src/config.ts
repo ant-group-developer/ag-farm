@@ -35,8 +35,11 @@ export const WorkerConfigSchema = z
     token_file: z.string().min(1).optional(),
     /** Tên hiển thị của node này. */
     name: z.string().min(1).max(100),
-    /** Loại job node này nhận. */
-    kinds: z.array(JobTypeSchema).min(1),
+    /**
+     * Loại job node này nhận (tuỳ chọn). Không khai: worker nhận mọi loại có handler mà máy chạy được
+     * (`workerKinds`). Khai: danh sách ép, giao với các handler của worker.
+     */
+    kinds: z.array(JobTypeSchema).min(1).optional(),
     /** Thư mục làm việc tạm cho mỗi job. */
     work_dir: z.string().min(1),
     cache: z.object({

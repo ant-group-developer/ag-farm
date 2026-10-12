@@ -21,6 +21,7 @@ import type { CapabilitiesOptions } from './capabilities';
 import { detectCapabilities } from './capabilities';
 import type { WorkerConfig } from './config';
 import { isWithinSchedule, resolveToken } from './config';
+import { workerKinds } from './kinds';
 import { HubClient, LeaseLostError } from './hub-client';
 import type { Logger } from './logger';
 import { rootLogger } from './logger';
@@ -132,12 +133,24 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
   } else {
     try {
       capabilities = await detectCapabilities(options.capabilitiesOptions);
-      log.info('Capabilities detected', { os: capabilities.os, gpus: capabilities.gpus.length });
+      log.info('Capabilities detected', {
+        os: capabilities.os,
+        gpus: capabilities.gpus.length,
+        ffmpeg: capabilities.engines.ffmpeg,
+        python: capabilities.engines.python,
+        ytdlp: capabilities.engines.ytdlp,
+      });
     } catch (err) {
       log.error('Failed to detect capabilities', { err: String(err) });
       throw err;
     }
   }
+
+  // Loại job: `kinds` trong config là danh sách ép; không khai thì mọi loại có handler mà máy chạy được. Dò một lần
+  // lúc khởi động: cài/cập nhật (thêm Python, yt-dlp…) luôn khởi động lại worker.
+  const kinds = workerKinds(handlers, capabilities, config.kinds);
+  const reportedKinds = kinds.length > 0 ? kinds : (config.kinds ?? []);
+  log.info('Job kinds', { kinds, from: config.kinds ? 'config' : 'handlers+capabilities' });
 
   let running = true;
   let claimEnabled = true;
@@ -164,7 +177,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
         const runningIds = [...activeJobs.keys()];
         const res = await hub.heartbeat({
           agent_version: version,
-          kinds: config.kinds,
+          kinds: reportedKinds,
           capabilities,
           free_slots: free,
           running_job_ids: runningIds,
@@ -206,7 +219,6 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     // rồi batch (không đụng slot giữ cho interactive). Hub chỉ trả job có loại slot còn trống trong
     // `free_slots`, nên job nhận về luôn chiếm được slot. Trước đây batch được xin với cả slot dự trữ
     // của GPU/CPU khác loại: job CPU nhận về không có slot, bị bỏ rơi tới khi lease hết hạn.
-    const kinds = config.kinds.filter((k) => handlers[k]);
     if (kinds.length === 0) { await sleep(5_000); continue; }
 
     let claimed: Awaited<ReturnType<typeof hub.claim>> | null = null;

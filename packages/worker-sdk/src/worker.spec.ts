@@ -420,3 +420,53 @@ describe('runWorker - never claims a job it has no slot for', () => {
     }
   }, 15_000);
 });
+
+describe('runWorker - kinds', () => {
+  it('without kinds in config, reports and claims every handled kind the machine can run', async () => {
+    const tmpDir = makeTmpDir();
+    const heartbeatKinds: unknown[] = [];
+    const claimKinds: unknown[] = [];
+    const stopCtrl = new AbortController();
+
+    const { server, url } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const path = req.url ?? '';
+        const body = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString()) as { kinds?: unknown }) : {};
+        res.setHeader('Content-Type', 'application/json');
+        if (path.includes('heartbeat')) {
+          heartbeatKinds.push(body.kinds);
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path.includes('claim')) {
+          claimKinds.push(body.kinds);
+          stopCtrl.abort();
+          res.writeHead(200); res.end(JSON.stringify({ job: null }));
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+
+    try {
+      const { kinds: _omit, ...config } = makeConfig(tmpDir, url);
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      const handler = async () => ({ manifest: null, summary: {} });
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.0.1',
+        // no GPU: scan.ai (needs gpu) is left out
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        stopSignal: stopCtrl.signal,
+        handlers: { 'scan.extract': handler, 'scan.ai': handler },
+      });
+      expect(heartbeatKinds[0]).toEqual(['scan.extract']);
+      expect(claimKinds[0]).toEqual(['scan.extract']);
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 10_000);
+});

@@ -34,6 +34,8 @@ import {
   AiTraceSchema,
   AI_TRACE_SCHEMA,
   AI_TRACE_PATH,
+  CapabilitiesSchema,
+  RequirementsSchema,
   type Capabilities,
 } from './index';
 
@@ -144,6 +146,16 @@ describe('requirements', () => {
     expect(meetsRequirements(gpuBox, { min_vram_mb: 16000 })).toBe(false);
     expect(meetsRequirements(gpuBox, { ollama_models: ['qwen3-vl:8b'] })).toBe(false);
     expect(meetsRequirements(gpuBox, { os: 'linux' })).toBe(false);
+  });
+
+  it('yt-dlp is optional in capabilities and required only when asked', () => {
+    expect(CapabilitiesSchema.safeParse(gpuBox).success).toBe(true);
+    const withYtdlp = { ...gpuBox, engines: { ...gpuBox.engines, ytdlp: '2026.08.19' } };
+    expect(CapabilitiesSchema.safeParse(withYtdlp).success).toBe(true);
+    expect(meetsRequirements(withYtdlp, { ytdlp: true })).toBe(true);
+    expect(meetsRequirements(gpuBox, { ytdlp: true })).toBe(false);
+    expect(meetsRequirements({ ...gpuBox, engines: { ...gpuBox.engines, ytdlp: null } }, { ytdlp: true })).toBe(false);
+    expect(RequirementsSchema.parse({ ytdlp: true })).toEqual({ ytdlp: true });
   });
 
   it('treats a model without tag as :latest', () => {
