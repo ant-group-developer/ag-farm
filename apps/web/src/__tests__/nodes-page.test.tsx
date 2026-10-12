@@ -1,13 +1,15 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { NuqsTestingAdapter } from 'nuqs/adapters/testing';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n/config';
 import { jobTypeLabel } from '../shared/lib/job-labels';
 import type { NodeView } from '../types/api';
 
 const listNodes = vi.fn();
 const patchNode = vi.fn();
+const requestNodeUpdate = vi.fn();
+const getLatestReleases = vi.fn();
 vi.mock('../api/admin', () => ({
   listNodes: (...args: unknown[]) => listNodes(...args),
   createNode: vi.fn(),
@@ -15,6 +17,8 @@ vi.mock('../api/admin', () => ({
   deleteNode: vi.fn(),
   reorderNodes: vi.fn(),
   createEnrollment: vi.fn(),
+  requestNodeUpdate: (...args: unknown[]) => requestNodeUpdate(...args),
+  getLatestReleases: (...args: unknown[]) => getLatestReleases(...args),
 }));
 
 const { NodesPage } = await import('../modules/nodes/NodesPage');
@@ -40,6 +44,10 @@ function node(name: string, priority_order: number, over: Partial<NodeView> = {}
     schedule: null,
     last_seen_at: null,
     agent_version: '1.0',
+    auto_update: true,
+    update_requested_at: null,
+    update: null,
+    update_at: null,
     created_at: '2026-10-01T00:00:00Z',
     updated_at: '2026-10-01T00:00:00Z',
     online: true,
@@ -71,6 +79,10 @@ beforeAll(async () => {
     dispatchEvent: () => false,
   })) as typeof window.matchMedia;
   await i18n.changeLanguage('vi');
+});
+
+beforeEach(() => {
+  getLatestReleases.mockResolvedValue({ packages: {} });
 });
 
 describe('NodesPage', () => {
@@ -125,5 +137,50 @@ describe('NodesPage', () => {
     await waitFor(() => expect(screen.getByRole('switch', { name: jobTypeLabel('scan.ai') }).className).not.toContain('loading'));
     fireEvent.click(screen.getByRole('switch', { name: jobTypeLabel('scan.ai') }));
     await waitFor(() => expect(patchNode).toHaveBeenLastCalledWith('id-a', { blocked_kinds: ['studio.tts'] }));
+  }, 30_000);
+
+  it('phiên bản cũ có tag "cũ", trạng thái cập nhật, công tắc tự cập nhật và nút Cập nhật ngay', async () => {
+    getLatestReleases.mockResolvedValue({
+      packages: { 'ag-render-worker': { version: '0.9.1', file: 'r.zip', sha256: 'a'.repeat(64), size_bytes: 1 } },
+    });
+    patchNode.mockResolvedValue({});
+    requestNodeUpdate.mockResolvedValue({});
+    listNodes.mockResolvedValue({
+      items: [
+        node('pc1-render', 1, {
+          kinds: ['studio.render_final'],
+          agent_version: '0.9.0',
+          update: { state: 'failed', target_version: '0.9.1', message: 'no heartbeat in 3 min | setup.log: pip failed' },
+          capabilities: {
+            os: 'windows',
+            cpu_cores: 8,
+            ram_mb: 16384,
+            gpus: [],
+            engines: { ffmpeg: '7.0', ollama_models: [], python: null },
+          },
+        }),
+        node('pc2-render', 2, { kinds: ['studio.render_final'], agent_version: '0.9.1', update: { state: 'idle' } }),
+        node('pc3-render', 3, { kinds: ['studio.render_final'], agent_version: '0.8.1', update: null }),
+      ],
+      total: 3,
+      page: 1,
+      pageSize: 200,
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getAllByText('cũ')).toHaveLength(2));
+    expect(screen.getByText('Cập nhật 0.9.1 lỗi')).toBeTruthy();
+    // Máy render thiếu Python, CUDA, yt-dlp, NVENC
+    for (const tool of ['Python', 'CUDA', 'yt-dlp', 'NVENC']) expect(screen.getAllByText(tool).length).toBeGreaterThan(0);
+
+    const switches = screen.getAllByRole('switch', { name: 'Tự cập nhật' });
+    expect(switches).toHaveLength(3);
+    fireEvent.click(switches[0]!);
+    await waitFor(() => expect(patchNode).toHaveBeenCalledWith('id-pc1-render', { auto_update: false }));
+
+    const buttons = screen.getAllByRole('button', { name: /Cập nhật ngay/ });
+    // pc1: cũ, lỗi -> thử lại được; pc2: đã mới nhất; pc3: bản chưa tự cập nhật được
+    expect(buttons.map((b) => (b as HTMLButtonElement).disabled)).toEqual([false, true, true]);
+    fireEvent.click(buttons[0]!);
+    await waitFor(() => expect(requestNodeUpdate).toHaveBeenCalledWith('id-pc1-render'));
   }, 30_000);
 });

@@ -124,8 +124,21 @@ export class AdminService {
     if (dto.status !== undefined) node.status = dto.status as 'active' | 'disabled';
     if (dto.schedule !== undefined) node.schedule = dto.schedule;
     if (dto.priority_order !== undefined) node.priorityOrder = dto.priority_order;
+    if (dto.auto_update !== undefined) node.autoUpdate = dto.auto_update;
     const saved = await this.nodeRepo.save(node);
     if (dto.priority_order !== undefined) await this.keepNewNodesLast();
+    return toNodeView(saved, this.isOnline(saved));
+  }
+
+  /**
+   * "Cập nhật ngay": worker thấy `update_requested_at` mới ở lần hỏi `GET /v1/worker/me` kế tiếp (mỗi phút) và cập
+   * nhật nếu hub có bản mới hơn, dù `auto_update` tắt hay bản đó từng hỏng trên máy.
+   */
+  async requestUpdate(id: string): Promise<NodeView> {
+    const node = await this.nodeRepo.findOne({ where: { id } });
+    if (!node) throw new NotFoundException('Node not found');
+    node.updateRequestedAt = new Date();
+    const saved = await this.nodeRepo.save(node);
     return toNodeView(saved, this.isOnline(saved));
   }
 

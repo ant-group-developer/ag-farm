@@ -26,6 +26,7 @@ import { HealthController } from './health.controller';
 import { AdminModule } from './modules/admin/admin.module';
 import { OwnerModule } from './modules/owner/owner.module';
 import { ReaperModule } from './modules/reaper/reaper.module';
+import { ReleasesModule } from './modules/releases/releases.module';
 import { WorkerModule } from './modules/worker/worker.module';
 
 @Module({
@@ -53,6 +54,7 @@ import { WorkerModule } from './modules/worker/worker.module';
     AdminModule,
     ReaperModule,
     EnrollModule,
+    ReleasesModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: ApiResponseInterceptor },

@@ -28,6 +28,11 @@ export function toNodeView(node: FarmNodeEntity, online: boolean) {
     schedule: node.schedule,
     last_seen_at: node.lastSeenAt ? node.lastSeenAt.toISOString() : null,
     agent_version: node.agentVersion,
+    // Tự cập nhật: admin cho phép không, lần bấm "Cập nhật ngay", trạng thái worker báo ở heartbeat gần nhất.
+    auto_update: node.autoUpdate ?? true,
+    update_requested_at: node.updateRequestedAt ? node.updateRequestedAt.toISOString() : null,
+    update: node.updateStatus ?? null,
+    update_at: node.updateStatusAt ? node.updateStatusAt.toISOString() : null,
     created_at: node.createdAt.toISOString(),
     updated_at: node.updatedAt.toISOString(),
     online,

@@ -211,6 +211,38 @@ export const en: LocaleMessages = {
     orderSaved: 'Worker order saved',
     slotsStale: 'From the last time the worker connected; it is not taking jobs now.',
     runningIds: 'Running jobs: {{ids}}',
+    versionOutdated: 'old',
+    versionOutdatedHelp: 'Newest release: {{latest}}',
+    autoUpdate: 'Auto-update',
+    autoUpdateHelp:
+      'On: when the farm publishes a new release, the worker stops taking jobs, waits for its running jobs, then updates itself; if the new version does not run it goes back to the old one. "Update now" updates even when this is off.',
+    updateNow: 'Update now',
+    updateNowSent: 'Sent: the worker updates within a minute, once its running jobs are done.',
+    updateNowLatest: 'The worker runs the newest release.',
+    updateNowBusy: 'The worker is updating.',
+    updateNowUnsupported:
+      'This worker version cannot update itself yet: run the update command on the machine once (the install command without -Code).',
+    updateNowRequested: 'Last pressed {{at}}',
+    updateSince: 'Since {{at}}',
+    updateState: {
+      idle: 'Not updating',
+      draining: 'Waiting for jobs to move to {{version}}',
+      installing: 'Installing {{version}}',
+      failed: 'Update to {{version}} failed',
+    },
+    missing: 'Missing:',
+    missingTool: {
+      python: 'Python',
+      cuda: 'CUDA',
+      ytdlp: 'yt-dlp',
+      nvenc: 'NVENC',
+    },
+    missingHelp: {
+      python: 'No Python that imports torch: takes no voice-over (studio.tts) or speech recognition (studio.transcribe).',
+      cuda: 'No NVIDIA GPU with CUDA seen: takes no GPU jobs.',
+      ytdlp: 'No yt-dlp: cannot download reference videos.',
+      nvenc: 'No NVENC: renders on the CPU, slower.',
+    },
   },
   owners: {
     title: 'Client apps',

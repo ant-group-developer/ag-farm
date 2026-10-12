@@ -277,6 +277,38 @@ export const vi = {
     orderSaved: 'Đã lưu thứ tự worker',
     slotsStale: 'Số liệu từ lần cuối worker kết nối, worker đang không nhận việc.',
     runningIds: 'Job đang chạy: {{ids}}',
+    versionOutdated: 'cũ',
+    versionOutdatedHelp: 'Bản mới nhất: {{latest}}',
+    autoUpdate: 'Tự cập nhật',
+    autoUpdateHelp:
+      'Bật: khi farm phát hành bản mới, worker ngừng nhận việc, chờ việc đang chạy xong rồi tự cập nhật; bản mới không chạy thì tự quay về bản cũ. "Cập nhật ngay" cập nhật cả khi đang tắt.',
+    updateNow: 'Cập nhật ngay',
+    updateNowSent: 'Đã gửi: worker cập nhật trong khoảng một phút, sau khi việc đang chạy xong.',
+    updateNowLatest: 'Worker đang chạy bản mới nhất.',
+    updateNowBusy: 'Worker đang cập nhật.',
+    updateNowUnsupported:
+      'Bản worker này chưa tự cập nhật được: chạy lệnh cập nhật trên máy một lần (lệnh cài, bỏ -Code).',
+    updateNowRequested: 'Bấm lần cuối lúc {{at}}',
+    updateSince: 'Từ {{at}}',
+    updateState: {
+      idle: 'Không cập nhật',
+      draining: 'Chờ việc xong để lên {{version}}',
+      installing: 'Đang cài {{version}}',
+      failed: 'Cập nhật {{version}} lỗi',
+    },
+    missing: 'Thiếu:',
+    missingTool: {
+      python: 'Python',
+      cuda: 'CUDA',
+      ytdlp: 'yt-dlp',
+      nvenc: 'NVENC',
+    },
+    missingHelp: {
+      python: 'Không có Python import được torch: không nhận lồng tiếng (studio.tts) và nhận dạng lời nói (studio.transcribe).',
+      cuda: 'Không thấy GPU NVIDIA có CUDA: không nhận việc cần GPU.',
+      ytdlp: 'Không có yt-dlp: không tải được video mẫu.',
+      nvenc: 'Không có NVENC: dựng video bằng CPU, chậm hơn.',
+    },
   },
 };
 

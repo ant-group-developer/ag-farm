@@ -72,10 +72,40 @@ export interface NodeView {
   schedule: unknown | null;
   last_seen_at: string | null;
   agent_version: string | null;
+  /** The worker updates itself when the farm publishes a newer release (default on). */
+  auto_update: boolean;
+  /** Last time an admin pressed "Update now". */
+  update_requested_at: string | null;
+  /** Self-update state from the worker's latest heartbeat that carried one; null for workers without self-update. */
+  update: NodeUpdateStatus | null;
+  update_at: string | null;
   created_at: string;
   updated_at: string;
   /** Computed by server: last_seen_at within NODE_OFFLINE_AFTER_SECONDS */
   online: boolean;
+}
+
+export type NodeUpdateState = 'idle' | 'draining' | 'installing' | 'failed';
+
+export interface NodeUpdateStatus {
+  state: NodeUpdateState;
+  target_version?: string;
+  /** Why it failed (with the last line of setup.log), or how the last update went. */
+  message?: string;
+  since?: string;
+}
+
+export interface ReleaseEntry {
+  version: string;
+  file: string;
+  sha256: string;
+  size_bytes: number;
+  built_at?: string;
+}
+
+/** The hub's /dist/latest.json: the newest release of each worker package. */
+export interface ReleaseManifest {
+  packages: Record<string, ReleaseEntry>;
 }
 
 export interface JobError {
@@ -229,6 +259,7 @@ export interface PatchNodeRequest {
   blocked_kinds?: JobType[];
   status?: 'active' | 'disabled';
   priority_order?: number;
+  auto_update?: boolean;
 }
 
 export interface CreateOwnerRequest {

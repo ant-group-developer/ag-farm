@@ -23,6 +23,8 @@ export const PatchNodeSchema = z.strictObject({
     .optional(),
   status: z.enum(['active', 'disabled']).optional(),
   schedule: z.unknown().optional(),
+  /** Máy tự lên bản mới khi phát hành (worker đọc qua `GET /v1/worker/me`). */
+  auto_update: z.boolean().optional(),
   /** Số nhỏ trước. Muốn xếp lại cả danh sách thì dùng `POST nodes/reorder`. */
   priority_order: z.number().int().min(0).max(1_000_000).optional(),
 });

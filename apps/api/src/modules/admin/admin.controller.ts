@@ -77,6 +77,13 @@ export class AdminController {
     return this.svc.reorderNodes(body.ids);
   }
 
+  /** "Cập nhật ngay": máy cập nhật ở lần hỏi hub kế tiếp (trong khoảng một phút), sau khi việc đang chạy xong. */
+  @Post('nodes/:id/update-now')
+  @HttpCode(200)
+  async requestNodeUpdate(@Param('id') id: string) {
+    return this.svc.requestUpdate(id);
+  }
+
   @Patch('nodes/:id')
   async patchNode(
     @Param('id') id: string,

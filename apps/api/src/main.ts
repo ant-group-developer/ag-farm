@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { releasesDir } from './config/releases-dir';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -25,7 +26,7 @@ async function bootstrap(): Promise<void> {
     config.get<string>('FARM_INSTALLER_DIR') ?? resolve(__dirname, '..', '..', '..', 'tools', 'worker-installer'),
     staticOptions,
   );
-  app.useStaticAssets(config.get<string>('FARM_RELEASES_DIR') ?? resolve(__dirname, '..', '..', '..', 'releases'), staticOptions);
+  app.useStaticAssets(releasesDir(config.get<string>('FARM_RELEASES_DIR')), staticOptions);
 
   const port = config.get<number>('PORT') ?? 3010;
   await app.listen(port);

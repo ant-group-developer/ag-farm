@@ -13,6 +13,7 @@ import type {
   PagedResponse,
   PatchNodeRequest,
   PatchOwnerRequest,
+  ReleaseManifest,
   StatsPeriodQuery,
   StatsPeriodResponse,
   StatsResponse,
@@ -51,6 +52,16 @@ export function patchNode(id: string, body: PatchNodeRequest): Promise<NodeView>
 /** Xếp lại thứ tự nhận việc: `ids` thành 1..n, máy không có trong danh sách đứng sau. Trả mọi máy theo thứ tự mới. */
 export function reorderNodes(ids: string[]): Promise<{ items: NodeView[] }> {
   return api.post<{ items: NodeView[] }>('/v1/admin/nodes/reorder', { ids });
+}
+
+/** "Update now": the worker updates at its next check (within a minute), once its running jobs are done. */
+export function requestNodeUpdate(id: string): Promise<NodeView> {
+  return api.post<NodeView>(`/v1/admin/nodes/${id}/update-now`);
+}
+
+/** The newest release of each worker package (the hub's latest.json). */
+export function getLatestReleases(): Promise<ReleaseManifest> {
+  return api.get<ReleaseManifest>('/v1/admin/releases/latest');
 }
 
 export function deleteNode(id: string): Promise<void> {

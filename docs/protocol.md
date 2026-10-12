@@ -90,4 +90,10 @@ Heartbeat có `update` (tuỳ chọn; `WorkerUpdateStatus`: `state` `idle|draini
 trước**. Bản đã hỏng không tự thử lại (mỗi lần thử là một lần ngừng nhận việc); "Cập nhật ngay" thử lại. Máy đang chạy
 render ≤ 0.8.1 / scan ≤ 0.3.5 chưa có bộ cập nhật: chạy lệnh cập nhật của `install.ps1` bằng tay một lần.
 
+Admin (trang Máy): `GET /v1/admin/releases/latest` (latest.json của hub, mục hỏng bị bỏ) để so phiên bản, tag "cũ";
+`GET /v1/admin/nodes` trả thêm `auto_update`, `update_requested_at`, `update` (trạng thái worker báo), `update_at`;
+`PATCH /v1/admin/nodes/:id {auto_update}` (công tắc "Tự cập nhật"); `POST /v1/admin/nodes/:id/update-now` (đặt
+`update_requested_at = now()`, nút "Cập nhật ngay"). Trang Máy cũng báo máy render thiếu gì theo capabilities: Python
+(torch), CUDA, yt-dlp, NVENC.
+
 Kết quả job (`JobResult`) chỉ gồm đường dẫn manifest và vài con số; dữ liệu đầy đủ nằm trong manifest ở bucket của chủ job.

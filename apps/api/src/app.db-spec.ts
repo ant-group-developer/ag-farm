@@ -2058,6 +2058,41 @@ describe('worker self-update', () => {
     expect((await heartbeat(token, { update: { state: 'sleeping' } })).status).toBe(400);
   });
 
+  it('admin turns auto-update off and on; the worker sees it', async () => {
+    const { node, token } = await createNode(ds);
+    const off = await request(app.getHttpServer()).patch(`/v1/admin/nodes/${node.id}`).send({ auto_update: false });
+    expect(off.status).toBe(200);
+    expect(off.body.data.auto_update).toBe(false);
+    let me = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${token}`);
+    expect(me.body.data.auto_update).toBe(false);
+    await request(app.getHttpServer()).patch(`/v1/admin/nodes/${node.id}`).send({ auto_update: true });
+    me = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${token}`);
+    expect(me.body.data.auto_update).toBe(true);
+    expect((await request(app.getHttpServer()).patch(`/v1/admin/nodes/${node.id}`).send({ auto_update: 'yes' })).status).toBe(400);
+  });
+
+  it('"update now" stamps the node; the worker sees the time', async () => {
+    const { node, token } = await createNode(ds);
+    const before = Date.now();
+    const res = await request(app.getHttpServer()).post(`/v1/admin/nodes/${node.id}/update-now`);
+    expect(res.status).toBe(200);
+    const at = Date.parse(res.body.data.update_requested_at);
+    expect(at).toBeGreaterThanOrEqual(before - 1000);
+    const me = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${token}`);
+    expect(me.body.data.update_requested_at).toBe(res.body.data.update_requested_at);
+    expect((await request(app.getHttpServer()).post(`/v1/admin/nodes/${randomUUID()}/update-now`)).status).toBe(404);
+  });
+
+  it('the admin node list shows the update state the worker reported', async () => {
+    const { node, token } = await createNode(ds);
+    const update = { state: 'failed', target_version: '0.9.1', message: 'no heartbeat in 3 min | setup.log: pip failed' };
+    await heartbeat(token, { update });
+    const list = await request(app.getHttpServer()).get('/v1/admin/nodes');
+    const row = list.body.data.items.find((n: { id: string }) => n.id === node.id);
+    expect(row).toMatchObject({ auto_update: true, update_requested_at: null, update, agent_version: '0.9.0' });
+    expect(typeof row.update_at).toBe('string');
+  });
+
   it('migration down/up keeps the other node columns', async () => {
     const { node } = await createNode(ds);
     const runner = ds.createQueryRunner();

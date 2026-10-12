@@ -24,7 +24,15 @@ import { DragSortTable, type ProColumns } from '@ant-design/pro-components';
 import type { TablePaginationConfig } from 'antd/es/table';
 import { parseAsInteger, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import { useState, type ReactNode } from 'react';
-import { createNode, deleteNode, listNodes, patchNode, reorderNodes } from '../../api/admin';
+import {
+  createNode,
+  deleteNode,
+  getLatestReleases,
+  listNodes,
+  patchNode,
+  reorderNodes,
+  requestNodeUpdate,
+} from '../../api/admin';
 import { SecretModal } from '../../shared/components/SecretModal';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { SortDropdown } from '../../shared/components/SortDropdown';
@@ -33,12 +41,22 @@ import { jobTypeOptions } from '../../shared/lib/job-labels';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import { columnsWidth } from '../../shared/lib/table-width';
 import { BlockedKindsField, KindSwitches } from './KindSwitches';
-import type { JobType, NodeCapabilities, NodeSortBy, NodeView, PagedResponse, SortOrder } from '../../types/api';
+import type {
+  JobType,
+  NodeCapabilities,
+  NodeSortBy,
+  NodeUpdateStatus,
+  NodeView,
+  PagedResponse,
+  ReleaseManifest,
+  SortOrder,
+} from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronDown,
   Cpu,
+  Download,
   GripVertical,
   Gpu,
   KeyRound,
@@ -51,6 +69,7 @@ import {
 } from 'lucide-react';
 import { EnrollModal } from './EnrollModal';
 import { NODE_ORDER_PAGE_SIZE, canDragSort, isOrderView, renumber, slotsAreLive } from './node-order';
+import { isOutdated, latestFor, missingTools, visibleUpdate, type MissingTool } from './node-update';
 
 const { Text } = Typography;
 
@@ -73,8 +92,83 @@ function Spec({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   );
 }
 
-/** Machine specs on separate lines: OS · CPU · RAM, one line per GPU, then installed engines. */
-function NodeSpecs({ caps }: { caps: NodeCapabilities | null }) {
+/** What a render worker lacks (Python, CUDA, yt-dlp, NVENC), each with what it costs. */
+function MissingTools({ missing }: { missing: MissingTool[] }) {
+  const { t } = useTranslation();
+  if (missing.length === 0) return null;
+  return (
+    <Flex wrap gap={4} align="center">
+      <Text type="secondary">{t('nodes.missing')}</Text>
+      {missing.map((m) => (
+        <Tooltip key={m} title={t(`nodes.missingHelp.${m}`)}>
+          <Tag color="red" bordered={false} style={{ marginInlineEnd: 0 }}>
+            {t(`nodes.missingTool.${m}`)}
+          </Tag>
+        </Tooltip>
+      ))}
+    </Flex>
+  );
+}
+
+const UPDATE_TAG_COLORS: Record<NodeUpdateStatus['state'], string> = {
+  idle: 'default',
+  draining: 'processing',
+  installing: 'processing',
+  failed: 'error',
+};
+
+/** Self-update state the worker reported: waiting for jobs / installing / failed (why), or how the last update went. */
+function UpdateState({ update }: { update: NodeUpdateStatus }) {
+  const { t } = useTranslation();
+  const version = update.target_version ?? '';
+  const tip = (
+    <>
+      {update.message && <div>{update.message}</div>}
+      {update.since && <div>{t('nodes.updateSince', { at: formatDateTime(update.since) })}</div>}
+    </>
+  );
+  if (update.state === 'idle') {
+    return (
+      <Tooltip title={update.since ? t('nodes.updateSince', { at: formatDateTime(update.since) }) : undefined}>
+        <Text type="secondary" ellipsis style={{ fontSize: 12, maxWidth: '100%' }}>
+          {update.message}
+        </Text>
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip title={update.message || update.since ? tip : undefined}>
+      <Tag color={UPDATE_TAG_COLORS[update.state]} bordered={false} style={{ marginInlineEnd: 0, whiteSpace: 'normal' }}>
+        {t(`nodes.updateState.${update.state}`, { version })}
+      </Tag>
+    </Tooltip>
+  );
+}
+
+/** Running version, "old" next to it when the farm has a newer release, and the self-update state. */
+function NodeVersion({ node, latest }: { node: NodeView; latest: ReleaseManifest | undefined }) {
+  const { t } = useTranslation();
+  const newest = latestFor(node, latest);
+  const update = visibleUpdate(node);
+  return (
+    <Flex vertical gap={4} style={{ minWidth: 0 }}>
+      <Flex align="center" gap={6} wrap>
+        {node.agent_version ? <Text>{node.agent_version}</Text> : <Text type="secondary">-</Text>}
+        {isOutdated(node, latest) ? (
+          <Tooltip title={t('nodes.versionOutdatedHelp', { latest: newest })}>
+            <Tag color="orange" bordered={false} style={{ marginInlineEnd: 0 }}>
+              {t('nodes.versionOutdated')}
+            </Tag>
+          </Tooltip>
+        ) : null}
+      </Flex>
+      {update && <UpdateState update={update} />}
+    </Flex>
+  );
+}
+
+/** Machine specs on separate lines: OS · CPU · RAM, one line per GPU, then installed engines and what is missing. */
+function NodeSpecs({ caps, missing = [] }: { caps: NodeCapabilities | null; missing?: MissingTool[] }) {
   const { t } = useTranslation();
   if (!caps) return <Text type="secondary">-</Text>;
   const { ffmpeg, python, ytdlp, ollama_models: models } = caps.engines;
@@ -136,6 +230,7 @@ function NodeSpecs({ caps }: { caps: NodeCapabilities | null }) {
           )}
         </Flex>
       )}
+      <MissingTools missing={missing} />
     </Flex>
   );
 }
@@ -226,6 +321,31 @@ export function NodesPage() {
     onError: (e) => void messageApi.error(String(e)),
   });
 
+  // Bản mới nhất của từng gói worker (latest.json của hub), để so với bản máy đang chạy.
+  const latestQuery = useQuery({
+    queryKey: ['releases-latest'],
+    queryFn: getLatestReleases,
+    refetchInterval: 60_000,
+  });
+  const latest = latestQuery.data;
+
+  const updateNowMut = useMutation({
+    mutationFn: (id: string) => requestNodeUpdate(id),
+    onSuccess: () => {
+      void messageApi.success(t('nodes.updateNowSent'));
+      void qc.invalidateQueries({ queryKey: ['nodes'] });
+    },
+    onError: (e) => void messageApi.error(String(e)),
+  });
+
+  /** Why "Update now" is off for a node, or null when it can be pressed. */
+  const updateNowBlocked = (r: NodeView): string | null => {
+    if (!r.update) return t('nodes.updateNowUnsupported');
+    if (r.update.state === 'draining' || r.update.state === 'installing') return t('nodes.updateNowBusy');
+    if (!isOutdated(r, latest)) return t('nodes.updateNowLatest');
+    return null;
+  };
+
   const columns: ProColumns<NodeView>[] = [
     {
       // Cột chứa tay nắm kéo thả (dragSortKey) khi đang xem theo thứ tự.
@@ -303,7 +423,7 @@ export function NodesPage() {
       title: t('nodes.capabilities'),
       key: 'caps',
       width: 340,
-      render: (_: unknown, r: NodeView) => <NodeSpecs caps={r.capabilities} />,
+      render: (_: unknown, r: NodeView) => <NodeSpecs caps={r.capabilities} missing={missingTools(r)} />,
     },
     {
       title: t('nodes.freeSlots'),
@@ -369,10 +489,42 @@ export function NodesPage() {
       title: t('nodes.version'),
       dataIndex: 'agent_version',
       key: 'version',
-      width: 120,
-      ellipsis: true,
-      render: (_: unknown, r: NodeView) =>
-        r.agent_version ? <Text>{r.agent_version}</Text> : <Text type="secondary">-</Text>,
+      width: 180,
+      render: (_: unknown, r: NodeView) => <NodeVersion node={r} latest={latest} />,
+    },
+    {
+      title: t('nodes.autoUpdate'),
+      tooltip: t('nodes.autoUpdateHelp'),
+      key: 'auto_update',
+      width: 160,
+      render: (_: unknown, r: NodeView) => {
+        const blocked = updateNowBlocked(r);
+        const requested = r.update_requested_at
+          ? t('nodes.updateNowRequested', { at: formatDateTime(r.update_requested_at) })
+          : null;
+        return (
+          <Flex vertical gap={6} align="flex-start">
+            <Switch
+              size="small"
+              aria-label={t('nodes.autoUpdate')}
+              checked={r.auto_update}
+              loading={patchMut.isPending && patchMut.variables?.id === r.id && patchMut.variables.body.auto_update !== undefined}
+              onChange={(checked) => patchMut.mutate({ id: r.id, body: { auto_update: checked } })}
+            />
+            <Tooltip title={[blocked, requested].filter(Boolean).join(' · ') || undefined}>
+              <Button
+                size="small"
+                icon={<Download size={14} />}
+                disabled={blocked !== null}
+                loading={updateNowMut.isPending && updateNowMut.variables === r.id}
+                onClick={() => updateNowMut.mutate(r.id)}
+              >
+                {t('nodes.updateNow')}
+              </Button>
+            </Tooltip>
+          </Flex>
+        );
+      },
     },
     {
       title: t('common.actions'),
