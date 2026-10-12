@@ -63,6 +63,11 @@ export const WorkerConfigSchema = z
     update_check_minutes: z.number().positive().max(1440).optional(),
     /** Có bản mới: chờ việc đang chạy xong tối đa chừng này phút rồi cập nhật (mặc định 30). */
     update_drain_minutes: z.number().nonnegative().max(1440).optional(),
+    /**
+     * Đo tình trạng máy (CPU, RAM, ổ, mạng, GPU) mỗi 15 s và gửi kèm heartbeat. Mặc định bật; `false` thì không đo,
+     * không gửi (hub chưa biết trường `metrics` cũng tự bị bỏ, xem worker.ts).
+     */
+    metrics: z.boolean().optional(),
     /** Passthrough: các trường tuỳ worker, ví dụ ollama_url. */
     extra: z.record(z.string(), z.unknown()).optional(),
   })

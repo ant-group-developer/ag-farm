@@ -96,4 +96,23 @@ Admin (trang Máy): `GET /v1/admin/releases/latest` (latest.json của hub, mụ
 `update_requested_at = now()`, nút "Cập nhật ngay"). Trang Máy cũng báo máy render thiếu gì theo capabilities: Python
 (torch), CUDA, yt-dlp, NVENC.
 
+### Tình trạng máy
+
+Worker-sdk đo máy ở nền mỗi `METRICS_SAMPLE_SECONDS` (15 s) và gửi bản mới nhất ở heartbeat, trong `metrics`
+(`MachineMetrics`, tuỳ chọn, mọi trường con tuỳ chọn): `cpu_pct` (từ chênh lệch `os.cpus()` giữa hai lần đo),
+`ram_used_mb`/`ram_total_mb`, `disks` (`{path, free_mb, total_mb}` của ổ chứa `work_dir` và cache, cùng ổ một dòng;
+`path` là `C:` trên Windows), `net_rx_bps`/`net_tx_bps` (byte/s, cộng các card mạng; Windows: `netstat -e`, bộ đếm 32 bit
+nên một vòng quay được cộng lại; Linux: `/proc/net/dev`, bỏ `lo`, docker, bridge, veth), `gpus`
+(`{index, util_pct, vram_used_mb, vram_total_mb, temp_c}` qua `nvidia-smi --query-gpu`), `uptime_s`. Số nào không đo được
+thì bỏ trường đó, không gửi 0.
+
+- Heartbeat không bao giờ chờ đo: nó đọc bản đo mới nhất, bản cũ quá 2 phút (sampler kẹt) thì không gửi.
+- Mỗi lần đo chạy tối đa một lệnh hệ điều hành (timeout 5 s): `nvidia-smi` và `netstat -e` (Windows) thay phiên, nên
+  mỗi số đó mới sau tối đa 30 s; máy không có `nvidia-smi` (hoặc capabilities không có GPU) thì không chạy nó. Một lần
+  đo mất khoảng 30–100 ms (đa phần là lệnh con).
+- Tắt: `metrics: false` trong config.yaml của worker.
+- Hub build trước khi có trường này từ chối heartbeat có nó (`strictObject`): **lên hub trước**. Worker vẫn chịu được hub
+  cũ: heartbeat có `metrics` bị 400 thì gửi lại ngay không có số đo và thôi gửi số đo trong một giờ, nên máy không
+  thành offline.
+
 Kết quả job (`JobResult`) chỉ gồm đường dẫn manifest và vài con số; dữ liệu đầy đủ nằm trong manifest ở bucket của chủ job.

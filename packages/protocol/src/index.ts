@@ -6,6 +6,7 @@ export * from './envelope';
 export * from './jobs/registry';
 export * from './jobs/scan';
 export * from './jobs/studio';
+export * from './metrics';
 export * from './owner-api';
 export * from './release';
 export * from './sign';

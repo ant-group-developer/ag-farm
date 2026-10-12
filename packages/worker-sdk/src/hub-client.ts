@@ -44,6 +44,17 @@ export class LeaseLostError extends Error {
   }
 }
 
+/** Hub trả mã lỗi HTTP (không phải 409 lease). */
+export class HubRequestError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'HubRequestError';
+  }
+}
+
 export class HubClient {
   constructor(
     private readonly hubUrl: string,
@@ -132,7 +143,7 @@ export class HubClient {
     }
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`Hub request ${path} failed: HTTP ${res.status} - ${text}`);
+      throw new HubRequestError(res.status, `Hub request ${path} failed: HTTP ${res.status} - ${text}`);
     }
   }
 }

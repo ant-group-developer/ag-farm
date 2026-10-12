@@ -22,7 +22,7 @@ import { detectCapabilities } from './capabilities';
 import type { WorkerConfig } from './config';
 import { isWithinSchedule, resolveToken } from './config';
 import { workerKinds } from './kinds';
-import { HubClient, LeaseLostError } from './hub-client';
+import { HubClient, HubRequestError, LeaseLostError } from './hub-client';
 import type { Logger } from './logger';
 import { rootLogger } from './logger';
 import {
@@ -37,6 +37,8 @@ import {
 } from './self-update';
 import type { SelfUpdaterDeps } from './self-update';
 import { SlotAllocator, loadMachineConfig } from './machine';
+import { MachineSampler } from './metrics';
+import type { MetricsProbes } from './metrics';
 import type { SlotHandle } from './machine';
 import { SignClient } from './sign-client';
 import type { UploadOutputOptions } from './transfer';
@@ -128,6 +130,10 @@ export interface RunWorkerOptions {
   /** Chu kỳ tick của tự cập nhật (ms, mặc định 10 s) và lần kiểm đầu. Dùng trong tests. */
   selfUpdateTickMs?: number;
   selfUpdateFirstCheckMs?: number;
+  /** Thay phần đo máy (tests: số giả, không đụng phần cứng thật). */
+  metricsProbes?: Partial<MetricsProbes>;
+  /** Chu kỳ đo máy (ms, mặc định 15 s). Dùng trong tests. */
+  metricsIntervalMs?: number;
 }
 
 // ---- Runner ----
@@ -173,6 +179,21 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
   const reportedKinds = kinds.length > 0 ? kinds : (config.kinds ?? []);
   log.info('Job kinds', { kinds, from: config.kinds ? 'config' : 'handlers+capabilities' });
 
+  // Đo máy ở nền (config `metrics: false` thì tắt). Heartbeat chỉ đọc bản đo mới nhất, không chờ đo.
+  const sampler =
+    config.metrics === false
+      ? null
+      : new MachineSampler({
+          dirs: [config.work_dir, config.cache.dir],
+          gpu: capabilities.gpus.length > 0,
+          ...(options.metricsIntervalMs !== undefined ? { intervalMs: options.metricsIntervalMs } : {}),
+          ...(options.metricsProbes ? { probes: options.metricsProbes } : {}),
+          onError: (what, err) => log.warn('Machine metric unavailable', { what, err: String(err) }),
+        });
+  sampler?.start();
+  /** Hub cũ (chưa biết `metrics`) trả 400: gửi heartbeat không có số đo tới mốc này rồi thử lại. */
+  let metricsPausedUntil = 0;
+
   let running = true;
   let claimEnabled = true;
 
@@ -195,7 +216,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     try {
       const free = allocator.freeSlots();
       const runningIds = [...activeJobs.keys()];
-      const res = await hub.heartbeat({
+      const base = {
         agent_version: version,
         kinds: reportedKinds,
         capabilities,
@@ -203,7 +224,20 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
         running_job_ids: runningIds,
         // Chỉ máy tự cập nhật mới gửi: worker chạy tay vẫn nói chuyện được với hub chưa biết trường này.
         ...(updater ? { update: updater.report } : {}),
-      });
+      };
+      const metrics = sampler && Date.now() >= metricsPausedUntil ? sampler.latest() : undefined;
+      let res: Awaited<ReturnType<typeof hub.heartbeat>>;
+      try {
+        res = await hub.heartbeat(metrics ? { ...base, metrics } : base);
+      } catch (err) {
+        // Hub build trước khi có `metrics` từ chối cả heartbeat (strictObject): đừng để máy thành offline vì số đo.
+        if (!metrics || !(err instanceof HubRequestError) || err.status !== 400) throw err;
+        metricsPausedUntil = Date.now() + 60 * 60_000;
+        log.warn('Hub refused machine metrics (older hub?); sending heartbeats without them for an hour', {
+          err: String(err),
+        });
+        res = await hub.heartbeat(base);
+      }
 
       if (res.status === 'disabled') {
         claimEnabled = false;
@@ -322,6 +356,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
   }
 
   allocator.setWanted(false);
+  sampler?.stop();
   log.info('Worker stopped');
 
   // ---- Tự cập nhật ----

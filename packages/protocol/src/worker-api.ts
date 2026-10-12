@@ -8,6 +8,7 @@ import {
   LaneSchema,
   OwnerIdSchema,
 } from './common';
+import { MachineMetricsSchema } from './metrics';
 
 /**
  * Worker tự cập nhật đang ở đâu:
@@ -42,6 +43,11 @@ export const HeartbeatRequestSchema = z.strictObject({
    * nó (`strictObject`): lên hub trước rồi mới lên worker.
    */
   update: WorkerUpdateStatusSchema.optional(),
+  /**
+   * Số đo máy mới nhất (tuỳ chọn: worker cũ không gửi, worker tắt bằng `metrics: false` không gửi). Hub build trước
+   * khi có trường này từ chối heartbeat có nó (`strictObject`): lên hub trước rồi mới lên worker.
+   */
+  metrics: MachineMetricsSchema.optional(),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequestSchema>;
 

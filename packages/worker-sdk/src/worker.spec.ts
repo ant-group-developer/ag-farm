@@ -586,3 +586,108 @@ describe('runWorker - self-update', () => {
     }
   }, 10_000);
 });
+
+describe('runWorker - machine metrics', () => {
+  const GB = 1024 ** 3;
+  /** Máy giả cho sampler: không đụng phần cứng thật. */
+  function fakeProbes(calls: { n: number }) {
+    return {
+      platform: 'linux' as const,
+      now: () => Date.now(),
+      cpuTimes: () => {
+        calls.n++;
+        return { idle: calls.n * 100, total: calls.n * 400 };
+      },
+      memory: () => ({ total: 16 * GB, free: 4 * GB }),
+      uptime: () => 120,
+      device: async () => 7,
+      statfs: async () => ({ bsize: 4096, blocks: (100 * GB) / 4096, bavail: (30 * GB) / 4096 }),
+      readFile: async () => '  eth0: 1000 1 0 0 0 0 0 0 2000 1 0 0 0 0 0 0',
+      exec: async () => ({ stdout: '' }),
+    };
+  }
+
+  async function runWithHub(opts: {
+    rejectMetrics?: boolean;
+    metricsOff?: boolean;
+    stopAfterBeats: number;
+    probes: ReturnType<typeof fakeProbes>;
+  }): Promise<{ bodies: Array<{ metrics?: Record<string, unknown> }>; statuses: number[] }> {
+    const tmpDir = makeTmpDir();
+    const bodies: Array<{ metrics?: Record<string, unknown> }> = [];
+    const statuses: number[] = [];
+    const stopCtrl = new AbortController();
+    const { server, url } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const path = req.url ?? '';
+        const body = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString()) as { metrics?: Record<string, unknown> }) : {};
+        res.setHeader('Content-Type', 'application/json');
+        if (path.includes('heartbeat')) {
+          bodies.push(body);
+          // Hub cũ: strictObject từ chối khoá lạ
+          const status = opts.rejectMetrics && body.metrics ? 400 : 200;
+          statuses.push(status);
+          if (statuses.filter((s) => s === 200).length >= opts.stopAfterBeats) stopCtrl.abort();
+          res.writeHead(status);
+          res.end(status === 200 ? heartbeatOk() : JSON.stringify({ error: { code: 'validation_error', message: 'metrics' } }));
+        } else if (path.includes('claim')) {
+          res.writeHead(200); res.end(JSON.stringify({ job: null }));
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+    try {
+      const config = { ...makeConfig(tmpDir, url), ...(opts.metricsOff ? { metrics: false } : {}) };
+      const { runWorker } = await import('./worker');
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.0.1',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 50,
+        metricsIntervalMs: 20,
+        metricsProbes: opts.probes,
+        stopSignal: stopCtrl.signal,
+        handlers: { 'scan.extract': async () => ({ manifest: null, summary: {} }) },
+      });
+      return { bodies, statuses };
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  it('heartbeats carry the latest machine reading', async () => {
+    const calls = { n: 0 };
+    const { bodies } = await runWithHub({ stopAfterBeats: 5, probes: fakeProbes(calls) });
+    const withMetrics = bodies.filter((b) => b.metrics);
+    expect(withMetrics.length).toBeGreaterThan(0);
+    const m = withMetrics[withMetrics.length - 1]!.metrics!;
+    expect(m).toMatchObject({
+      cpu_pct: 75,
+      ram_used_mb: 12 * 1024,
+      ram_total_mb: 16 * 1024,
+      uptime_s: 120,
+    });
+    expect((m['disks'] as unknown[]).length).toBe(1);
+  }, 15_000);
+
+  it('an older hub refusing metrics still gets heartbeats, without them', async () => {
+    const { bodies, statuses } = await runWithHub({ rejectMetrics: true, stopAfterBeats: 6, probes: fakeProbes({ n: 0 }) });
+    const refused = statuses.filter((s) => s === 400).length;
+    // Bị từ chối đúng một lần, gửi lại ngay không có số đo, rồi thôi gửi số đo
+    expect(refused).toBe(1);
+    const at = statuses.indexOf(400);
+    expect(bodies[at + 1]!.metrics).toBeUndefined();
+    expect(bodies.slice(at + 1).every((b) => !b.metrics)).toBe(true);
+  }, 15_000);
+
+  it('metrics: false in config measures nothing and sends nothing', async () => {
+    const calls = { n: 0 };
+    const { bodies } = await runWithHub({ metricsOff: true, stopAfterBeats: 4, probes: fakeProbes(calls) });
+    expect(bodies.every((b) => !b.metrics)).toBe(true);
+    expect(calls.n).toBe(0);
+  }, 15_000);
+});
