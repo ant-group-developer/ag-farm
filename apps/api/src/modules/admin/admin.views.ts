@@ -33,6 +33,9 @@ export function toNodeView(node: FarmNodeEntity, online: boolean) {
     update_requested_at: node.updateRequestedAt ? node.updateRequestedAt.toISOString() : null,
     update: node.updateStatus ?? null,
     update_at: node.updateStatusAt ? node.updateStatusAt.toISOString() : null,
+    // Tình trạng máy ở heartbeat gần nhất có số đo; `metrics_at` cũ (worker cũ, máy tắt) thì web làm mờ.
+    metrics: node.metrics ?? null,
+    metrics_at: node.metricsAt ? node.metricsAt.toISOString() : null,
     created_at: node.createdAt.toISOString(),
     updated_at: node.updatedAt.toISOString(),
     online,

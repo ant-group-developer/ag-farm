@@ -31,6 +31,8 @@ describe('admin views', () => {
       updateRequestedAt: null,
       updateStatus: null,
       updateStatusAt: null,
+      metrics: { cpu_pct: 12.5, disks: [{ path: 'C:', free_mb: 1000, total_mb: 2000 }] },
+      metricsAt: at,
       createdAt: at,
       updatedAt: at,
     } as FarmNodeEntity;
@@ -46,6 +48,8 @@ describe('admin views', () => {
       last_seen_at: at.toISOString(),
       agent_version: '0.1.0',
       online: true,
+      metrics: { cpu_pct: 12.5, disks: [{ path: 'C:', free_mb: 1000, total_mb: 2000 }] },
+      metrics_at: at.toISOString(),
     });
     expect(JSON.stringify(view)).not.toMatch(/token|Hash/);
   });
@@ -61,7 +65,7 @@ describe('admin views', () => {
       createdAt: at,
       updatedAt: at,
     } as unknown as FarmNodeEntity;
-    expect(toNodeView(node, false)).toMatchObject({ last_seen_at: null, running_job_ids: [] });
+    expect(toNodeView(node, false)).toMatchObject({ last_seen_at: null, running_job_ids: [], metrics: null, metrics_at: null });
   });
 
   it('trả chủ job dạng snake_case, không kèm hash khoá', () => {

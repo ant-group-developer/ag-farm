@@ -27,6 +27,7 @@ import { StatsFinishedIndex1700000000000 } from './database/migrations/170000000
 import { NodePriorityOrder1800000000000 } from './database/migrations/1800000000000-node-priority-order';
 import { NodeBlockedKinds1900000000000 } from './database/migrations/1900000000000-node-blocked-kinds';
 import { NodeSelfUpdate2000000000000 } from './database/migrations/2000000000000-node-self-update';
+import { MachineMetrics2100000000000 } from './database/migrations/2100000000000-machine-metrics';
 import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
 import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
@@ -82,6 +83,7 @@ const MIGRATIONS = [
   NodePriorityOrder1800000000000,
   NodeBlockedKinds1900000000000,
   NodeSelfUpdate2000000000000,
+  MachineMetrics2100000000000,
 ];
 
 /** Fake AccountMeClient → luôn trả ADMIN */
@@ -249,6 +251,7 @@ describe('ag-farm DB integration', () => {
       await runner.query(`DROP TABLE IF EXISTS farm_nodes`);
       await runner.query(`DROP TABLE IF EXISTS farm_owners`);
       await runner.query(`DROP TABLE IF EXISTS farm_enrollments`);
+      await runner.query(`DROP TABLE IF EXISTS farm_machine_metrics`);
       await runner.query(`DELETE FROM migrations`);
       // up lại
       await ds.runMigrations();
@@ -2106,6 +2109,219 @@ describe('worker self-update', () => {
       await m.up(runner);
       const rows: { auto_update: boolean }[] = await runner.query(`SELECT auto_update FROM farm_nodes WHERE id = $1`, [node.id]);
       expect(rows[0]!.auto_update).toBe(true);
+    } finally {
+      await runner.release();
+    }
+  });
+});
+
+// ============================================================
+// Tình trạng máy
+// ============================================================
+
+describe('machine metrics', () => {
+  let app: INestApplication;
+  let ds: DataSource;
+
+  const HEARTBEAT = {
+    agent_version: '0.9.0',
+    kinds: ['studio.render_preview'],
+    capabilities: { os: 'windows', cpu_cores: 8, ram_mb: 16384, gpus: [], engines: { ffmpeg: '7.0', ollama_models: [], python: null } },
+    free_slots: { cpu: 1, gpu: 0 },
+    running_job_ids: [],
+  };
+  const METRICS = {
+    cpu_pct: 42.5,
+    ram_used_mb: 12_000,
+    ram_total_mb: 16_384,
+    disks: [
+      { path: 'C:', free_mb: 80_000, total_mb: 500_000 },
+      { path: 'D:', free_mb: 15_000, total_mb: 1_000_000 },
+    ],
+    net_rx_bps: 125_000,
+    net_tx_bps: 4_000,
+    gpus: [{ index: 0, util_pct: 88, vram_used_mb: 6000, vram_total_mb: 8192, temp_c: 70 }],
+    uptime_s: 3600,
+  };
+
+  beforeAll(async () => {
+    app = await buildAdminApp();
+    ds = getDs(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await ds.query('TRUNCATE TABLE farm_jobs, farm_nodes, farm_owners, farm_enrollments, farm_machine_metrics RESTART IDENTITY CASCADE');
+  });
+
+  async function nodeOn(machine: string, name: string): Promise<{ node: FarmNodeEntity; token: string }> {
+    const token = randomBytes(24).toString('base64url');
+    const repo = ds.getRepository(FarmNodeEntity);
+    const node = await repo.save(
+      repo.create({
+        name,
+        machine,
+        kinds: ['studio.render_preview'],
+        tokenHash: createHash('sha256').update(token).digest('hex'),
+        status: 'active',
+      }),
+    );
+    return { node, token };
+  }
+
+  function heartbeat(token: string, extra: Record<string, unknown> = {}) {
+    return request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({ ...HEARTBEAT, ...extra });
+  }
+
+  async function machineRows(): Promise<Array<Record<string, unknown>>> {
+    return ds.query(`SELECT * FROM farm_machine_metrics ORDER BY machine, at`);
+  }
+
+  it('a heartbeat with metrics keeps them on the node and in the machine history', async () => {
+    const { node, token } = await nodeOn('PC1', 'PC1-render');
+    expect((await heartbeat(token, { metrics: METRICS })).status).toBe(200);
+    const saved = await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id });
+    expect(saved.metrics).toEqual(METRICS);
+    expect(saved.metricsAt).toBeInstanceOf(Date);
+
+    const rows = await machineRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      machine: 'PC1',
+      cpu_pct: 42.5,
+      ram_used_mb: 12_000,
+      ram_total_mb: 16_384,
+      disk_free_mb: 15_000,
+      disk_total_mb: 1_000_000,
+      net_rx_bps: 125_000,
+      net_tx_bps: 4_000,
+      disks: METRICS.disks,
+      gpu: METRICS.gpus,
+    });
+    expect((rows[0]!['at'] as Date).getUTCSeconds()).toBe(0);
+
+    // Trang Máy thấy số đo mới nhất
+    const list = await request(app.getHttpServer()).get('/v1/admin/nodes');
+    const view = list.body.data.items.find((n: { id: string }) => n.id === node.id);
+    expect(view.metrics).toEqual(METRICS);
+    expect(typeof view.metrics_at).toBe('string');
+  });
+
+  it('nodes of one machine share one row per minute; a reading without a value keeps the earlier one', async () => {
+    const render = await nodeOn('PC2', 'PC2-render');
+    const scan = await nodeOn('PC2', 'PC2-scan');
+    const loner = await nodeOn('', 'old-node');
+    expect((await heartbeat(render.token, { metrics: METRICS })).status).toBe(200);
+    expect((await heartbeat(scan.token, { metrics: { cpu_pct: 90, ram_used_mb: 13_000, ram_total_mb: 16_384 } })).status).toBe(200);
+    expect((await heartbeat(loner.token, { metrics: { cpu_pct: 5 } })).status).toBe(200);
+    const rows = await machineRows();
+    expect(rows.map((r) => r['machine']).sort()).toEqual(['PC2', 'old-node']);
+    const pc2 = rows.find((r) => r['machine'] === 'PC2');
+    // Cùng phút: số mới nhất của máy; GPU/ổ giữ từ lần trước vì lần sau không có
+    expect(pc2).toMatchObject({ cpu_pct: 90, ram_used_mb: 13_000, disk_free_mb: 15_000, gpu: METRICS.gpus });
+  });
+
+  it('a heartbeat without metrics (older worker) keeps the last reading and writes no history', async () => {
+    const { node, token } = await nodeOn('PC3', 'PC3-render');
+    await heartbeat(token, { metrics: METRICS });
+    await ds.query(`DELETE FROM farm_machine_metrics`);
+    expect((await heartbeat(token)).status).toBe(200);
+    const saved = await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id });
+    expect(saved.metrics).toEqual(METRICS);
+    expect(await machineRows()).toHaveLength(0);
+  });
+
+  it('a heartbeat with bad metrics is refused', async () => {
+    const { token } = await nodeOn('PC4', 'PC4-render');
+    expect((await heartbeat(token, { metrics: { cpu_pct: 250 } })).status).toBe(400);
+    expect((await heartbeat(token, { metrics: { temperature: 1 } })).status).toBe(400);
+  });
+
+  it('GET machines/:machine/metrics gives buckets for 1h, 24h, 7d', async () => {
+    const now = Date.now();
+    const minute = (ago: number) => new Date(Math.floor((now - ago * 60_000) / 60_000) * 60_000).toISOString();
+    const samples: Array<[number, number]> = [
+      [2, 10],
+      [3, 30],
+      [200, 50],
+      [3 * 24 * 60, 70],
+      [8 * 24 * 60, 99],
+    ];
+    for (const [ago, cpu] of samples) {
+      await ds.query(
+        `INSERT INTO farm_machine_metrics (machine, at, cpu_pct, ram_used_mb, ram_total_mb) VALUES ('PC 5', $1, $2, 1000, 2000)`,
+        [minute(ago), cpu],
+      );
+    }
+    const get = (range?: string) =>
+      request(app.getHttpServer()).get(`/v1/admin/machines/${encodeURIComponent('PC 5')}/metrics${range ? `?range=${range}` : ''}`);
+    const cpus = (body: { data: { points: Array<{ cpu_pct: number | null }> } }) =>
+      body.data.points.map((p) => p.cpu_pct).filter((v): v is number => v != null);
+
+    const hour = await get();
+    expect(hour.status).toBe(200);
+    expect(hour.body.data).toMatchObject({ machine: 'PC 5', range: '1h', bucket_seconds: 60 });
+    expect(cpus(hour.body)).toEqual([30, 10]);
+    expect(hour.body.data.points.length).toBeLessThanOrEqual(61);
+
+    const day = await get('24h');
+    expect(day.body.data.bucket_seconds).toBe(300);
+    expect(day.body.data.points.length).toBeLessThanOrEqual(300);
+    expect(cpus(day.body)[0]).toBe(50);
+
+    const week = await get('7d');
+    expect(week.body.data.bucket_seconds).toBe(3600);
+    expect(week.body.data.points.length).toBeLessThanOrEqual(300);
+    expect(cpus(week.body)[0]).toBe(70); // 8 ngày trước nằm ngoài 7d
+
+    expect((await get('30d')).status).toBe(400);
+    const none = await request(app.getHttpServer()).get('/v1/admin/machines/unknown/metrics');
+    expect(none.status).toBe(200);
+    expect(cpus(none.body)).toEqual([]);
+  });
+
+  it('the reaper deletes readings older than 7 days, in batches', async () => {
+    const now = new Date();
+    await ds.query(
+      `INSERT INTO farm_machine_metrics (machine, at, cpu_pct)
+       SELECT 'PC6', $1::timestamptz - make_interval(mins => g), 1 FROM generate_series(0, 11999) g`,
+      [new Date(now.getTime() - 8 * 24 * 60 * 60_000).toISOString()],
+    );
+    await ds.query(`INSERT INTO farm_machine_metrics (machine, at, cpu_pct) VALUES ('PC6', $1, 2)`, [
+      new Date(now.getTime() - 6 * 24 * 60 * 60_000).toISOString(),
+    ]);
+    const reaper = app.get(ReaperService);
+    expect(await reaper.pruneMetrics(now)).toBe(12_000);
+    const left: Array<{ cpu_pct: number }> = await ds.query(`SELECT cpu_pct FROM farm_machine_metrics`);
+    expect(left).toEqual([{ cpu_pct: 2 }]);
+    expect(await reaper.pruneMetrics(now)).toBe(0);
+  });
+
+  it('migration down/up drops and restores the metrics columns and table', async () => {
+    const { node, token } = await nodeOn('PC7', 'PC7-render');
+    await heartbeat(token, { metrics: METRICS });
+    const runner = ds.createQueryRunner();
+    try {
+      const m = new MachineMetrics2100000000000();
+      await m.down(runner);
+      const cols: unknown[] = await runner.query(
+        `SELECT 1 FROM information_schema.columns WHERE table_name = 'farm_nodes' AND column_name IN ('metrics', 'metrics_at')`,
+      );
+      expect(cols).toHaveLength(0);
+      expect(await runner.query(`SELECT 1 FROM pg_tables WHERE tablename = 'farm_machine_metrics'`)).toHaveLength(0);
+      await m.up(runner);
+      const rows: Array<{ metrics: unknown }> = await runner.query(`SELECT metrics FROM farm_nodes WHERE id = $1`, [node.id]);
+      expect(rows[0]!.metrics).toBeNull();
+      const idx: unknown[] = await runner.query(
+        `SELECT 1 FROM pg_indexes WHERE tablename = 'farm_machine_metrics' AND indexname = 'farm_machine_metrics_at_idx'`,
+      );
+      expect(idx).toHaveLength(1);
     } finally {
       await runner.release();
     }

@@ -38,6 +38,7 @@ Sao chép `apps/api/.env.example` → `apps/api/.env` rồi điền:
 | `REAPER_INTERVAL_MS` | Chu kỳ reaper thu hồi lease hết hạn (mặc định `15000`) |
 | `NODE_OFFLINE_AFTER_SECONDS` | Thời gian không heartbeat coi node offline (mặc định `90`) |
 | `NODE_PRIORITY_GRACE_SECONDS` | Job chờ quá ngần này giây thì máy xếp sau cũng nhận, không nhường máy xếp trước nữa (mặc định `10`, `0` = tắt thứ tự máy) |
+| `MACHINE_METRICS_KEEP_DAYS` | Giữ lịch sử số đo máy (`farm_machine_metrics`) bấy nhiêu ngày; reaper xoá dòng cũ hơn mỗi 10 phút (mặc định `7`) |
 
 ### Sinh cặp khoá ticket
 

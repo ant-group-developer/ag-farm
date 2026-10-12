@@ -32,6 +32,8 @@ import { FarmJobEntity } from '../../database/entities/farm-job.entity';
 type JobPatch = Parameters<Repository<FarmJobEntity>['update']>[1];
 import { FarmNodeEntity } from '../../database/entities/farm-node.entity';
 import { FarmOwnerEntity } from '../../database/entities/farm-owner.entity';
+import { machineKey } from '../machines/machine-metrics';
+import { MachineMetricsService } from '../machines/machine-metrics.service';
 import { ollamaModels, parseKeyPem } from '../../config/env';
 import {
   claimableSince,
@@ -65,6 +67,7 @@ export class WorkerService {
     private readonly ownerRepo: Repository<FarmOwnerEntity>,
     private readonly dataSource: DataSource,
     private readonly config: ConfigService,
+    private readonly machineMetrics: MachineMetricsService,
   ) {}
 
   async me(node: FarmNodeEntity): Promise<WorkerMeResponse> {
@@ -84,9 +87,11 @@ export class WorkerService {
 
   async heartbeat(node: FarmNodeEntity, req: HeartbeatRequest): Promise<HeartbeatResponse> {
     // Chỉ cập nhật `kinds` (kinds báo cáo) — không ghi đè `blocked_kinds` (do admin chỉnh).
-    // Trạng thái tự cập nhật chỉ ghi khi worker gửi (worker cũ không gửi: giữ giá trị cũ, thường là null).
+    // Trạng thái tự cập nhật và số đo máy chỉ ghi khi worker gửi (worker cũ không gửi: giữ giá trị cũ, thường là null).
+    const now = new Date();
     await this.nodeRepo.update(node.id, {
-      ...(req.update ? { updateStatus: req.update, updateStatusAt: new Date() } : {}),
+      ...(req.update ? { updateStatus: req.update, updateStatusAt: now } : {}),
+      ...(req.metrics ? { metrics: req.metrics, metricsAt: now } : {}),
       agentVersion: req.agent_version,
       kinds: req.kinds,
       capabilities: req.capabilities,
@@ -97,8 +102,16 @@ export class WorkerService {
       ramMb: req.capabilities.ram_mb,
       gpus: req.capabilities.gpus,
       engines: req.capabilities.engines,
-      lastSeenAt: new Date(),
+      lastSeenAt: now,
     });
+    if (req.metrics) {
+      // Lịch sử theo máy: lỗi ghi không được làm hỏng heartbeat (máy sẽ thành offline).
+      try {
+        await this.machineMetrics.record(machineKey(node), req.metrics, now);
+      } catch (err) {
+        this.logger.warn(`Could not record machine metrics for ${node.name}: ${String(err)}`);
+      }
+    }
     return {
       node_id: node.id,
       server_time: new Date().toISOString(),

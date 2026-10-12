@@ -1,5 +1,5 @@
 import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
-import type { Capabilities, Slots, WorkerUpdateStatus } from '@ag-farm/protocol';
+import type { Capabilities, MachineMetrics, Slots, WorkerUpdateStatus } from '@ag-farm/protocol';
 
 /** Máy worker đã đăng ký. */
 @Entity('farm_nodes')
@@ -95,6 +95,13 @@ export class FarmNodeEntity {
 
   @Column({ name: 'update_status_at', type: 'timestamptz', nullable: true })
   updateStatusAt!: Date | null;
+
+  /** Số đo máy ở heartbeat gần nhất có trường `metrics` (CPU, RAM, ổ, mạng, GPU). */
+  @Column({ type: 'jsonb', nullable: true })
+  metrics!: MachineMetrics | null;
+
+  @Column({ name: 'metrics_at', type: 'timestamptz', nullable: true })
+  metricsAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

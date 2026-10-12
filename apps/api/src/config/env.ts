@@ -36,6 +36,9 @@ export const EnvSchema = z.object({
    */
   NODE_PRIORITY_GRACE_SECONDS: z.coerce.number().int().min(0).default(10),
 
+  /** Giữ lịch sử số đo máy (CPU, RAM, ổ, mạng, GPU) bấy nhiêu ngày; reaper xoá dòng cũ hơn. */
+  MACHINE_METRICS_KEEP_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+
   FRONTEND_ORIGIN: z.string().default('*'),
 
   /** Địa chỉ hub mà máy worker gọi tới, hiện trong lệnh cài máy (vd. https://farm-api-dev.ant-group.net). */

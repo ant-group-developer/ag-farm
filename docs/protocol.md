@@ -115,4 +115,15 @@ thì bỏ trường đó, không gửi 0.
   cũ: heartbeat có `metrics` bị 400 thì gửi lại ngay không có số đo và thôi gửi số đo trong một giờ, nên máy không
   thành offline.
 
+Hub lưu bản đo ở `farm_nodes.metrics`/`metrics_at` (heartbeat không có `metrics` giữ giá trị cũ; web coi số đo cũ hơn 2
+phút là cũ) và ghi lịch sử theo máy vào `farm_machine_metrics` (khoá `farm_nodes.machine`, node không có máy thì tên
+node): mỗi phút một dòng, các node cùng máy ghi chung dòng đó (số mới nhất; trường lần này thiếu giữ số cũ), `disk_free_mb`
+là ổ còn ít chỗ nhất, `disks`/`gpu` giữ đủ. Reaper xoá dòng cũ hơn `MACHINE_METRICS_KEEP_DAYS` (mặc định 7) mỗi 10 phút,
+từng lô 5 000 dòng. Lỗi ghi lịch sử không làm hỏng heartbeat.
+
+Admin: `GET /v1/admin/nodes` trả thêm `metrics`, `metrics_at`; `GET /v1/admin/machines/:machine/metrics?range=1h|24h|7d`
+(mặc định `1h`) trả `{ machine, range, bucket_seconds, from, to, points }`, ô 1 phút / 5 phút / 1 giờ (≤ 300 điểm); mỗi
+điểm `{ t, cpu_pct, ram_used_mb, ram_total_mb, disk_free_mb, disk_total_mb, net_rx_bps, net_tx_bps, gpus[] }` là trung
+bình trong ô (ổ trống: thấp nhất; nhiệt độ GPU: cao nhất), ô không có số đo thì `null`.
+
 Kết quả job (`JobResult`) chỉ gồm đường dẫn manifest và vài con số; dữ liệu đầy đủ nằm trong manifest ở bucket của chủ job.
