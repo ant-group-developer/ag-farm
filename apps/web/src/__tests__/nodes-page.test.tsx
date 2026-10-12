@@ -10,6 +10,7 @@ const listNodes = vi.fn();
 const patchNode = vi.fn();
 const requestNodeUpdate = vi.fn();
 const getLatestReleases = vi.fn();
+const getMachineMetrics = vi.fn();
 vi.mock('../api/admin', () => ({
   listNodes: (...args: unknown[]) => listNodes(...args),
   createNode: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock('../api/admin', () => ({
   createEnrollment: vi.fn(),
   requestNodeUpdate: (...args: unknown[]) => requestNodeUpdate(...args),
   getLatestReleases: (...args: unknown[]) => getLatestReleases(...args),
+  getMachineMetrics: (...args: unknown[]) => getMachineMetrics(...args),
 }));
 
 const { NodesPage } = await import('../modules/nodes/NodesPage');
@@ -182,5 +184,142 @@ describe('NodesPage', () => {
     expect(buttons.map((b) => (b as HTMLButtonElement).disabled)).toEqual([false, true, true]);
     fireEvent.click(buttons[0]!);
     await waitFor(() => expect(requestNodeUpdate).toHaveBeenCalledWith('id-pc1-render'));
+  }, 30_000);
+
+  it('cột tình trạng máy: số, màu theo ngưỡng, số đo cũ bị làm mờ, đầu trang báo gộp theo máy', async () => {
+    const now = new Date().toISOString();
+    const old = new Date(Date.now() - 10 * 60_000).toISOString();
+    const fullDisk = { path: 'D:', free_mb: 12 * 1024, total_mb: 1000 * 1024 };
+    listNodes.mockResolvedValue({
+      items: [
+        node('PC1-render', 1, {
+          machine: 'PC1',
+          metrics_at: now,
+          metrics: {
+            cpu_pct: 37,
+            ram_used_mb: 15 * 1024,
+            ram_total_mb: 16 * 1024,
+            disks: [fullDisk],
+            net_rx_bps: 1_250_000,
+            net_tx_bps: 40_000,
+            gpus: [{ index: 0, util_pct: 88, vram_used_mb: 6144, vram_total_mb: 8192, temp_c: 71 }],
+          },
+        }),
+        node('PC1-scan', 2, {
+          machine: 'PC1',
+          metrics_at: now,
+          metrics: { cpu_pct: 35, ram_used_mb: 15 * 1024, ram_total_mb: 16 * 1024, disks: [fullDisk] },
+        }),
+        node('PC2-render', 3, {
+          machine: 'PC2',
+          metrics_at: now,
+          metrics: { cpu_pct: 5, ram_used_mb: 4 * 1024, ram_total_mb: 16 * 1024, disks: [fullDisk] },
+        }),
+        node('PC3-render', 4, {
+          machine: 'PC3',
+          metrics_at: old,
+          metrics: { cpu_pct: 99, ram_used_mb: 16 * 1024, ram_total_mb: 16 * 1024 },
+        }),
+        node('PC4-render', 5, { machine: 'PC4' }),
+      ],
+      total: 5,
+      page: 1,
+      pageSize: 200,
+    });
+    const { container } = renderPage();
+    await waitFor(() => expect(screen.getAllByText('PC1-render').length).toBeGreaterThan(0));
+    // Header: per machine (PC1 counts once), stale PC3 left out
+    expect(screen.getByText('2 máy sắp đầy ổ')).toBeTruthy();
+    expect(screen.getByText('1 máy RAM > 90 %')).toBeTruthy();
+    expect(screen.queryByText(/CPU ≥ 95/)).toBeNull();
+    // Cells
+    expect(screen.getByText('37%')).toBeTruthy();
+    expect(screen.getAllByText('trống 12 GB').length).toBe(3);
+    // Dưới 20 GB trống: đỏ; RAM 94 %: vàng; CPU 37 %: màu thường
+    expect(screen.getAllByText('trống 12 GB')[0]!.style.color).not.toBe('');
+    expect(screen.getAllByText('94%')[0]!.style.color).not.toBe('');
+    expect(screen.getByText('37%').style.color).toBe('');
+    expect(screen.getByText('↓ 1.3 MB/s')).toBeTruthy();
+    expect(screen.getByText('↑ 40.0 kB/s')).toBeTruthy();
+    expect(screen.getByText('88%')).toBeTruthy();
+    expect(screen.getByText(/VRAM 6 \/ 8 GB/)).toBeTruthy();
+    // PC3's reading is old: greyed
+    const stale = [...container.querySelectorAll('[data-stale]')];
+    expect(stale.length).toBeGreaterThan(0);
+    expect(stale.some((el) => el.textContent?.includes('99%'))).toBe(true);
+    expect(stale.some((el) => el.textContent?.includes('37%'))).toBe(false);
+  }, 30_000);
+
+  it('sắp theo CPU thì máy cao nhất lên đầu, máy chưa có số đo cuối, và tắt kéo thả', async () => {
+    const now = new Date().toISOString();
+    listNodes.mockResolvedValue({
+      items: [
+        node('low', 1, { metrics_at: now, metrics: { cpu_pct: 10 } }),
+        node('none', 2),
+        node('high', 3, { metrics_at: now, metrics: { cpu_pct: 90 } }),
+      ],
+      total: 3,
+      page: 1,
+      pageSize: 200,
+    });
+    const { container } = renderPage();
+    await waitFor(() => expect(screen.getAllByText('low').length).toBeGreaterThan(0));
+    expect(container.querySelectorAll('svg.lucide-grip-vertical')).toHaveLength(3);
+    const rowNames = () =>
+      [...container.querySelectorAll('tbody tr.ant-table-row')].map((tr) =>
+        ['low', 'none', 'high'].find((n) => tr.textContent?.includes(n)),
+      );
+    expect(rowNames()).toEqual(['low', 'none', 'high']);
+    const cpuHeader = [...container.querySelectorAll('th')].find((th) => th.textContent?.trim().startsWith('CPU'))!;
+    fireEvent.click(cpuHeader);
+    await waitFor(() => expect(rowNames()).toEqual(['high', 'low', 'none']));
+    expect(container.querySelectorAll('svg.lucide-grip-vertical')).toHaveLength(0);
+  }, 30_000);
+
+  it('bấm tên máy mở drawer biểu đồ của máy đó', async () => {
+    const now = new Date().toISOString();
+    getMachineMetrics.mockResolvedValue({
+      machine: 'PC1',
+      range: '1h',
+      bucket_seconds: 60,
+      from: now,
+      to: now,
+      points: [
+        {
+          t: now,
+          cpu_pct: 20,
+          ram_used_mb: 1024,
+          ram_total_mb: 2048,
+          disk_free_mb: 5000,
+          disk_total_mb: 9000,
+          net_rx_bps: 10,
+          net_tx_bps: 5,
+          gpus: [],
+        },
+      ],
+    });
+    listNodes.mockResolvedValue({
+      items: [
+        node('PC1-render', 1, {
+          machine: 'PC1',
+          metrics_at: now,
+          metrics: { cpu_pct: 20, uptime_s: 2 * 86_400 + 3600, disks: [{ path: 'C:', free_mb: 5000, total_mb: 9000 }] },
+        }),
+        node('PC1-scan', 2, { machine: 'PC1' }),
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 200,
+    });
+    renderPage();
+    const links = await screen.findAllByText('PC1');
+    fireEvent.click(links[0]!);
+    await waitFor(() => expect(getMachineMetrics).toHaveBeenCalledWith('PC1', '1h'));
+    expect(await screen.findByText('Máy PC1')).toBeTruthy();
+    expect(screen.getByText('2d 1h')).toBeTruthy();
+    // Both workers of the machine are listed
+    expect(screen.getAllByText('PC1-scan').length).toBeGreaterThan(1);
+    fireEvent.click(screen.getByText('7 ngày'));
+    await waitFor(() => expect(getMachineMetrics).toHaveBeenCalledWith('PC1', '7d'));
   }, 30_000);
 });

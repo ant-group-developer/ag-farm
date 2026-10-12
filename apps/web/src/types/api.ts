@@ -79,10 +79,74 @@ export interface NodeView {
   /** Self-update state from the worker's latest heartbeat that carried one; null for workers without self-update. */
   update: NodeUpdateStatus | null;
   update_at: string | null;
+  /** Latest machine reading (CPU, RAM, disks, network, GPU); absent from hubs before metrics, null before the first one. */
+  metrics?: MachineMetrics | null;
+  /** When the hub got `metrics`; older than 2 minutes means the reading is stale. */
+  metrics_at?: string | null;
   created_at: string;
   updated_at: string;
   /** Computed by server: last_seen_at within NODE_OFFLINE_AFTER_SECONDS */
   online: boolean;
+}
+
+export interface DiskMetrics {
+  /** `C:` on Windows, the directory on Linux. */
+  path: string;
+  free_mb: number;
+  total_mb: number;
+}
+
+export interface GpuMetrics {
+  index: number;
+  util_pct?: number;
+  vram_used_mb?: number;
+  vram_total_mb?: number;
+  temp_c?: number;
+}
+
+/** What a worker measured on its machine; anything it could not measure is left out. */
+export interface MachineMetrics {
+  cpu_pct?: number;
+  ram_used_mb?: number;
+  ram_total_mb?: number;
+  disks?: DiskMetrics[];
+  /** Bytes per second, all network cards of the machine. */
+  net_rx_bps?: number;
+  net_tx_bps?: number;
+  gpus?: GpuMetrics[];
+  uptime_s?: number;
+}
+
+export type MetricRange = '1h' | '24h' | '7d';
+
+export interface MachineMetricGpuPoint {
+  index: number;
+  util_pct: number | null;
+  vram_used_mb: number | null;
+  vram_total_mb: number | null;
+  temp_c: number | null;
+}
+
+/** One chart point: averages over the bucket (disk: lowest free; GPU temperature: highest); null when nothing came in. */
+export interface MachineMetricPoint {
+  t: string;
+  cpu_pct: number | null;
+  ram_used_mb: number | null;
+  ram_total_mb: number | null;
+  disk_free_mb: number | null;
+  disk_total_mb: number | null;
+  net_rx_bps: number | null;
+  net_tx_bps: number | null;
+  gpus: MachineMetricGpuPoint[];
+}
+
+export interface MachineMetricsSeries {
+  machine: string;
+  range: MetricRange;
+  bucket_seconds: number;
+  from: string;
+  to: string;
+  points: MachineMetricPoint[];
 }
 
 export type NodeUpdateState = 'idle' | 'draining' | 'installing' | 'failed';

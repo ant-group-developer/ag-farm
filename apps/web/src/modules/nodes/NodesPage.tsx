@@ -70,18 +70,14 @@ import {
 import { EnrollModal } from './EnrollModal';
 import { NODE_ORDER_PAGE_SIZE, canDragSort, isOrderView, renumber, slotsAreLive } from './node-order';
 import { isOutdated, latestFor, missingTools, visibleUpdate, type MissingTool } from './node-update';
+import { formatGb, isMetricKey, machineKey, sortByMetric, type MetricKey, type MetricSortOrder } from './machine-health';
+import { CpuCell, DiskCell, GpuCell, HealthSummaryBar, MachineDrawer, NetCell, RamCell } from './MachineHealth';
 
 const { Text } = Typography;
 
 const OS_LABELS: Record<string, string> = { windows: 'Windows', linux: 'Linux', darwin: 'macOS' };
 
 const SPEC_ICON_STYLE = { flexShrink: 0, color: 'rgba(0, 0, 0, 0.45)' } as const;
-
-/** MB → GB: whole numbers from 10 GB up, one decimal below (8 GB VRAM vs 1.5 GB). */
-function formatGb(mb: number): string {
-  const gb = mb / 1024;
-  return String(gb >= 10 ? Math.round(gb) : Math.round(gb * 10) / 10);
-}
 
 function Spec({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
@@ -243,6 +239,14 @@ export function NodesPage() {
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [editNode, setEditNode] = useState<NodeView | null>(null);
   const [secret, setSecret] = useState<{ title: string; label: string; value: string } | null>(null);
+  /** Machine whose charts are open in the drawer. */
+  const [openMachine, setOpenMachine] = useState<string | null>(null);
+  /**
+   * A health column sorts the rows of the page here (the table's own local sort does not run inside ProTable); drag to
+   * reorder is off meanwhile, the rows are not in priority order.
+   */
+  const [metricSort, setMetricSort] = useState<{ key: MetricKey; order: MetricSortOrder } | null>(null);
+  const metricSorted = metricSort !== null;
   const [form] = Form.useForm<{ name: string; machine?: string; kinds: JobType[] }>();
   const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[] }>();
 
@@ -282,8 +286,9 @@ export function NodesPage() {
   ];
 
   const nodes = nodesQuery.data?.items ?? [];
+  const shownNodes = metricSort ? sortByMetric(nodes, metricSort.key, metricSort.order) : nodes;
   const total = nodesQuery.data?.total ?? 0;
-  const draggable = canDragSort(orderView, nodes.length, total);
+  const draggable = canDragSort(orderView, nodes.length, total) && !metricSorted;
 
   const reorderMut = useMutation({
     mutationFn: (ordered: NodeView[]) => reorderNodes(ordered.map((n) => n.id)),
@@ -346,6 +351,11 @@ export function NodesPage() {
     return null;
   };
 
+  const openOnClick = (r: NodeView) => ({
+    onClick: () => setOpenMachine(machineKey(r)),
+    style: { cursor: 'pointer' },
+  });
+
   const columns: ProColumns<NodeView>[] = [
     {
       // Cột chứa tay nắm kéo thả (dragSortKey) khi đang xem theo thứ tự.
@@ -382,9 +392,16 @@ export function NodesPage() {
       render: (_: unknown, r: NodeView) => (
         <Flex vertical style={{ minWidth: 0 }}>
           <Text strong ellipsis={{ tooltip: r.name }}>{r.name}</Text>
-          <Text type="secondary" ellipsis={{ tooltip: r.machine || undefined }}>
-            {r.machine || '-'}
-          </Text>
+          <Tooltip title={t('nodes.health.openChart', { machine: machineKey(r) })}>
+            <Typography.Link
+              ellipsis
+              type="secondary"
+              onClick={() => setOpenMachine(machineKey(r))}
+              style={{ maxWidth: '100%' }}
+            >
+              {r.machine || '-'}
+            </Typography.Link>
+          </Tooltip>
         </Flex>
       ),
     },
@@ -403,6 +420,59 @@ export function NodesPage() {
           }
         />
       ),
+    },
+    // Tình trạng máy (worker đo mỗi 15 s): bấm ô mở biểu đồ của máy; sắp xếp trên trang đang xem.
+    {
+      title: t('nodes.health.cpu'),
+      tooltip: t('nodes.health.help'),
+      key: 'cpu',
+      dataIndex: 'cpu',
+      width: 100,
+      sorter: true,
+      sortDirections: ['descend', 'ascend'],
+      onCell: openOnClick,
+      render: (_: unknown, r: NodeView) => <CpuCell node={r} />,
+    },
+    {
+      title: t('nodes.health.ram'),
+      key: 'ram',
+      dataIndex: 'ram',
+      width: 120,
+      sorter: true,
+      sortDirections: ['descend', 'ascend'],
+      onCell: openOnClick,
+      render: (_: unknown, r: NodeView) => <RamCell node={r} />,
+    },
+    {
+      title: t('nodes.health.disk'),
+      key: 'disk',
+      dataIndex: 'disk',
+      width: 130,
+      // Ít chỗ trống nhất trước
+      sorter: true,
+      sortDirections: ['ascend', 'descend'],
+      onCell: openOnClick,
+      render: (_: unknown, r: NodeView) => <DiskCell node={r} />,
+    },
+    {
+      title: t('nodes.health.network'),
+      key: 'net',
+      dataIndex: 'net',
+      width: 120,
+      sorter: true,
+      sortDirections: ['descend', 'ascend'],
+      onCell: openOnClick,
+      render: (_: unknown, r: NodeView) => <NetCell node={r} />,
+    },
+    {
+      title: t('nodes.health.gpu'),
+      key: 'gpu',
+      dataIndex: 'gpu',
+      width: 150,
+      sorter: true,
+      sortDirections: ['descend', 'ascend'],
+      onCell: openOnClick,
+      render: (_: unknown, r: NodeView) => <GpuCell node={r} />,
     },
     {
       // Worker tự báo loại làm được (ghi đè mỗi heartbeat); admin chỉ tắt/bật từng loại (`blocked_kinds`).
@@ -627,9 +697,15 @@ export function NodesPage() {
         }
       />
 
+      <HealthSummaryBar nodes={nodes} />
+
       <DragSortTable<NodeView>
         rowKey="id"
-        dataSource={nodes}
+        onChange={(_pagination, _filters, sorter) => {
+          const s = Array.isArray(sorter) ? sorter[0] : sorter;
+          setMetricSort(s?.order && isMetricKey(s.columnKey) ? { key: s.columnKey, order: s.order } : null);
+        }}
+        dataSource={shownNodes}
         columns={columns}
         loading={nodesQuery.isLoading || reorderMut.isPending}
         pagination={pagination}
@@ -706,6 +782,12 @@ export function NodesPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <MachineDrawer
+        machine={openMachine}
+        nodes={openMachine ? nodes.filter((n) => machineKey(n) === openMachine) : []}
+        onClose={() => setOpenMachine(null)}
+      />
 
       <EnrollModal
         open={enrollOpen}

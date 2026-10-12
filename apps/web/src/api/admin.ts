@@ -8,6 +8,8 @@ import type {
   CreateNodeRequest,
   CreateOwnerRequest,
   JobView,
+  MachineMetricsSeries,
+  MetricRange,
   NodeView,
   OwnerView,
   PagedResponse,
@@ -62,6 +64,11 @@ export function requestNodeUpdate(id: string): Promise<NodeView> {
 /** The newest release of each worker package (the hub's latest.json). */
 export function getLatestReleases(): Promise<ReleaseManifest> {
   return api.get<ReleaseManifest>('/v1/admin/releases/latest');
+}
+
+/** Readings of one machine (a node's `machine`, or its name when it has none) for the charts. */
+export function getMachineMetrics(machine: string, range: MetricRange): Promise<MachineMetricsSeries> {
+  return api.get<MachineMetricsSeries>(`/v1/admin/machines/${encodeURIComponent(machine)}/metrics${toParams({ range })}`);
 }
 
 export function deleteNode(id: string): Promise<void> {
