@@ -205,6 +205,13 @@ export const en: LocaleMessages = {
     allowedKinds: 'Job types it is given',
     allowedKindsHelp: 'Leave empty to give the worker every job type it reports.',
     allowedKindsAll: 'All reported types',
+    order: 'Order',
+    orderHelp: 'The order workers get jobs in: a worker higher up with a free slot gets a job before the ones below it. Drag the ⋮⋮ handle to change it.',
+    orderDragHint: 'Drag to change the order workers get jobs in',
+    orderDragOff: 'Sort by "Order" ascending and clear the search to drag.',
+    orderSaved: 'Worker order saved',
+    slotsStale: 'From the last time the worker connected; it is not taking jobs now.',
+    runningIds: 'Running jobs: {{ids}}',
   },
   owners: {
     title: 'Client apps',

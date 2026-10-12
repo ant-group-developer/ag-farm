@@ -15,16 +15,16 @@ import {
   Select,
   Space,
   Switch,
-  Table,
   Tag,
   Tooltip,
   Typography,
   message,
 } from 'antd';
-import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
+import { DragSortTable, type ProColumns } from '@ant-design/pro-components';
+import type { TablePaginationConfig } from 'antd/es/table';
 import { parseAsInteger, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import { useState, type ReactNode } from 'react';
-import { createNode, deleteNode, listNodes, patchNode } from '../../api/admin';
+import { createNode, deleteNode, listNodes, patchNode, reorderNodes } from '../../api/admin';
 import { SecretModal } from '../../shared/components/SecretModal';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { SortDropdown } from '../../shared/components/SortDropdown';
@@ -32,12 +32,13 @@ import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
 import { jobTypeLabel, jobTypeOptions } from '../../shared/lib/job-labels';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import { columnsWidth } from '../../shared/lib/table-width';
-import type { JobType, NodeCapabilities, NodeSortBy, NodeView, SortOrder } from '../../types/api';
+import type { JobType, NodeCapabilities, NodeSortBy, NodeView, PagedResponse, SortOrder } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronDown,
   Cpu,
+  GripVertical,
   Gpu,
   KeyRound,
   MemoryStick,
@@ -48,6 +49,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { EnrollModal } from './EnrollModal';
+import { NODE_ORDER_PAGE_SIZE, canDragSort, isOrderView, renumber, slotsAreLive } from './node-order';
 
 const { Text } = Typography;
 
@@ -147,26 +149,32 @@ export function NodesPage() {
   const [query, setQuery] = useQueryStates({
     page: parseAsInteger.withDefault(1),
     pageSize: parseAsInteger.withDefault(20),
-    sortBy: parseAsStringEnum<NodeSortBy>(['name', 'lastSeenAt', 'createdAt']).withDefault('createdAt'),
-    sortOrder: parseAsStringEnum<SortOrder>(['asc', 'desc']).withDefault('desc'),
+    sortBy: parseAsStringEnum<NodeSortBy>(['priorityOrder', 'name', 'lastSeenAt', 'createdAt']).withDefault(
+      'priorityOrder',
+    ),
+    sortOrder: parseAsStringEnum<SortOrder>(['asc', 'desc']).withDefault('asc'),
     q: parseAsString.withDefault(''),
   });
 
+  // Xem theo thứ tự nhận việc: tải cả danh sách một trang để kéo thả cả farm.
+  const orderView = isOrderView(query);
   const apiQuery = {
-    page: query.page,
-    pageSize: query.pageSize,
+    page: orderView ? 1 : query.page,
+    pageSize: orderView ? NODE_ORDER_PAGE_SIZE : query.pageSize,
     sortBy: query.sortBy,
     sortOrder: query.sortOrder,
     q: query.q || undefined,
   };
+  const queryKey = ['nodes', apiQuery];
 
   const nodesQuery = useQuery({
-    queryKey: ['nodes', apiQuery],
+    queryKey,
     queryFn: () => listNodes(apiQuery),
     refetchInterval: 10_000,
   });
 
   const sortFields: readonly { value: NodeSortBy; label: string }[] = [
+    { value: 'priorityOrder', label: t('nodes.order') },
     { value: 'createdAt', label: t('common.createdAt') },
     { value: 'name', label: t('nodes.name') },
     { value: 'lastSeenAt', label: t('nodes.lastSeen') },
@@ -174,6 +182,19 @@ export function NodesPage() {
 
   const nodes = nodesQuery.data?.items ?? [];
   const total = nodesQuery.data?.total ?? 0;
+  const draggable = canDragSort(orderView, nodes.length, total);
+
+  const reorderMut = useMutation({
+    mutationFn: (ordered: NodeView[]) => reorderNodes(ordered.map((n) => n.id)),
+    onMutate: async (ordered) => {
+      // Hiện thứ tự mới ngay, không đợi hub (và không để lần tải định kỳ kéo về thứ tự cũ giữa chừng).
+      await qc.cancelQueries({ queryKey: ['nodes'] });
+      qc.setQueryData<PagedResponse<NodeView>>(queryKey, (old) => (old ? { ...old, items: renumber(ordered) } : old));
+    },
+    onSuccess: () => void messageApi.success(t('nodes.orderSaved')),
+    onError: (e) => void messageApi.error(String(e)),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['nodes'] }),
+  });
 
   const createMut = useMutation({
     mutationFn: createNode,
@@ -199,7 +220,23 @@ export function NodesPage() {
     onError: (e) => void messageApi.error(String(e)),
   });
 
-  const columns: ColumnsType<NodeView> = [
+  const columns: ProColumns<NodeView>[] = [
+    {
+      // Cột chứa tay nắm kéo thả (dragSortKey) khi đang xem theo thứ tự.
+      title: t('nodes.order'),
+      tooltip: t('nodes.orderHelp'),
+      key: 'priority_order',
+      dataIndex: 'priority_order',
+      width: 90,
+      render: (_: unknown, r: NodeView) =>
+        draggable ? (
+          <Text strong>{r.priority_order}</Text>
+        ) : (
+          <Tooltip title={orderView ? undefined : t('nodes.orderDragOff')}>
+            <Text type={orderView ? undefined : 'secondary'}>{r.priority_order}</Text>
+          </Tooltip>
+        ),
+    },
     {
       title: t('nodes.connection'),
       key: 'online',
@@ -216,9 +253,9 @@ export function NodesPage() {
       dataIndex: 'name',
       key: 'name',
       width: 200,
-      render: (v: string, r: NodeView) => (
+      render: (_: unknown, r: NodeView) => (
         <Flex vertical style={{ minWidth: 0 }}>
-          <Text strong ellipsis={{ tooltip: v }}>{v}</Text>
+          <Text strong ellipsis={{ tooltip: r.name }}>{r.name}</Text>
           <Text type="secondary" ellipsis={{ tooltip: r.machine || undefined }}>
             {r.machine || '-'}
           </Text>
@@ -273,19 +310,28 @@ export function NodesPage() {
       title: t('nodes.freeSlots'),
       key: 'slots',
       width: 120,
-      render: (_: unknown, r: NodeView) =>
-        r.free_slots ? (
-          <Flex vertical>
-            <Text>
-              <Text type="secondary">CPU</Text> {r.free_slots.cpu}
-            </Text>
-            <Text>
-              <Text type="secondary">GPU</Text> {r.free_slots.gpu}
-            </Text>
-          </Flex>
-        ) : (
-          <Text type="secondary">-</Text>
-        ),
+      render: (_: unknown, r: NodeView) => {
+        if (!r.free_slots) return <Text type="secondary">-</Text>;
+        // Máy offline hay tắt: số này là của lần kết nối cuối, không phải chỗ nó đang nhận việc.
+        const live = slotsAreLive(r);
+        const slot = (label: string, free: number) => (
+          <Tag
+            bordered={false}
+            color={live ? (free > 0 ? 'green' : 'default') : undefined}
+            style={{ marginInlineEnd: 0, opacity: live ? 1 : 0.55 }}
+          >
+            {label} {free}
+          </Tag>
+        );
+        return (
+          <Tooltip title={live ? undefined : t('nodes.slotsStale')}>
+            <Flex wrap gap={4}>
+              {slot('CPU', r.free_slots.cpu)}
+              {slot('GPU', r.free_slots.gpu)}
+            </Flex>
+          </Tooltip>
+        );
+      },
     },
     {
       title: t('nodes.running'),
@@ -294,9 +340,16 @@ export function NodesPage() {
       align: 'center',
       render: (_: unknown, r: NodeView) =>
         r.running_job_ids.length > 0 ? (
-          <Text strong>{r.running_job_ids.length}</Text>
+          <Tooltip title={t('nodes.runningIds', { ids: r.running_job_ids.join(', ') })}>
+            <Badge
+              count={r.running_job_ids.length}
+              color="blue"
+              overflowCount={999}
+              showZero={false}
+            />
+          </Tooltip>
         ) : (
-          <Text type="secondary">-</Text>
+          <Text type="secondary">0</Text>
         ),
     },
     {
@@ -319,7 +372,8 @@ export function NodesPage() {
       key: 'version',
       width: 120,
       ellipsis: true,
-      render: (v: string | null) => (v ? <Text>{v}</Text> : <Text type="secondary">-</Text>),
+      render: (_: unknown, r: NodeView) =>
+        r.agent_version ? <Text>{r.agent_version}</Text> : <Text type="secondary">-</Text>,
     },
     {
       title: t('common.actions'),
@@ -359,14 +413,18 @@ export function NodesPage() {
     },
   ];
 
-  const pagination: TablePaginationConfig = {
-    current: query.page,
-    pageSize: query.pageSize,
-    total,
-    showSizeChanger: true,
-    pageSizeOptions: ['10', '20', '50', '100'],
-    onChange: (p, ps) => void setQuery({ page: p, pageSize: ps }),
-  };
+  // Xem theo thứ tự: cả danh sách trong một trang, không phân trang (trừ farm quá 200 máy).
+  const pagination: TablePaginationConfig | false =
+    orderView && total <= nodes.length
+      ? false
+      : {
+          current: apiQuery.page,
+          pageSize: apiQuery.pageSize,
+          total,
+          showSizeChanger: !orderView,
+          pageSizeOptions: ['10', '20', '50', '100'],
+          onChange: (p, ps) => void setQuery({ page: p, pageSize: ps }),
+        };
 
   return (
     <>
@@ -418,15 +476,26 @@ export function NodesPage() {
         }
       />
 
-      <Table
+      <DragSortTable<NodeView>
         rowKey="id"
         dataSource={nodes}
         columns={columns}
-        loading={nodesQuery.isLoading}
+        loading={nodesQuery.isLoading || reorderMut.isPending}
         pagination={pagination}
         sticky={PAGE_TABLE_STICKY}
         tableLayout="fixed"
         scroll={{ x: columnsWidth(columns) }}
+        search={false}
+        options={false}
+        toolBarRender={false}
+        ghost
+        dragSortKey={draggable ? 'priority_order' : undefined}
+        dragSortHandlerRender={() => (
+          <Tooltip title={t('nodes.orderDragHint')}>
+            <GripVertical size={16} style={{ cursor: 'grab', color: 'rgba(0, 0, 0, 0.45)' }} />
+          </Tooltip>
+        )}
+        onDragSortEnd={(_from, _to, ordered) => reorderMut.mutate(ordered)}
       />
 
       {/* Create modal */}

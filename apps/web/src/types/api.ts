@@ -56,6 +56,8 @@ export interface NodeView {
   /** Admin-set allowed kinds; null = all reported kinds are allowed */
   allowed_kinds: JobType[] | null;
   status: 'active' | 'disabled';
+  /** Thứ tự nhận việc, số nhỏ trước: máy xếp trước còn slot thì nhận job trước máy xếp sau. */
+  priority_order: number;
   os: string | null;
   cpu_cores: number | null;
   ram_mb: number | null;
@@ -128,7 +130,7 @@ export interface PagedResponse<T> {
 }
 
 export type JobSortBy = 'createdAt' | 'updatedAt' | 'priority' | 'status' | 'type';
-export type NodeSortBy = 'name' | 'lastSeenAt' | 'createdAt';
+export type NodeSortBy = 'priorityOrder' | 'name' | 'lastSeenAt' | 'createdAt';
 export type OwnerSortBy = 'name' | 'createdAt';
 export type SortOrder = 'asc' | 'desc';
 
@@ -224,6 +226,7 @@ export interface PatchNodeRequest {
   name?: string;
   allowed_kinds?: JobType[] | null;
   status?: 'active' | 'disabled';
+  priority_order?: number;
 }
 
 export interface CreateOwnerRequest {

@@ -48,6 +48,11 @@ export function patchNode(id: string, body: PatchNodeRequest): Promise<NodeView>
   return api.patch<NodeView>(`/v1/admin/nodes/${id}`, body);
 }
 
+/** Xếp lại thứ tự nhận việc: `ids` thành 1..n, máy không có trong danh sách đứng sau. Trả mọi máy theo thứ tự mới. */
+export function reorderNodes(ids: string[]): Promise<{ items: NodeView[] }> {
+  return api.post<{ items: NodeView[] }>('/v1/admin/nodes/reorder', { ids });
+}
+
 export function deleteNode(id: string): Promise<void> {
   return api.delete(`/v1/admin/nodes/${id}`);
 }

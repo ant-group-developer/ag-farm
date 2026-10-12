@@ -271,6 +271,13 @@ export const vi = {
     allowedKinds: 'Loại job được giao',
     allowedKindsHelp: 'Để trống thì worker được giao mọi loại job nó báo làm được.',
     allowedKindsAll: 'Tất cả loại worker báo',
+    order: 'Thứ tự',
+    orderHelp: 'Thứ tự nhận việc: worker xếp trên còn slot trống thì nhận job trước worker xếp dưới. Kéo biểu tượng ⋮⋮ để đổi.',
+    orderDragHint: 'Kéo để đổi thứ tự nhận việc',
+    orderDragOff: 'Sắp theo "Thứ tự" tăng dần và bỏ ô tìm để kéo thả.',
+    orderSaved: 'Đã lưu thứ tự worker',
+    slotsStale: 'Số liệu từ lần cuối worker kết nối, worker đang không nhận việc.',
+    runningIds: 'Job đang chạy: {{ids}}',
   },
 };
 
