@@ -25,7 +25,7 @@ import {
   JOB_TYPE_SPECS,
 } from '@ag-farm/protocol';
 import { randomBytes } from 'node:crypto';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { FarmJobEntity } from '../../database/entities/farm-job.entity';
 
 /** Kiểu giá trị cho UPDATE của TypeORM (khác Partial ở các cột jsonb). */
@@ -33,6 +33,15 @@ type JobPatch = Parameters<Repository<FarmJobEntity>['update']>[1];
 import { FarmNodeEntity } from '../../database/entities/farm-node.entity';
 import { FarmOwnerEntity } from '../../database/entities/farm-owner.entity';
 import { ollamaModels, parseKeyPem } from '../../config/env';
+import {
+  claimableSince,
+  earlierNodeFor,
+  earlierReadyNodes,
+  effectiveKinds as kindsTaken,
+  isInsideSchedule,
+  subtractLeasedSince,
+  type EarlierNode,
+} from './node-priority';
 
 function leaseToken(): string {
   return randomBytes(32).toString('base64url');
@@ -41,14 +50,6 @@ function leaseToken(): string {
 function backoffMs(attempt: number): number {
   // min(30s * 2^(attempt-1), 15 min)
   return Math.min(30_000 * Math.pow(2, attempt - 1), 15 * 60_000);
-}
-
-/**
- * Lịch chạy do worker tự áp theo giờ của chính máy đó (hub chạy UTC trên VPS, máy ở văn phòng),
- * nên hub chỉ lưu `schedule` để hiển thị. Ngoại lệ duy nhất: `{ paused: true }` để tạm dừng từ web.
- */
-function isInsideSchedule(schedule: unknown): boolean {
-  return !(schedule && typeof schedule === 'object' && (schedule as { paused?: unknown }).paused === true);
 }
 
 @Injectable()
@@ -116,15 +117,17 @@ export class WorkerService {
     // Job interactive node làm được nhưng thiếu slot: worker báo cho worker batch cùng máy nhường slot.
     const waiting = { cpu: 0, gpu: 0 };
 
+    const offlineAfterSeconds = Number(this.config.get('NODE_OFFLINE_AFTER_SECONDS') ?? 90);
+    const priorityGraceMs = Number(this.config.get('NODE_PRIORITY_GRACE_SECONDS') ?? 10) * 1000;
+
     const job = await this.dataSource.transaction(async (em) => {
+      // Đọc mọi máy một lần: máy này (allowed_kinds, capabilities từ heartbeat) và các máy xếp trước nó.
+      const nodes = await em.getRepository(FarmNodeEntity).find();
+      const freshNode = nodes.find((n) => n.id === node.id);
+      if (!freshNode) return null;
+
       // Tính giao: reported_kinds ∩ allowed_kinds (null allowed_kinds = tất cả được phép)
-      const freshNodeForKinds = await em
-        .getRepository(FarmNodeEntity)
-        .findOneByOrFail({ id: node.id });
-      const effectiveKinds =
-        freshNodeForKinds.allowedKinds != null
-          ? req.kinds.filter((k) => freshNodeForKinds.allowedKinds!.includes(k))
-          : req.kinds;
+      const effectiveKinds = kindsTaken(req.kinds, freshNode.allowedKinds);
 
       if (effectiveKinds.length === 0) return null;
 
@@ -151,11 +154,14 @@ export class WorkerService {
         .limit(50)
         .getMany();
 
-      // Lấy capabilities của node (đã cập nhật trong heartbeat)
-      const freshNode = await em.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id });
+      // Capabilities của node (đã cập nhật trong heartbeat)
       const caps = freshNode.capabilities;
       if (!caps) return null;
       const freeSlots = req.free_slots;
+
+      // Máy xếp trước đang rảnh: chỉ tính khi gặp job đầu tiên cần xét, mỗi claim một lần.
+      const nowMs = Date.now();
+      let earlier: EarlierNode[] | null = null;
 
       // Chọn job đầu tiên mà node đáp ứng
       for (const candidate of candidates) {
@@ -165,6 +171,18 @@ export class WorkerService {
         // Kiểm requirements
         const reqs = candidate.requirements as Requirements;
         if (!nodeMeetsRequirements(freshNode.id, caps, reqs)) continue;
+
+        // Thứ tự máy: còn máy xếp trước rảnh, nhận được job này thì để nó nhận. Job chờ quá grace thì
+        // máy nào cũng nhận (máy xếp trước chậm hay kẹt không giữ việc lại). Job ghim máy không nhường.
+        if (!reqs.node_id && nowMs - claimableSince(candidate) < priorityGraceMs) {
+          earlier ??= await this.loadEarlierNodes(em, nodes, freshNode, nowMs, offlineAfterSeconds);
+          const taker = earlierNodeFor(candidate, earlier);
+          if (taker) {
+            // Giữ chỗ trên máy đó để các job sau chỉ nhường khi nó còn slot.
+            taker.free[spec.slot] -= 1;
+            continue;
+          }
+        }
 
         // Kiểm slot
         const slotKind = spec.slot;
@@ -240,6 +258,31 @@ export class WorkerService {
         sign_url: owner.signUrl,
       },
     };
+  }
+
+  /**
+   * Các máy xếp trước `self` đang rảnh, với slot trống = slot trống ở heartbeat gần nhất trừ các job (còn leased)
+   * đã giao cho máy đó sau heartbeat ấy.
+   */
+  private async loadEarlierNodes(
+    em: EntityManager,
+    nodes: readonly FarmNodeEntity[],
+    self: FarmNodeEntity,
+    nowMs: number,
+    offlineAfterSeconds: number,
+  ): Promise<EarlierNode[]> {
+    const earlier = earlierReadyNodes(nodes, self, nowMs, offlineAfterSeconds);
+    if (earlier.length === 0) return earlier;
+    const leased: { node_id: string; type: string; n: string }[] = await em.query(
+      `SELECT j.node_id, j.type, COUNT(*) AS n
+       FROM farm_jobs j
+       JOIN unnest($1::uuid[], $2::timestamptz[]) AS s(id, seen) ON j.node_id = s.id
+       WHERE j.status = 'leased' AND j.started_at > s.seen
+       GROUP BY j.node_id, j.type`,
+      [earlier.map((e) => e.node.id), earlier.map((e) => e.node.lastSeenAt!.toISOString())],
+    );
+    subtractLeasedSince(earlier, leased);
+    return earlier;
   }
 
   /**

@@ -30,6 +30,12 @@ export const EnvSchema = z.object({
   // Node online threshold
   NODE_OFFLINE_AFTER_SECONDS: z.coerce.number().int().min(10).default(90),
 
+  /**
+   * Thứ tự máy: job chờ chưa quá ngần này giây thì máy xếp sau nhường cho máy xếp trước đang rảnh;
+   * quá thì máy nào cũng nhận (máy xếp trước chậm hay kẹt không giữ việc lại). 0 = tắt thứ tự máy.
+   */
+  NODE_PRIORITY_GRACE_SECONDS: z.coerce.number().int().min(0).default(10),
+
   FRONTEND_ORIGIN: z.string().default('*'),
 
   /** Địa chỉ hub mà máy worker gọi tới, hiện trong lệnh cài máy (vd. https://farm-api-dev.ant-group.net). */

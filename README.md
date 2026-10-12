@@ -37,6 +37,7 @@ Sao chép `apps/api/.env.example` → `apps/api/.env` rồi điền:
 | `FARM_TICKET_PUBLIC_KEY` | Ed25519 SPKI PEM (dấu xuống dòng thay bằng `\n`) |
 | `REAPER_INTERVAL_MS` | Chu kỳ reaper thu hồi lease hết hạn (mặc định `15000`) |
 | `NODE_OFFLINE_AFTER_SECONDS` | Thời gian không heartbeat coi node offline (mặc định `90`) |
+| `NODE_PRIORITY_GRACE_SECONDS` | Job chờ quá ngần này giây thì máy xếp sau cũng nhận, không nhường máy xếp trước nữa (mặc định `10`, `0` = tắt thứ tự máy) |
 
 ### Sinh cặp khoá ticket
 

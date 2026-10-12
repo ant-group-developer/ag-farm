@@ -1729,3 +1729,223 @@ describe('ag-farm GĐ4 DB integration', () => {
     });
   });
 });
+
+// ============================================================
+// Thứ tự máy khi claim
+// ============================================================
+
+describe('node priority when claiming', () => {
+  let app: INestApplication;
+  let ds: DataSource;
+  let ownerKey: string;
+
+  const CAPS = {
+    os: 'linux',
+    cpu_cores: 4,
+    ram_mb: 8192,
+    gpus: [],
+    engines: { ffmpeg: null, ollama_models: [], python: null },
+  };
+  type Slots = { cpu: number; gpu: number };
+  type NodeOpts = { kinds?: string[]; free?: Slots; caps?: typeof CAPS };
+
+  beforeAll(async () => {
+    app = await buildAdminApp();
+    ds = getDs(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await ds.query('TRUNCATE TABLE farm_jobs, farm_nodes, farm_owners, farm_enrollments RESTART IDENTITY CASCADE');
+    ownerKey = (await createOwner(ds, 'ag-go')).key;
+  });
+
+  async function heartbeat(token: string, opts: NodeOpts = {}): Promise<void> {
+    const res = await request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({
+        agent_version: '1.0',
+        kinds: opts.kinds ?? ['scan.extract'],
+        capabilities: opts.caps ?? CAPS,
+        free_slots: opts.free ?? { cpu: 2, gpu: 0 },
+        running_job_ids: [],
+      });
+    expect(res.status).toBe(200);
+  }
+
+  /** Máy mới (đứng cuối thứ tự), đã heartbeat: online, báo loại job và slot trống. */
+  async function addNode(name: string, opts: NodeOpts = {}): Promise<{ id: string; token: string }> {
+    const token = randomBytes(16).toString('base64url');
+    const repo = ds.getRepository(FarmNodeEntity);
+    const saved = await repo.save(
+      repo.create({
+        name,
+        machine: name,
+        kinds: opts.kinds ?? ['scan.extract'],
+        tokenHash: createHash('sha256').update(token).digest('hex'),
+        status: 'active',
+      }),
+    );
+    await heartbeat(token, opts);
+    return { id: saved.id, token };
+  }
+
+  async function claim(token: string, free: Slots = { cpu: 2, gpu: 0 }) {
+    const res = await request(app.getHttpServer())
+      .post('/v1/worker/claim')
+      .set('Authorization', `Node ${token}`)
+      .send({ kinds: ['scan.extract'], free_slots: free, cached_affinity: [] });
+    expect(res.status).toBe(200);
+    return res.body.data as { job: { id: string } | null; waiting_interactive?: unknown };
+  }
+
+  async function submit(correlationId: string, requirements?: Record<string, unknown>): Promise<string> {
+    const res = await request(app.getHttpServer())
+      .post('/v1/owner/jobs')
+      .set('Authorization', `Owner ${ownerKey}`)
+      .send({
+        type: 'scan.extract',
+        correlation_id: correlationId,
+        ...(requirements ? { requirements } : {}),
+        payload: {
+          asset: {
+            id: randomUUID(),
+            kind: 'video',
+            mime_type: 'video/mp4',
+            size_bytes: null,
+            checksum_sha256: null,
+            duration_ms: null,
+            width: null,
+            height: null,
+          },
+          extract_version: 'x1',
+        },
+        max_attempts: 1,
+      });
+    expect(res.status).toBe(200);
+    return res.body.data.job.id as string;
+  }
+
+  it('an idle earlier node keeps the job: the later node gets nothing, the earlier one gets it', async () => {
+    const a = await addNode('a');
+    const b = await addNode('b');
+    const jobId = await submit('p-idle');
+
+    expect(await claim(b.token)).toEqual({ job: null });
+    expect((await claim(a.token)).job?.id).toBe(jobId);
+  });
+
+  it('the order follows the admin reorder', async () => {
+    const a = await addNode('a');
+    const b = await addNode('b');
+    await request(app.getHttpServer()).post('/v1/admin/nodes/reorder').send({ ids: [b.id, a.id] });
+    const jobId = await submit('p-reorder');
+
+    expect((await claim(a.token)).job).toBeNull();
+    expect((await claim(b.token)).job?.id).toBe(jobId);
+  });
+
+  it('the later node claims when the earlier node has no free slot', async () => {
+    await addNode('a', { free: { cpu: 0, gpu: 0 } });
+    const b = await addNode('b');
+    const jobId = await submit('p-busy');
+    expect((await claim(b.token)).job?.id).toBe(jobId);
+  });
+
+  it('jobs leased to the earlier node since its heartbeat use up its free slots', async () => {
+    const a = await addNode('a', { free: { cpu: 1, gpu: 0 } });
+    const b = await addNode('b');
+    const first = await submit('p-lease-1');
+    expect((await claim(a.token)).job?.id).toBe(first);
+    // A báo 1 slot trống ở heartbeat, nhưng đã nhận 1 job sau đó: hết chỗ, B nhận job tiếp theo.
+    const second = await submit('p-lease-2');
+    expect((await claim(b.token)).job?.id).toBe(second);
+  });
+
+  it('a later node only yields as many jobs as the earlier node has free slots', async () => {
+    const a = await addNode('a', { free: { cpu: 1, gpu: 0 } });
+    const b = await addNode('b');
+    const first = await submit('p-slots-1');
+    const second = await submit('p-slots-2');
+    // A còn 1 slot: job đầu nhường A, job sau B nhận.
+    expect((await claim(b.token)).job?.id).toBe(second);
+    expect((await claim(a.token)).job?.id).toBe(first);
+  });
+
+  it('the later node claims when the earlier node is offline', async () => {
+    const a = await addNode('a');
+    const b = await addNode('b');
+    await ds.query(`UPDATE farm_nodes SET last_seen_at = now() - interval '10 minutes' WHERE id = $1`, [a.id]);
+    const jobId = await submit('p-offline');
+    expect((await claim(b.token)).job?.id).toBe(jobId);
+  });
+
+  it('the later node claims when the earlier node is disabled or paused', async () => {
+    const a = await addNode('a');
+    const b = await addNode('b');
+    await ds.getRepository(FarmNodeEntity).update(a.id, { status: 'disabled' });
+    const first = await submit('p-disabled');
+    expect((await claim(b.token)).job?.id).toBe(first);
+
+    await ds.getRepository(FarmNodeEntity).update(a.id, { status: 'active', schedule: { paused: true } });
+    const second = await submit('p-paused');
+    expect((await claim(b.token)).job?.id).toBe(second);
+  });
+
+  it('the later node claims when the earlier node does not take that job type', async () => {
+    const a = await addNode('a', { kinds: ['scan.ai'] });
+    const b = await addNode('b');
+    const first = await submit('p-kind');
+    expect((await claim(b.token)).job?.id).toBe(first);
+
+    // Máy báo nhận loại này nhưng admin không cho phép
+    await heartbeat(a.token, { kinds: ['scan.extract'] });
+    await ds.getRepository(FarmNodeEntity).update(a.id, { allowedKinds: ['scan.ai'] });
+    const second = await submit('p-allowed');
+    expect((await claim(b.token)).job?.id).toBe(second);
+  });
+
+  it('the later node claims when the earlier node does not meet the job requirements', async () => {
+    await addNode('a');
+    const b = await addNode('b', { caps: { ...CAPS, os: 'windows' } });
+    const jobId = await submit('p-reqs', { os: 'windows' });
+    expect((await claim(b.token)).job?.id).toBe(jobId);
+  });
+
+  it('after the grace period any node takes the job', async () => {
+    await addNode('a');
+    const b = await addNode('b');
+    const jobId = await submit('p-grace');
+    expect((await claim(b.token)).job).toBeNull();
+    await ds.query(
+      `UPDATE farm_jobs SET created_at = now() - interval '1 minute', updated_at = now() - interval '1 minute' WHERE id = $1`,
+      [jobId],
+    );
+    expect((await claim(b.token)).job?.id).toBe(jobId);
+  });
+
+  it('a job pinned to a node is not held for an earlier node', async () => {
+    await addNode('a');
+    const b = await addNode('b');
+    const jobId = await submit('p-pinned', { node_id: b.id });
+    expect((await claim(b.token)).job?.id).toBe(jobId);
+  });
+
+  it('concurrent claims from nodes in order never hand out a job twice', async () => {
+    const nodes: Array<{ id: string; token: string }> = [];
+    for (let i = 0; i < 5; i++) nodes.push(await addNode(`n${i}`));
+    for (let i = 0; i < 8; i++) await submit(`p-conc-${i}`);
+
+    const claims = await Promise.all([...nodes, ...nodes, ...nodes].map((n) => claim(n.token)));
+    const ids = claims.map((c) => c.job?.id).filter((id): id is string => id != null);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids.length).toBeLessThanOrEqual(8);
+    const leased: { n: string }[] = await ds.query(`SELECT COUNT(*) AS n FROM farm_jobs WHERE status = 'leased'`);
+    expect(Number(leased[0]!.n)).toBe(ids.length);
+  });
+});
