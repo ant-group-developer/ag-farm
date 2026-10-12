@@ -20,6 +20,11 @@ import { Initial1000000000000 } from './database/migrations/1000000000000-initia
 import { Enrollments1100000000000 } from './database/migrations/1100000000000-enrollments';
 import { JobPause1200000000000 } from './database/migrations/1200000000000-job-pause';
 import { AdminListIndexes1300000000000 } from './database/migrations/1300000000000-admin-list-indexes';
+import { StudioExportPremiere1400000000000 } from './database/migrations/1400000000000-studio-export-premiere';
+import { DropOwnerDefaultLane1500000000000 } from './database/migrations/1500000000000-drop-owner-default-lane';
+import { StudioTranscribe1600000000000 } from './database/migrations/1600000000000-studio-transcribe';
+import { StatsFinishedIndex1700000000000 } from './database/migrations/1700000000000-stats-finished-index';
+import { NodePriorityOrder1800000000000 } from './database/migrations/1800000000000-node-priority-order';
 import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
 import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
@@ -63,6 +68,18 @@ const TEST_ENV = {
   FARM_OLLAMA_MODELS: 'qwen2.5vl:3b, qwen2.5vl:7b',
 };
 
+const MIGRATIONS = [
+  Initial1000000000000,
+  Enrollments1100000000000,
+  JobPause1200000000000,
+  AdminListIndexes1300000000000,
+  StudioExportPremiere1400000000000,
+  DropOwnerDefaultLane1500000000000,
+  StudioTranscribe1600000000000,
+  StatsFinishedIndex1700000000000,
+  NodePriorityOrder1800000000000,
+];
+
 /** Fake AccountMeClient → luôn trả ADMIN */
 const fakeAccountMeClient = { getMe: async () => ({ user_type: 'ADMIN' }) };
 
@@ -79,7 +96,7 @@ async function buildApp(): Promise<INestApplication> {
         type: 'postgres',
         url: TEST_DB_URL,
         entities: [FarmOwnerEntity, FarmNodeEntity, FarmJobEntity, FarmEnrollmentEntity],
-        migrations: [Initial1000000000000, Enrollments1100000000000, JobPause1200000000000, AdminListIndexes1300000000000],
+        migrations: MIGRATIONS,
         migrationsRun: true,
         synchronize: false,
         dropSchema: true, // reset DB mỗi lần test
@@ -118,7 +135,7 @@ async function buildAdminApp(): Promise<INestApplication> {
         type: 'postgres',
         url: TEST_DB_URL,
         entities: [FarmOwnerEntity, FarmNodeEntity, FarmJobEntity, FarmEnrollmentEntity],
-        migrations: [Initial1000000000000, Enrollments1100000000000, JobPause1200000000000, AdminListIndexes1300000000000],
+        migrations: MIGRATIONS,
         migrationsRun: true,
         synchronize: false,
         dropSchema: true,
@@ -1619,5 +1636,96 @@ describe('ag-farm GĐ4 DB integration', () => {
     const del = await request(app.getHttpServer()).delete(`/v1/admin/nodes/${node.id}`);
     expect(del.status).toBe(204);
   });
-});
 
+  // ---- Thứ tự ưu tiên của máy ----
+  describe('node priority order', () => {
+    async function addNode(name: string): Promise<string> {
+      const res = await request(app.getHttpServer())
+        .post('/v1/admin/nodes')
+        .send({ name, machine: 'm', kinds: ['scan.extract'] });
+      expect(res.status).toBe(201);
+      return res.body.data.id as string;
+    }
+
+    async function listedNames(query = ''): Promise<string[]> {
+      const res = await request(app.getHttpServer()).get(`/v1/admin/nodes${query}`);
+      expect(res.status).toBe(200);
+      return (res.body.data.items as Array<{ name: string }>).map((n) => n.name);
+    }
+
+    it('new nodes go last, and GET /v1/admin/nodes lists in that order by default', async () => {
+      await addNode('zeta');
+      await addNode('alpha');
+      await addNode('mid');
+      const res = await request(app.getHttpServer()).get('/v1/admin/nodes');
+      const items = res.body.data.items as Array<{ name: string; priority_order: number }>;
+      expect(items.map((n) => n.name)).toEqual(['zeta', 'alpha', 'mid']);
+      expect(items[0]!.priority_order).toBeLessThan(items[1]!.priority_order);
+      expect(items[1]!.priority_order).toBeLessThan(items[2]!.priority_order);
+      // Các cách sắp khác vẫn dùng được
+      expect(await listedNames('?sortBy=name&sortOrder=asc')).toEqual(['alpha', 'mid', 'zeta']);
+    });
+
+    it('POST /v1/admin/nodes/reorder numbers the given ids 1..n and keeps the others after, in their order', async () => {
+      const a = await addNode('a');
+      const b = await addNode('b');
+      const c = await addNode('c');
+      const d = await addNode('d');
+
+      const res = await request(app.getHttpServer()).post('/v1/admin/nodes/reorder').send({ ids: [c, a] });
+      expect(res.status).toBe(200);
+      const items = res.body.data.items as Array<{ id: string; priority_order: number }>;
+      expect(items.map((n) => [n.id, n.priority_order])).toEqual([
+        [c, 1],
+        [a, 2],
+        [b, 3],
+        [d, 4],
+      ]);
+      expect(await listedNames()).toEqual(['c', 'a', 'b', 'd']);
+
+      // Máy thêm sau vẫn đứng cuối
+      await addNode('e');
+      expect(await listedNames()).toEqual(['c', 'a', 'b', 'd', 'e']);
+    });
+
+    it('POST /v1/admin/nodes/reorder rejects unknown and repeated ids without changing anything', async () => {
+      await addNode('a');
+      const b = await addNode('b');
+      const unknown = await request(app.getHttpServer())
+        .post('/v1/admin/nodes/reorder')
+        .send({ ids: [b, randomUUID()] });
+      expect(unknown.status).toBe(404);
+      const repeated = await request(app.getHttpServer()).post('/v1/admin/nodes/reorder').send({ ids: [b, b] });
+      expect(repeated.status).toBe(400);
+      const empty = await request(app.getHttpServer()).post('/v1/admin/nodes/reorder').send({ ids: [] });
+      expect(empty.status).toBe(400);
+      expect(await listedNames()).toEqual(['a', 'b']);
+    });
+
+    it('PATCH /v1/admin/nodes/:id sets priority_order, and nodes added later still go last', async () => {
+      const a = await addNode('a');
+      await addNode('b');
+      const res = await request(app.getHttpServer()).patch(`/v1/admin/nodes/${a}`).send({ priority_order: 500 });
+      expect(res.status).toBe(200);
+      expect(res.body.data.priority_order).toBe(500);
+      expect(await listedNames()).toEqual(['b', 'a']);
+      await addNode('c');
+      expect(await listedNames()).toEqual(['b', 'a', 'c']);
+    });
+
+    it('GET /v1/owner/nodes lists the nodes in priority order', async () => {
+      const { key } = await createOwner(ds, 'ag-go');
+      const a = await addNode('a');
+      const b = await addNode('b');
+      const c = await addNode('c');
+      await request(app.getHttpServer()).post('/v1/admin/nodes/reorder').send({ ids: [c, a, b] });
+      const res = await request(app.getHttpServer()).get('/v1/owner/nodes').set('Authorization', `Owner ${key}`);
+      expect(res.status).toBe(200);
+      expect((res.body.data.nodes as Array<{ name: string }>).map((n) => n.name)).toEqual(['c', 'a', 'b']);
+      // Không thêm khoá nào vào dạng node của chủ job (schema chặt ở client)
+      expect(Object.keys(res.body.data.nodes[0]).sort()).toEqual(
+        ['gpus', 'id', 'kinds', 'last_seen_at', 'name', 'online', 'running_jobs'].sort(),
+      );
+    });
+  });
+});

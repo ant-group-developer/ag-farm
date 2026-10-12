@@ -15,6 +15,7 @@ export function toNodeView(node: FarmNodeEntity, online: boolean) {
     kinds: node.kinds,
     allowed_kinds: node.allowedKinds ?? null,
     status: node.status,
+    priority_order: node.priorityOrder,
     os: node.os,
     cpu_cores: node.cpuCores,
     ram_mb: node.ramMb,

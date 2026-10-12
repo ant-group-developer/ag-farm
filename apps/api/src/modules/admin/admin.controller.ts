@@ -22,6 +22,7 @@ import {
   CreateOwnerSchema,
   PatchNodeSchema,
   PatchOwnerSchema,
+  ReorderNodesSchema,
 } from './admin.dto';
 import { AdminService } from './admin.service';
 import type { AdminJobControlDto } from './admin.dto';
@@ -67,6 +68,13 @@ export class AdminController {
   async createNode(@Body(new ZodValidationPipe(CreateNodeSchema)) body: any) {
     const { node, token } = await this.svc.createNode(body);
     return { ...node, token };
+  }
+
+  /** Xếp lại thứ tự ưu tiên của máy (kéo thả trên web): `ids` thành 1..n, máy còn lại đứng sau. */
+  @Post('nodes/reorder')
+  @HttpCode(200)
+  async reorderNodes(@Body(new ZodValidationPipe(ReorderNodesSchema)) body: any) {
+    return this.svc.reorderNodes(body.ids);
   }
 
   @Patch('nodes/:id')

@@ -36,6 +36,7 @@ const JOB_SORT_COLUMNS: Record<string, string> = {
 };
 
 const NODE_SORT_COLUMNS: Record<string, string> = {
+  priorityOrder: 'n.priority_order',
   name: 'n.name',
   lastSeenAt: 'n.last_seen_at',
   createdAt: 'n.created_at',
@@ -70,15 +71,21 @@ export class AdminService {
       qb.andWhere('(n.name ILIKE :q OR n.machine ILIKE :q)', { q: `%${query.q}%` });
     }
 
-    const sortCol = NODE_SORT_COLUMNS[query.sortBy] ?? 'n.created_at';
-    const sortDir = (query.sortOrder?.toUpperCase() ?? 'DESC') as 'ASC' | 'DESC';
+    const sortCol = NODE_SORT_COLUMNS[query.sortBy] ?? 'n.priority_order';
+    const sortDir = (query.sortOrder?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC';
 
     const total = await qb.getCount();
     const page = query.page;
     const pageSize = query.pageSize;
     const offset = (page - 1) * pageSize;
 
-    qb.orderBy(sortCol, sortDir).offset(offset).limit(pageSize);
+    // Trùng giá trị thì theo thứ tự ưu tiên rồi tên, để trang không nhảy giữa các lần tải.
+    qb.orderBy(sortCol, sortDir)
+      .addOrderBy('n.priority_order', 'ASC')
+      .addOrderBy('n.name', 'ASC')
+      .addOrderBy('n.id', 'ASC')
+      .offset(offset)
+      .limit(pageSize);
 
     const nodes = await qb.getMany();
     return {
@@ -116,8 +123,47 @@ export class AdminService {
     if (dto.allowed_kinds !== undefined) node.allowedKinds = dto.allowed_kinds;
     if (dto.status !== undefined) node.status = dto.status as 'active' | 'disabled';
     if (dto.schedule !== undefined) node.schedule = dto.schedule;
+    if (dto.priority_order !== undefined) node.priorityOrder = dto.priority_order;
     const saved = await this.nodeRepo.save(node);
+    if (dto.priority_order !== undefined) await this.keepNewNodesLast();
     return toNodeView(saved, this.isOnline(saved));
+  }
+
+  /**
+   * Xếp lại thứ tự máy: `ids` theo thứ tự mới thành 1..n, các máy còn lại giữ thứ tự cũ và đứng sau.
+   * Trả về toàn bộ máy theo thứ tự mới.
+   */
+  async reorderNodes(ids: string[]): Promise<{ items: NodeView[] }> {
+    await this.nodeRepo.manager.transaction(async (em) => {
+      // Khoá mọi máy: hai lần xếp cùng lúc không đan xen thành thứ tự lẫn lộn.
+      const rows: { id: string }[] = await em.query(
+        `SELECT id FROM farm_nodes ORDER BY priority_order, name, id FOR UPDATE`,
+      );
+      const known = new Set(rows.map((r) => r.id));
+      const missing = ids.filter((id) => !known.has(id));
+      if (missing.length > 0) throw new NotFoundException(`Node not found: ${missing.join(', ')}`);
+      const picked = new Set(ids);
+      const order = [...ids, ...rows.map((r) => r.id).filter((id) => !picked.has(id))];
+      await em.query(
+        `UPDATE farm_nodes n SET priority_order = s.ord
+         FROM unnest($1::uuid[]) WITH ORDINALITY AS s(id, ord)
+         WHERE n.id = s.id`,
+        [order],
+      );
+    });
+    const nodes = await this.nodeRepo.find({ order: { priorityOrder: 'ASC', name: 'ASC', id: 'ASC' } });
+    return { items: nodes.map((n) => toNodeView(n, this.isOnline(n))) };
+  }
+
+  /** Máy mới lấy số kế tiếp của sequence: đẩy sequence qua số lớn nhất admin vừa đặt để máy mới vẫn đứng cuối. */
+  private async keepNewNodesLast(): Promise<void> {
+    await this.nodeRepo.query(
+      `SELECT setval('farm_nodes_priority_order_seq', m.v)
+       FROM (SELECT MAX(priority_order) AS v FROM farm_nodes) m,
+            (SELECT last_value, is_called FROM farm_nodes_priority_order_seq) s
+       WHERE m.v IS NOT NULL AND m.v > 0
+         AND (m.v > s.last_value OR (m.v = s.last_value AND NOT s.is_called))`,
+    );
   }
 
   async deleteNode(id: string): Promise<void> {

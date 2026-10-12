@@ -31,6 +31,17 @@ export class FarmNodeEntity {
   @Column({ type: 'text', default: 'active' })
   status!: 'active' | 'disabled';
 
+  /**
+   * Thứ tự ưu tiên (số nhỏ trước): máy xếp trước còn slot thì được nhận việc trước máy xếp sau.
+   * Máy mới lấy số kế tiếp của sequence (đứng sau mọi máy đã có).
+   */
+  @Column({
+    name: 'priority_order',
+    type: 'int',
+    default: () => "nextval('farm_nodes_priority_order_seq')",
+  })
+  priorityOrder!: number;
+
   @Column({ type: 'text', nullable: true })
   os!: string | null;
 

@@ -14,6 +14,7 @@ describe('admin views', () => {
       allowedKinds: null,
       tokenHash: 'a'.repeat(64),
       status: 'active',
+      priorityOrder: 3,
       os: 'windows',
       cpuCores: 8,
       ramMb: 16384,
@@ -33,6 +34,7 @@ describe('admin views', () => {
     const view = toNodeView(node, true);
 
     expect(view).toMatchObject({
+      priority_order: 3,
       cpu_cores: 8,
       ram_mb: 16384,
       free_slots: { cpu: 2, gpu: 1 },
