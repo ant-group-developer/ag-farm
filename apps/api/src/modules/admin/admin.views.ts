@@ -13,7 +13,7 @@ export function toNodeView(node: FarmNodeEntity, online: boolean) {
     name: node.name,
     machine: node.machine,
     kinds: node.kinds,
-    allowed_kinds: node.allowedKinds ?? null,
+    blocked_kinds: node.blockedKinds ?? [],
     status: node.status,
     priority_order: node.priorityOrder,
     os: node.os,

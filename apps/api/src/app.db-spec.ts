@@ -25,6 +25,7 @@ import { DropOwnerDefaultLane1500000000000 } from './database/migrations/1500000
 import { StudioTranscribe1600000000000 } from './database/migrations/1600000000000-studio-transcribe';
 import { StatsFinishedIndex1700000000000 } from './database/migrations/1700000000000-stats-finished-index';
 import { NodePriorityOrder1800000000000 } from './database/migrations/1800000000000-node-priority-order';
+import { NodeBlockedKinds1900000000000 } from './database/migrations/1900000000000-node-blocked-kinds';
 import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
 import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
@@ -78,6 +79,7 @@ const MIGRATIONS = [
   StudioTranscribe1600000000000,
   StatsFinishedIndex1700000000000,
   NodePriorityOrder1800000000000,
+  NodeBlockedKinds1900000000000,
 ];
 
 /** Fake AccountMeClient → luôn trả ADMIN */
@@ -1461,8 +1463,8 @@ describe('ag-farm GĐ4 DB integration', () => {
     expect(long.status).toBe(400);
   });
 
-  // ---- Node kinds intersection: allowed_kinds restricts claim ----
-  it('allowed_kinds intersection: intersection is empty → no jobs claimed', async () => {
+  // ---- Node kinds: blocked_kinds stops a claim ----
+  it('blocked_kinds: a kind the admin blocked on the node is not claimed', async () => {
     const { key } = await createOwner(ds, 'ag-go');
     const { token, node } = await createNode(ds, ['scan.extract']);
 
@@ -1493,16 +1495,16 @@ describe('ag-farm GĐ4 DB integration', () => {
     expect(submit.status).toBe(200);
     const jobId = submit.body.data.job.id as string;
 
-    // Đặt allowed_kinds = ['scan.ai'] → node chỉ được phép claim scan.ai
-    // nhưng node báo cáo kinds = ['scan.extract'], giao = [] → không claim được
-    await ds.getRepository(FarmNodeEntity).update(node.id, { allowedKinds: ['scan.ai'] });
+    // Admin chặn scan.extract trên node: node báo scan.extract, trừ đi phần bị chặn còn rỗng
+    // → không claim được
+    await ds.getRepository(FarmNodeEntity).update(node.id, { blockedKinds: ['scan.extract'] });
 
     const claimRes = await request(app.getHttpServer())
       .post('/v1/worker/claim')
       .set('Authorization', `Node ${token}`)
       .send({ kinds: ['scan.extract'], free_slots: { cpu: 4, gpu: 0 }, cached_affinity: [] });
     expect(claimRes.status).toBe(200);
-    // Giao rỗng → không nhận được job nào
+    // Không còn loại nào → không nhận được job nào
     expect(claimRes.body.data.job).toBeNull();
 
     // Job vẫn queued
@@ -1510,8 +1512,8 @@ describe('ag-farm GĐ4 DB integration', () => {
     expect(j.status).toBe('queued');
   });
 
-  // ---- Node kinds intersection: allowed_kinds = subset → only matching jobs claimed ----
-  it('allowed_kinds intersection: only jobs whose type is in the intersection are claimed', async () => {
+  // ---- Node kinds: blocking another kind leaves the rest ----
+  it('blocked_kinds: blocking another kind still claims the kinds left', async () => {
     const { key } = await createOwner(ds, 'ag-go');
     const { token, node } = await createNode(ds, ['scan.extract']);
 
@@ -1540,8 +1542,8 @@ describe('ag-farm GĐ4 DB integration', () => {
       });
     expect(submit.status).toBe(200);
 
-    // allowed_kinds = ['scan.extract'] (khớp) → claim được
-    await ds.getRepository(FarmNodeEntity).update(node.id, { allowedKinds: ['scan.extract'] });
+    // chặn scan.ai, không chặn scan.extract → claim được
+    await ds.getRepository(FarmNodeEntity).update(node.id, { blockedKinds: ['scan.ai'] });
 
     const claimRes = await request(app.getHttpServer())
       .post('/v1/worker/claim')
@@ -1552,23 +1554,29 @@ describe('ag-farm GĐ4 DB integration', () => {
     expect(claimRes.body.data.job.type).toBe('scan.extract');
   });
 
-  // ---- Node kinds intersection: allowed_kinds = null → tất cả kinds được phép ----
-  it('allowed_kinds = null allows all reported kinds', async () => {
+  // ---- Node kinds: nothing blocked → every reported kind ----
+  it('blocked_kinds empty (the default) allows every reported kind', async () => {
     const { key } = await createOwner(ds, 'ag-go');
-    const { token } = await createNode(ds, ['scan.extract']);
+    const { token, node } = await createNode(ds, ['scan.extract']);
 
-    await request(app.getHttpServer())
+    // Worker mới khai thêm engines.ytdlp: hub nhận
+    const hb = await request(app.getHttpServer())
       .post('/v1/worker/heartbeat')
       .set('Authorization', `Node ${token}`)
       .send({
         agent_version: '1.0',
         kinds: ['scan.extract'],
-        capabilities: { os: 'linux', cpu_cores: 4, ram_mb: 8192, gpus: [], engines: { ffmpeg: null, ollama_models: [], python: null } },
+        capabilities: {
+          os: 'linux', cpu_cores: 4, ram_mb: 8192, gpus: [],
+          engines: { ffmpeg: null, ollama_models: [], python: null, ytdlp: '2026.08.19' },
+        },
         free_slots: { cpu: 4, gpu: 0 },
         running_job_ids: [],
       });
+    expect(hb.status).toBe(200);
+    expect((await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id })).capabilities?.engines.ytdlp).toBe('2026.08.19');
 
-    // allowed_kinds là null (mặc định) → nhận được job scan.extract
+    // blocked_kinds rỗng (mặc định) → nhận được job scan.extract
     await request(app.getHttpServer())
       .post('/v1/owner/jobs')
       .set('Authorization', `Owner ${key}`)
@@ -1711,6 +1719,33 @@ describe('ag-farm GĐ4 DB integration', () => {
       expect(await listedNames()).toEqual(['b', 'a']);
       await addNode('c');
       expect(await listedNames()).toEqual(['b', 'a', 'c']);
+    });
+
+    it('PATCH /v1/admin/nodes/:id blocks job kinds; the old allowed_kinds is refused clearly', async () => {
+      const a = await addNode('a');
+      const res = await request(app.getHttpServer())
+        .patch(`/v1/admin/nodes/${a}`)
+        .send({ blocked_kinds: ['scan.ai', 'scan.ai', 'studio.tts'] });
+      expect(res.status).toBe(200);
+      expect(res.body.data.blocked_kinds).toEqual(['scan.ai', 'studio.tts']);
+      expect(res.body.data.allowed_kinds).toBeUndefined();
+      expect((await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: a })).blockedKinds).toEqual(['scan.ai', 'studio.tts']);
+
+      const cleared = await request(app.getHttpServer()).patch(`/v1/admin/nodes/${a}`).send({ blocked_kinds: [] });
+      expect(cleared.body.data.blocked_kinds).toEqual([]);
+
+      const old = await request(app.getHttpServer()).patch(`/v1/admin/nodes/${a}`).send({ allowed_kinds: ['scan.ai'] });
+      expect(old.status).toBe(400);
+      expect(JSON.stringify(old.body)).toContain('blocked_kinds');
+      const unknownKind = await request(app.getHttpServer()).patch(`/v1/admin/nodes/${a}`).send({ blocked_kinds: ['nope'] });
+      expect(unknownKind.status).toBe(400);
+    });
+
+    it('a new node blocks nothing', async () => {
+      const a = await addNode('a');
+      const res = await request(app.getHttpServer()).get('/v1/admin/nodes');
+      const item = (res.body.data.items as Array<{ id: string; blocked_kinds: string[] }>).find((n) => n.id === a);
+      expect(item?.blocked_kinds).toEqual([]);
     });
 
     it('GET /v1/owner/nodes lists the nodes in priority order', async () => {
@@ -1902,9 +1937,9 @@ describe('node priority when claiming', () => {
     const first = await submit('p-kind');
     expect((await claim(b.token)).job?.id).toBe(first);
 
-    // Máy báo nhận loại này nhưng admin không cho phép
+    // Máy báo nhận loại này nhưng admin chặn
     await heartbeat(a.token, { kinds: ['scan.extract'] });
-    await ds.getRepository(FarmNodeEntity).update(a.id, { allowedKinds: ['scan.ai'] });
+    await ds.getRepository(FarmNodeEntity).update(a.id, { blockedKinds: ['scan.extract'] });
     const second = await submit('p-allowed');
     expect((await claim(b.token)).job?.id).toBe(second);
   });

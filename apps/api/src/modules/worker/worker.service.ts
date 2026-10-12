@@ -80,7 +80,7 @@ export class WorkerService {
   }
 
   async heartbeat(node: FarmNodeEntity, req: HeartbeatRequest): Promise<HeartbeatResponse> {
-    // Chỉ cập nhật `kinds` (kinds báo cáo) — không ghi đè `allowed_kinds` (do admin chỉnh).
+    // Chỉ cập nhật `kinds` (kinds báo cáo) — không ghi đè `blocked_kinds` (do admin chỉnh).
     await this.nodeRepo.update(node.id, {
       agentVersion: req.agent_version,
       kinds: req.kinds,
@@ -121,13 +121,13 @@ export class WorkerService {
     const priorityGraceMs = Number(this.config.get('NODE_PRIORITY_GRACE_SECONDS') ?? 10) * 1000;
 
     const job = await this.dataSource.transaction(async (em) => {
-      // Đọc mọi máy một lần: máy này (allowed_kinds, capabilities từ heartbeat) và các máy xếp trước nó.
+      // Đọc mọi máy một lần: máy này (blocked_kinds, capabilities từ heartbeat) và các máy xếp trước nó.
       const nodes = await em.getRepository(FarmNodeEntity).find();
       const freshNode = nodes.find((n) => n.id === node.id);
       if (!freshNode) return null;
 
-      // Tính giao: reported_kinds ∩ allowed_kinds (null allowed_kinds = tất cả được phép)
-      const effectiveKinds = kindsTaken(req.kinds, freshNode.allowedKinds);
+      // Loại máy nhận: loại worker xin − loại admin chặn
+      const effectiveKinds = kindsTaken(req.kinds, freshNode.blockedKinds);
 
       if (effectiveKinds.length === 0) return null;
 

@@ -16,9 +16,9 @@ export function isInsideSchedule(schedule: unknown): boolean {
   return !(schedule && typeof schedule === 'object' && (schedule as { paused?: unknown }).paused === true);
 }
 
-/** Loại job máy nhận: loại worker báo ∩ loại admin cho phép (`allowed_kinds` null = tất cả). */
-export function effectiveKinds(reported: readonly string[], allowed: readonly string[] | null): string[] {
-  return allowed != null ? reported.filter((k) => allowed.includes(k)) : [...reported];
+/** Loại job máy nhận: loại worker báo − loại admin chặn (`blocked_kinds`). */
+export function effectiveKinds(reported: readonly string[], blocked: readonly string[] | null | undefined): string[] {
+  return blocked?.length ? reported.filter((k) => !blocked.includes(k)) : [...reported];
 }
 
 /** `a` xếp trước `b`: số thứ tự nhỏ hơn; trùng số thì theo id để hai máy không cùng nhường nhau. */
@@ -57,7 +57,7 @@ export function earlierReadyNodes(
         n.freeSlots != null,
     )
     .sort((a, b) => (isAhead(a, b) ? -1 : 1))
-    .map((n) => ({ node: n, kinds: effectiveKinds(n.kinds, n.allowedKinds), free: { ...n.freeSlots! } }));
+    .map((n) => ({ node: n, kinds: effectiveKinds(n.kinds, n.blockedKinds), free: { ...n.freeSlots! } }));
 }
 
 /** Trừ vào slot trống các job đã giao cho máy sau lần heartbeat gần nhất của nó (heartbeat chưa tính các job này). */

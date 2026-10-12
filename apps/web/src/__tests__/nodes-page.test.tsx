@@ -1,15 +1,17 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { NuqsTestingAdapter } from 'nuqs/adapters/testing';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n/config';
+import { jobTypeLabel } from '../shared/lib/job-labels';
 import type { NodeView } from '../types/api';
 
 const listNodes = vi.fn();
+const patchNode = vi.fn();
 vi.mock('../api/admin', () => ({
   listNodes: (...args: unknown[]) => listNodes(...args),
   createNode: vi.fn(),
-  patchNode: vi.fn(),
+  patchNode: (...args: unknown[]) => patchNode(...args),
   deleteNode: vi.fn(),
   reorderNodes: vi.fn(),
   createEnrollment: vi.fn(),
@@ -23,7 +25,7 @@ function node(name: string, priority_order: number, over: Partial<NodeView> = {}
     name,
     machine: 'PC',
     kinds: ['scan.extract'],
-    allowed_kinds: null,
+    blocked_kinds: [],
     status: 'active',
     priority_order,
     os: 'windows',
@@ -98,4 +100,30 @@ describe('NodesPage', () => {
     expect(listNodes).toHaveBeenLastCalledWith(expect.objectContaining({ sortBy: 'name', pageSize: 20 }));
     expect(container.querySelectorAll('svg.lucide-grip-vertical')).toHaveLength(0);
   });
+
+  it('mỗi loại job máy báo có một công tắc; tắt thì gửi blocked_kinds', async () => {
+    patchNode.mockResolvedValue({});
+    listNodes.mockResolvedValue({
+      items: [node('a', 1, { kinds: ['scan.extract', 'scan.ai'], blocked_kinds: ['scan.ai', 'studio.tts'] })],
+      total: 1,
+      page: 1,
+      pageSize: 200,
+    });
+    renderPage();
+    const extract = await screen.findByRole('switch', { name: jobTypeLabel('scan.extract') });
+    const ai = screen.getByRole('switch', { name: jobTypeLabel('scan.ai') });
+    // studio.tts đã chặn dù máy không còn báo: vẫn hiện để bật lại
+    const tts = screen.getByRole('switch', { name: jobTypeLabel('studio.tts') });
+    expect(extract.getAttribute('aria-checked')).toBe('true');
+    expect(ai.getAttribute('aria-checked')).toBe('false');
+    expect(tts.getAttribute('aria-checked')).toBe('false');
+
+    fireEvent.click(extract);
+    await waitFor(() =>
+      expect(patchNode).toHaveBeenCalledWith('id-a', { blocked_kinds: ['scan.ai', 'studio.tts', 'scan.extract'] }),
+    );
+    await waitFor(() => expect(screen.getByRole('switch', { name: jobTypeLabel('scan.ai') }).className).not.toContain('loading'));
+    fireEvent.click(screen.getByRole('switch', { name: jobTypeLabel('scan.ai') }));
+    await waitFor(() => expect(patchNode).toHaveBeenLastCalledWith('id-a', { blocked_kinds: ['studio.tts'] }));
+  }, 30_000);
 });

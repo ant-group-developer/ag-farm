@@ -120,7 +120,7 @@ export class AdminService {
     const node = await this.nodeRepo.findOne({ where: { id } });
     if (!node) throw new NotFoundException('Node not found');
     if (dto.name !== undefined) node.name = dto.name;
-    if (dto.allowed_kinds !== undefined) node.allowedKinds = dto.allowed_kinds;
+    if (dto.blocked_kinds !== undefined) node.blockedKinds = dto.blocked_kinds;
     if (dto.status !== undefined) node.status = dto.status as 'active' | 'disabled';
     if (dto.schedule !== undefined) node.schedule = dto.schedule;
     if (dto.priority_order !== undefined) node.priorityOrder = dto.priority_order;

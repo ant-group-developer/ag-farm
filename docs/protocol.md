@@ -26,7 +26,7 @@ queued/leased ──cancel (chủ job)──► cancelled   (worker nhận 409 j
 ```
 
 - Claim chọn job theo thứ tự: `lane = interactive` trước, rồi `priority` cao hơn, rồi job có `affinity_key` worker đang cache, rồi job cũ nhất. Job chỉ được giao khi máy đáp ứng `requirements` (`meetsRequirements`) và còn slot đúng loại (`JOB_TYPE_SPECS[type].slot`).
-- Thứ tự máy (`farm_nodes.priority_order`, số nhỏ trước; admin kéo thả ở trang Worker, hay `POST /v1/admin/nodes/reorder {ids}`): máy B xin việc thì bỏ qua một job nếu còn máy A xếp trước B đang bật, online (heartbeat trong `NODE_OFFLINE_AFTER_SECONDS`), trong lịch (không `paused`), nhận loại job đó (`kinds` báo ∩ `allowed_kinds`), đủ `requirements` và còn slot đúng loại. Slot trống của A là `free_slots` ở heartbeat gần nhất trừ các job (còn `leased`) đã giao cho A sau heartbeat đó; mỗi job B nhường giữ một slot của A trong lần claim ấy, nên B chỉ nhường số job A nhận nổi. Job chờ quá `NODE_PRIORITY_GRACE_SECONDS` (mặc định 10 s, tính từ mốc muộn nhất trong `created_at`, `updated_at` — lần vào lại hàng — và `not_before`) thì máy nào cũng nhận, để A chậm hay kẹt không giữ việc lại. Job ghim máy (`requirements.node_id`) không nhường. Thứ tự này chỉ là của hub: không đổi gì ở API worker; `GET /v1/owner/nodes` trả máy theo thứ tự này.
+- Thứ tự máy (`farm_nodes.priority_order`, số nhỏ trước; admin kéo thả ở trang Worker, hay `POST /v1/admin/nodes/reorder {ids}`): máy B xin việc thì bỏ qua một job nếu còn máy A xếp trước B đang bật, online (heartbeat trong `NODE_OFFLINE_AFTER_SECONDS`), trong lịch (không `paused`), nhận loại job đó (`kinds` báo − `blocked_kinds`), đủ `requirements` và còn slot đúng loại. Slot trống của A là `free_slots` ở heartbeat gần nhất trừ các job (còn `leased`) đã giao cho A sau heartbeat đó; mỗi job B nhường giữ một slot của A trong lần claim ấy, nên B chỉ nhường số job A nhận nổi. Job chờ quá `NODE_PRIORITY_GRACE_SECONDS` (mặc định 10 s, tính từ mốc muộn nhất trong `created_at`, `updated_at` — lần vào lại hàng — và `not_before`) thì máy nào cũng nhận, để A chậm hay kẹt không giữ việc lại. Job ghim máy (`requirements.node_id`) không nhường. Thứ tự này chỉ là của hub: không đổi gì ở API worker; `GET /v1/owner/nodes` trả máy theo thứ tự này.
 - Lease dài `LEASE_SECONDS` (120 s). Worker gửi progress mỗi 30 s để gia hạn và nhận vé mới.
 - Lease cũ (bị reaper lấy lại) nộp progress/complete/fail thì nhận 409 `lease_lost`; worker phải dừng job ngay.
 - `correlation_id` là duy nhất theo chủ job: gửi lại trả về job cũ (`created: false`), nên chủ job gửi lại thoải mái sau lỗi mạng.
@@ -64,5 +64,10 @@ có torch, NVENC, yt-dlp), dò một lần lúc khởi động; khai thì là da
 `engines.ytdlp` (tuỳ chọn, phiên bản `yt-dlp --version`; requirement `ytdlp: true`). Hub build trước khi có trường này
 từ chối heartbeat có nó (`strictObject`), nên **lên hub trước, rồi mới lên worker**. Worker chỉ gửi trường này khi dò
 thấy yt-dlp, và dò ffmpeg bằng chính binary nó chạy (`ffmpeg-static` trong gói), không phải `ffmpeg` trên PATH.
+
+Hub giao cho máy các loại nó báo trừ các loại admin chặn ở máy đó (`farm_nodes.blocked_kinds`, rỗng = không chặn;
+`PATCH /v1/admin/nodes/:id {blocked_kinds}`, trang Máy có công tắc từng loại). Loại mới worker báo lên tự được giao.
+`allowed_kinds` (danh sách cho phép) đã bỏ: migration `1900000000000` chuyển thành chặn = loại đã báo − loại được phép,
+và PATCH có `allowed_kinds` trả 400.
 
 Kết quả job (`JobResult`) chỉ gồm đường dẫn manifest và vài con số; dữ liệu đầy đủ nằm trong manifest ở bucket của chủ job.

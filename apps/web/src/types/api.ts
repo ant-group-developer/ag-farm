@@ -40,6 +40,8 @@ export interface NodeCapabilities {
     ffmpeg: string | null;
     ollama_models: string[];
     python: string | null;
+    /** yt-dlp version; absent from workers that do not probe it. */
+    ytdlp?: string | null;
   };
 }
 
@@ -53,8 +55,8 @@ export interface NodeView {
   name: string;
   machine: string;
   kinds: JobType[];
-  /** Admin-set allowed kinds; null = all reported kinds are allowed */
-  allowed_kinds: JobType[] | null;
+  /** Job types the admin turned off on this node; the node takes every other kind it reports. */
+  blocked_kinds: JobType[];
   status: 'active' | 'disabled';
   /** Thứ tự nhận việc, số nhỏ trước: máy xếp trước còn slot thì nhận job trước máy xếp sau. */
   priority_order: number;
@@ -224,7 +226,7 @@ export interface CreateNodeRequest {
 
 export interface PatchNodeRequest {
   name?: string;
-  allowed_kinds?: JobType[] | null;
+  blocked_kinds?: JobType[];
   status?: 'active' | 'disabled';
   priority_order?: number;
 }

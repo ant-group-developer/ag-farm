@@ -10,8 +10,17 @@ export type CreateNodeDto = z.infer<typeof CreateNodeSchema>;
 
 export const PatchNodeSchema = z.strictObject({
   name: z.string().min(1).max(200).optional(),
-  // Không có `kinds`: worker tự báo qua heartbeat (ghi đè mỗi lần), admin giới hạn bằng allowed_kinds.
-  allowed_kinds: z.array(JobTypeSchema).nullable().optional(),
+  // Không có `kinds`: worker tự báo qua heartbeat (ghi đè mỗi lần), admin chặn từng loại bằng blocked_kinds
+  // (rỗng = không chặn). Có thể chặn trước loại máy chưa báo.
+  blocked_kinds: z
+    .array(JobTypeSchema)
+    .max(100)
+    .transform((kinds) => [...new Set(kinds)])
+    .optional(),
+  // Đã thay bằng blocked_kinds: web cũ gửi khoá này thì báo rõ thay vì bỏ qua lặng lẽ.
+  allowed_kinds: z
+    .never({ error: 'allowed_kinds was replaced by blocked_kinds (the job types this node must not take); reload the farm web' })
+    .optional(),
   status: z.enum(['active', 'disabled']).optional(),
   schedule: z.unknown().optional(),
   /** Số nhỏ trước. Muốn xếp lại cả danh sách thì dùng `POST nodes/reorder`. */

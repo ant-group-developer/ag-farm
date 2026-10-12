@@ -18,11 +18,11 @@ export class FarmNodeEntity {
   kinds!: string[];
 
   /**
-   * Loại job admin cho phép node nhận (nullable = cho phép tất cả kinds được báo cáo).
-   * Khi assign job dùng giao: reported_kinds ∩ allowed_kinds.
+   * Loại job admin chặn ở node này (rỗng = không chặn gì). Khi giao job: kinds worker báo − blocked_kinds, nên loại
+   * mới worker báo lên tự chạy.
    */
-  @Column({ name: 'allowed_kinds', type: 'text', array: true, nullable: true, default: null })
-  allowedKinds!: string[] | null;
+  @Column({ name: 'blocked_kinds', type: 'text', array: true, default: () => `'{}'` })
+  blockedKinds!: string[];
 
   /** sha256 hex của token node */
   @Column({ name: 'token_hash', type: 'char', length: 64, unique: true })

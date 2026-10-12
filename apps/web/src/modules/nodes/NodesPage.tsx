@@ -29,9 +29,10 @@ import { SecretModal } from '../../shared/components/SecretModal';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { SortDropdown } from '../../shared/components/SortDropdown';
 import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
-import { jobTypeLabel, jobTypeOptions } from '../../shared/lib/job-labels';
+import { jobTypeOptions } from '../../shared/lib/job-labels';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import { columnsWidth } from '../../shared/lib/table-width';
+import { BlockedKindsField, KindSwitches } from './KindSwitches';
 import type { JobType, NodeCapabilities, NodeSortBy, NodeView, PagedResponse, SortOrder } from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
@@ -76,7 +77,7 @@ function Spec({ icon, children }: { icon: ReactNode; children: ReactNode }) {
 function NodeSpecs({ caps }: { caps: NodeCapabilities | null }) {
   const { t } = useTranslation();
   if (!caps) return <Text type="secondary">-</Text>;
-  const { ffmpeg, python, ollama_models: models } = caps.engines;
+  const { ffmpeg, python, ytdlp, ollama_models: models } = caps.engines;
   return (
     <Flex vertical gap={4}>
       <Flex wrap gap="4px 16px">
@@ -111,7 +112,7 @@ function NodeSpecs({ caps }: { caps: NodeCapabilities | null }) {
           <Text type="secondary">{t('nodes.noGpu')}</Text>
         </Spec>
       )}
-      {(ffmpeg || python || models.length > 0) && (
+      {(ffmpeg || python || ytdlp || models.length > 0) && (
         <Flex wrap gap={4}>
           {ffmpeg && (
             <Tooltip title={`ffmpeg ${ffmpeg}`}>
@@ -120,6 +121,11 @@ function NodeSpecs({ caps }: { caps: NodeCapabilities | null }) {
           )}
           {python && (
             <Tag bordered={false} style={{ marginInlineEnd: 0 }}>Python {python}</Tag>
+          )}
+          {ytdlp && (
+            <Tooltip title={`yt-dlp ${ytdlp}`}>
+              <Tag bordered={false} style={{ marginInlineEnd: 0 }}>yt-dlp</Tag>
+            </Tooltip>
           )}
           {models.length > 0 && (
             <Tooltip title={models.join(', ')}>
@@ -143,7 +149,7 @@ export function NodesPage() {
   const [editNode, setEditNode] = useState<NodeView | null>(null);
   const [secret, setSecret] = useState<{ title: string; label: string; value: string } | null>(null);
   const [form] = Form.useForm<{ name: string; machine?: string; kinds: JobType[] }>();
-  const [editForm] = Form.useForm<{ name: string; allowed_kinds: JobType[] | null }>();
+  const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[] }>();
 
   // URL state via nuqs
   const [query, setQuery] = useQueryStates({
@@ -279,26 +285,19 @@ export function NodesPage() {
       ),
     },
     {
-      title: t('common.jobTypes'),
+      // Worker tự báo loại làm được (ghi đè mỗi heartbeat); admin chỉ tắt/bật từng loại (`blocked_kinds`).
+      title: t('nodes.kinds'),
+      tooltip: t('nodes.kindsHelp'),
       key: 'kinds',
-      width: 210,
-      render: (_: unknown, r: NodeView) => {
-        const effective = r.allowed_kinds ?? r.kinds;
-        const isRestricted = r.allowed_kinds !== null;
-        return (
-          <Tooltip
-            title={isRestricted ? `${t('nodes.allowedKinds')}: ${effective.map(jobTypeLabel).join(', ')}` : undefined}
-          >
-            <Flex wrap gap={4}>
-              {effective.map((k) => (
-                <Tag key={k} color={isRestricted ? 'orange' : 'blue'} style={{ marginInlineEnd: 0 }}>
-                  {jobTypeLabel(k)}
-                </Tag>
-              ))}
-            </Flex>
-          </Tooltip>
-        );
-      },
+      width: 230,
+      render: (_: unknown, r: NodeView) => (
+        <KindSwitches
+          reported={r.kinds}
+          blocked={r.blocked_kinds ?? []}
+          loading={patchMut.isPending && patchMut.variables?.id === r.id && patchMut.variables.body.blocked_kinds !== undefined}
+          onChange={(blocked) => patchMut.mutate({ id: r.id, body: { blocked_kinds: blocked } })}
+        />
+      ),
     },
     {
       title: t('nodes.capabilities'),
@@ -391,7 +390,7 @@ export function NodesPage() {
                 setEditNode(r);
                 editForm.setFieldsValue({
                   name: r.name,
-                  allowed_kinds: r.allowed_kinds ?? undefined,
+                  blocked_kinds: r.blocked_kinds ?? [],
                 });
               }}
             />
@@ -549,38 +548,9 @@ export function NodesPage() {
           <Form.Item name="name" label={t('nodes.nameLabel')} rules={[{ required: true, message: t('nodes.nameRequired') }]}>
             <Input placeholder={t('nodes.namePlaceholder')} />
           </Form.Item>
-          {/* Chỉ xem: worker ghi đè `kinds` ở mỗi heartbeat, admin giới hạn bằng `allowed_kinds`. */}
-          <Form.Item label={t('nodes.reportedKinds')} tooltip={t('nodes.reportedKindsHelp')}>
-            {editNode && editNode.kinds.length > 0 ? (
-              <Flex wrap gap={4}>
-                {editNode.kinds.map((k) => (
-                  <Tag key={k} style={{ marginInlineEnd: 0 }}>
-                    {jobTypeLabel(k)}
-                  </Tag>
-                ))}
-              </Flex>
-            ) : (
-              <Text type="secondary">-</Text>
-            )}
-          </Form.Item>
-          <Form.Item
-            name="allowed_kinds"
-            label={t('nodes.allowedKinds')}
-            tooltip={t('nodes.allowedKindsHelp')}
-          >
-            <Select
-              mode="multiple"
-              allowClear
-              options={
-                editNode
-                  ? jobTypeOptions(editNode.kinds)
-                  : jobTypeOptions()
-              }
-              placeholder={t('nodes.allowedKindsAll')}
-              onChange={(vals: JobType[]) => {
-                editForm.setFieldValue('allowed_kinds', vals.length > 0 ? vals : null);
-              }}
-            />
+          {/* Worker ghi đè `kinds` ở mỗi heartbeat; admin chỉ tắt/bật từng loại (`blocked_kinds`). */}
+          <Form.Item name="blocked_kinds" label={t('nodes.kinds')} tooltip={t('nodes.kindsHelp')}>
+            <BlockedKindsField reported={editNode?.kinds ?? []} />
           </Form.Item>
         </Form>
       </Modal>

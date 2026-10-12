@@ -29,7 +29,7 @@ function node(over: Partial<FarmNodeEntity> = {}): FarmNodeEntity {
     priorityOrder: seq,
     status: 'active',
     kinds: ['scan.extract', 'scan.ai'],
-    allowedKinds: null,
+    blockedKinds: [],
     capabilities: CAPS,
     freeSlots: { cpu: 2, gpu: 0 },
     schedule: null,
@@ -49,9 +49,11 @@ describe('node priority', () => {
     expect(isInsideSchedule({ paused: true })).toBe(false);
   });
 
-  it('effectiveKinds: reported ∩ allowed, null allows all', () => {
-    expect(effectiveKinds(['a', 'b'], null)).toEqual(['a', 'b']);
-    expect(effectiveKinds(['a', 'b'], ['b', 'c'])).toEqual(['b']);
+  it('effectiveKinds: reported − blocked, so a kind the worker newly reports is taken', () => {
+    expect(effectiveKinds(['a', 'b'], [])).toEqual(['a', 'b']);
+    expect(effectiveKinds(['a', 'b'], ['b', 'c'])).toEqual(['a']);
+    expect(effectiveKinds(['a', 'b', 'new'], ['b'])).toEqual(['a', 'new']);
+    expect(effectiveKinds(['a'], null)).toEqual(['a']);
   });
 
   it('isAhead: smaller order first, ties broken by id so two nodes never yield to each other', () => {
@@ -99,7 +101,7 @@ describe('node priority', () => {
 
   it('earlierNodeFor: the first earlier node that takes the type, meets requirements and has the slot', () => {
     const full = node({ freeSlots: { cpu: 0, gpu: 0 } });
-    const noKind = node({ allowedKinds: ['scan.ai'] });
+    const noKind = node({ blockedKinds: ['scan.extract'] });
     const windowsOnly = node({ capabilities: { ...CAPS, os: 'windows' } });
     const ok = node();
     const ready = earlierReadyNodes([full, noKind, windowsOnly, ok], node({ priorityOrder: 99 }), NOW, 90);
