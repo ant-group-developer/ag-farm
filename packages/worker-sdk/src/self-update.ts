@@ -55,7 +55,7 @@ export function updateRole(packageName: string): string {
 export function readUpdateOutcome(dir: string, role: string): UpdateOutcome | null {
   try {
     // install.ps1 (PowerShell 5.1) có thể ghi kèm BOM
-    const raw = JSON.parse(readFileSync(join(dir, `result-${role}.json`), 'utf8').replace(/^﻿/, '')) as unknown;
+    const raw = JSON.parse(readFileSync(join(dir, `result-${role}.json`), 'utf8').replace(/^\uFEFF/, '')) as unknown;
     if (!raw || typeof raw !== 'object') return null;
     const o = raw as Record<string, unknown>;
     if (o['state'] !== 'done' && o['state'] !== 'failed') return null;
@@ -100,7 +100,7 @@ export async function fetchLatestVersion(hubUrl: string, packageName: string): P
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`GET /dist/latest.json failed: HTTP ${res.status}`);
-  const raw = JSON.parse((await res.text()).replace(/^﻿/, '')) as { packages?: Record<string, unknown> };
+  const raw = JSON.parse((await res.text()).replace(/^\uFEFF/, '')) as { packages?: Record<string, unknown> };
   const entry = ReleaseEntrySchema.safeParse(raw?.packages?.[packageName]);
   return entry.success ? entry.data.version : null;
 }

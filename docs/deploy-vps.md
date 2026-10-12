@@ -36,12 +36,13 @@ Mỗi môi trường có cặp khoá vé, khoá owner và tập máy worker riê
    - `FRONTEND_ORIGIN` = domain web; `FARM_PUBLIC_URL` và `VITE_API_URL` = domain API.
    - `FARM_OLLAMA_MODELS=qwen2.5vl:7b`: phải trùng `ANALYSIS_MODEL` của ag-go.
    - Khoá vé: chạy `sudo docker compose build api`, rồi `sudo docker compose run --rm --no-deps api node dist/scripts/generate-ticket-keys.js`, rồi dán hai khoá vào `.env`.
+   - `FARM_RELEASE_KEY`: khoá phát hành worker (`openssl rand -hex 32`), dùng khi đẩy gói từ máy build (mục 5). Mỗi môi trường một khoá; chỉ giữ trên VPS và máy build, không commit.
 6. **Auth0:** thêm domain web farm vào Allowed Callback URLs, Allowed Logout URLs và Allowed Web Origins của app web farm.
-7. **Gói cài worker:** thư mục `releases/` không nằm trong git. Chép từ máy build lên:
+7. **Gói cài worker:** thư mục `releases/` (`FARM_RELEASES_DIR_HOST`) không nằm trong git; api ghi vào đó khi phát hành, nên cho user `node` của container (uid 1000) quyền ghi:
    ```bash
-   scp releases/latest.json releases/ag-scan-worker-<bản>.zip releases/ag-render-worker-<bản>.zip <user>@<vps>:/www/wwwroot/<dev|prod>/ag-farm/releases/
+   sudo mkdir -p /www/wwwroot/<dev|prod>/ag-farm/releases && sudo chown -R 1000:1000 /www/wwwroot/<dev|prod>/ag-farm/releases
    ```
-   Chỉ cần đúng các bản mà `latest.json` đang trỏ tới. Khi có bản mới: chạy `node scripts/release.mjs --publish <thư mục>` trong repo worker, rồi chép lại.
+   Lần đầu (hub chưa có gói nào) và mỗi lần có bản mới: phát hành từ máy build như mục 5.
 8. **nginx (site trong aaPanel), có SSL Let's Encrypt:**
    ```nginx
    # api-farm(-dev).ant-group.net
@@ -52,6 +53,17 @@ Mỗi môi trường có cặp khoá vé, khoá owner và tập máy worker riê
      proxy_set_header X-Forwarded-Proto $scheme;
      proxy_read_timeout 120s;
      client_max_body_size 20m;
+   }
+   # Phát hành gói worker (zip ~100 MB): lớn hơn và lâu hơn các API khác
+   location = /v1/admin/releases {
+     proxy_pass http://127.0.0.1:3010;
+     proxy_set_header Host $host;
+     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+     proxy_set_header X-Forwarded-Proto $scheme;
+     client_max_body_size 1024m;
+     proxy_request_buffering off;
+     proxy_read_timeout 600s;
+     proxy_send_timeout 600s;
    }
    # farm(-dev).ant-group.net
    location / { proxy_pass http://127.0.0.1:3011; proxy_set_header Host $host; }
@@ -95,3 +107,28 @@ User SSH cần chạy `sudo` không hỏi mật khẩu cho git, bash và docker.
 ## 4. Thêm máy worker
 
 Trên web farm, vào Máy → Thêm máy, chọn vai trò, rồi chạy lệnh được tạo ra trong PowerShell (Run as Administrator) trên máy worker. Bộ cài tải đúng các model trong `FARM_OLLAMA_MODELS`. Mọi máy nhận `scan.ai` phải chạy được model đó: `qwen2.5vl:7b` cần khoảng 10 GB VRAM.
+
+## 5. Phát hành worker (máy tự cập nhật)
+
+Trên máy build Windows (đã clone ag-farm, ag-studio cạnh repo worker), khoá phát hành của đúng hub trong biến môi trường
+(chỉ đặt cho phiên PowerShell này, không ghi vào file trong repo):
+
+```powershell
+$env:FARM_RELEASE_KEY = '<FARM_RELEASE_KEY của hub>'
+cd E:\CODE\ag-render-worker   # hoặc ag-scan-worker
+node scripts/release.mjs --publish --upload https://api-farm(-dev).ant-group.net
+```
+
+Script đóng gói, rồi đẩy zip lên `POST /v1/admin/releases` (header `Authorization: Release <khoá>`; khoá không bao giờ in
+ra). Hub kiểm sha256, **từ chối bản không mới hơn** bản đang có (409 `version_not_newer`: tăng `version` trong
+`package.json` rồi chạy lại), lưu `<gói>-<bản>.zip` và ghi `latest.json` (file tạm rồi đổi tên). Dùng biến khác cho hub
+khác: `--key-env FARM_DEV_RELEASE_KEY`. Không có khoá thì admin đăng nhập vẫn gọi được API này (Bearer Auth0).
+`--publish <thư mục>` (chép vào một thư mục latest.json) vẫn dùng được khi cần.
+
+Sau khi phát hành, máy cài bằng `install.ps1` (render 0.9.0 / scan 0.4.0 trở lên) tự cập nhật trong khoảng 15 phút:
+ngừng nhận việc, chờ việc đang chạy xong (tối đa 30 phút), task `ag-farm-updater` cài bản mới, bản mới không chạy thì
+quay về bản cũ. Trang **Máy** của web farm: cột Phiên bản (tag "cũ", trạng thái cập nhật, lỗi kèm dòng cuối
+`setup.log`), công tắc "Tự cập nhật", nút "Cập nhật ngay". Máy còn chạy render 0.8.1 / scan 0.3.5 trở về trước: chạy
+lệnh cập nhật (lệnh cài, bỏ `-Code`) trên máy **một lần cuối**; từ đó máy tự cập nhật.
+
+Thứ tự lên bản có đổi giao thức: hub (deploy.sh, có migration) → phát hành worker → Studio.

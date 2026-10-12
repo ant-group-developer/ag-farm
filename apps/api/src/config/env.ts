@@ -42,6 +42,13 @@ export const EnvSchema = z.object({
   FARM_PUBLIC_URL: z.string().url().optional(),
   /** Thư mục gói phát hành worker (zip + latest.json), phục vụ ở `/dist/`. */
   FARM_RELEASES_DIR: z.string().optional(),
+  /**
+   * Khoá phát hành worker (`POST /v1/admin/releases` với `Authorization: Release <khoá>`, cho `release.mjs --upload`).
+   * Không đặt: chỉ admin đăng nhập (Auth0) mới phát hành được.
+   */
+  FARM_RELEASE_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(32).optional()),
+  /** Dung lượng tối đa một gói phát hành tải lên (MB). */
+  FARM_RELEASE_MAX_MB: z.coerce.number().int().min(1).max(4096).default(1024),
   /** Thư mục chứa install.ps1/uninstall.ps1, phục vụ ở `/dist/`. */
   FARM_INSTALLER_DIR: z.string().optional(),
   /** Model Ollama máy quét cần có (phân cách bởi dấu phẩy), trùng ANALYSIS_MODEL của ag-go. Bộ cài tải các model này. */
