@@ -691,3 +691,22 @@ describe('runWorker - machine metrics', () => {
     expect(calls.n).toBe(0);
   }, 15_000);
 });
+
+describe('errorToJobError', () => {
+  it('keeps a handler code and lets the handler choose to retry', async () => {
+    const { errorToJobError, JobFailure, NonRetryableError } = await import('./worker');
+    expect(errorToJobError(new JobFailure('network', 'getaddrinfo failed', true))).toEqual({
+      code: 'network', message: 'getaddrinfo failed', retryable: true,
+    });
+    expect(errorToJobError(new JobFailure('private', 'Private video', false))).toEqual({
+      code: 'private', message: 'Private video', retryable: false,
+    });
+    expect(errorToJobError(new NonRetryableError('invalid_payload', 'bad'))).toEqual({
+      code: 'invalid_payload', message: 'bad', retryable: false,
+    });
+    expect(errorToJobError(new Error('boom'))).toEqual({ code: 'WORKER_ERROR', message: 'boom', retryable: true });
+    expect(errorToJobError(new JobFailure('x'.repeat(100), 'y'.repeat(3000), true))).toMatchObject({
+      code: 'x'.repeat(80), message: 'y'.repeat(2000),
+    });
+  });
+});

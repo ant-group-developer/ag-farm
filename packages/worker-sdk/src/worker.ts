@@ -70,6 +70,21 @@ export class NonRetryableError extends Error {
   }
 }
 
+/**
+ * Lỗi có mã máy đọc được (chủ job đọc `error.code`), handler tự chọn có đáng thử lại không: vd. `studio.reference_fetch`
+ * báo `network` (thử lại) hay `private` (không).
+ */
+export class JobFailure extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = 'JobFailure';
+  }
+}
+
 // ---- Context truyền vào handler ----
 
 export interface JobContext {
@@ -613,9 +628,13 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
   }
 }
 
-function errorToJobError(err: unknown): JobError {
+/** Lỗi handler ném → `error` gửi hub (`JobErrorSchema`: mã ≤ 80, lời ≤ 2000 ký tự). */
+export function errorToJobError(err: unknown): JobError {
   if (err instanceof NonRetryableError) {
     return { code: err.code, message: err.message, retryable: false };
+  }
+  if (err instanceof JobFailure) {
+    return { code: err.code.slice(0, 80), message: err.message.slice(0, 2000), retryable: err.retryable };
   }
   if (err instanceof Error) {
     return { code: 'WORKER_ERROR', message: err.message.slice(0, 2000), retryable: true };
