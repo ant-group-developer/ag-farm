@@ -2,7 +2,8 @@
 #
 # Mở PowerShell bằng "Run as Administrator" rồi dán lệnh lấy ở trang Máy của web farm:
 #   iwr https://<farm>/dist/install.ps1 -UseBasicParsing | iex; Install-AgWorker -Hub https://<farm> -Code <mã>
-# Cập nhật lên bản mới (giữ cấu hình, không cần mã):
+# Cập nhật lên bản mới (không cần mã; config.yaml giữ name, token, cache và khoá tự thêm, viết lại các khoá extra
+# installer quản lý, bỏ danh sách kinds khi gói mới tự tính được; bản trước lưu ở config.yaml.bak):
 #   iwr https://<farm>/dist/install.ps1 -UseBasicParsing | iex; Install-AgWorker -Hub https://<farm>
 # Chạy từ file tải về:
 #   iex (Get-Content -Raw -Encoding UTF8 .\install.ps1); Install-AgWorker -Hub ... -Code ...
@@ -73,30 +74,200 @@ function New-AgMachineYaml {
   ) -join "`r`n"
 }
 
-function New-AgConfigYaml {
-  param([string]$Hub, $Node, [string]$RoleDir, [string]$CacheDir, [int]$CacheGb, [string]$MachineFile, [hashtable]$Extra)
-  $lines = @(
-    '# Cau hinh worker (install.ps1 tao). Token chi hien o day, dung chia se file nay.',
-    "hub_url: $(ConvertTo-AgYamlString $Hub)",
-    "token: $(ConvertTo-AgYamlString $Node.token)",
-    "name: $(ConvertTo-AgYamlString $Node.name)",
-    'kinds:'
-  )
-  foreach ($k in $Node.kinds) { $lines += "  - $k" }
-  $lines += "work_dir: $(ConvertTo-AgYamlString (Join-Path $RoleDir 'work'))"
-  $lines += 'cache:'
-  $lines += "  dir: $(ConvertTo-AgYamlString $CacheDir)"
-  $lines += "  max_gb: $CacheGb"
-  $lines += "machine_file: $(ConvertTo-AgYamlString $MachineFile)"
-  if ($Extra -and $Extra.Count -gt 0) {
-    $lines += 'extra:'
-    foreach ($key in ($Extra.Keys | Sort-Object)) {
-      $v = $Extra[$key]
-      if ($v -is [bool]) { $lines += "  ${key}: $($v.ToString().ToLower())" }
-      else { $lines += "  ${key}: $(ConvertTo-AgYamlString ([string]$v))" }
+function ConvertTo-AgYamlValue {
+  param($Value)
+  if ($Value -is [bool]) { return $Value.ToString().ToLower() }
+  if ($Value -is [int] -or $Value -is [long] -or $Value -is [double]) { return [string]$Value }
+  return ConvertTo-AgYamlString ([string]$Value)
+}
+
+# Chia config.yaml thành các khối cấp cao: dòng `khoá:` ở cột 0 mở khối; dòng thụt vào và dòng trống thuộc khối phía
+# trên; comment ở cột 0 thuộc khối ngay sau nó (bỏ khối thì bỏ cả comment của khối). Khối đầu (key $null) là phần mở đầu.
+function Split-AgYamlBlocks {
+  param([string]$Text)
+  $blocks = New-Object System.Collections.ArrayList
+  $current = [pscustomobject]@{ key = $null; lines = (New-Object System.Collections.ArrayList) }
+  [void]$blocks.Add($current)
+  $pending = New-Object System.Collections.ArrayList
+  if ($Text) {
+    foreach ($line in ($Text -split "`r?`n")) {
+      if ($line -match '^([A-Za-z_][A-Za-z0-9_-]*)\s*:') {
+        $current = [pscustomobject]@{ key = $Matches[1]; lines = (New-Object System.Collections.ArrayList) }
+        foreach ($p in $pending) { [void]$current.lines.Add($p) }
+        $pending.Clear()
+        [void]$current.lines.Add($line)
+        [void]$blocks.Add($current)
+      } elseif ($line -match '^#') {
+        [void]$pending.Add($line)
+      } else {
+        foreach ($p in $pending) { [void]$current.lines.Add($p) }
+        $pending.Clear()
+        [void]$current.lines.Add($line)
+      }
     }
   }
+  foreach ($p in $pending) { [void]$current.lines.Add($p) }
+  return , $blocks
+}
+
+# Ghi các khoá `$Managed` vào khối `extra:` (mảng dòng, kể cả dòng `extra:`), giữ nguyên khoá người dùng tự thêm.
+# Giá trị $null: giữ như cũ. Trả về mảng dòng mới.
+function Merge-AgYamlExtra {
+  param([string[]]$Lines, [System.Collections.IDictionary]$Managed)
+  $headerAt = -1
+  for ($i = 0; $i -lt $Lines.Count; $i++) { if ($Lines[$i] -match '^extra\s*:') { $headerAt = $i; break } }
+  $out = New-Object System.Collections.ArrayList
+  for ($i = 0; $i -lt $headerAt; $i++) { [void]$out.Add($Lines[$i]) }
+  $inline = ''
+  if ($headerAt -ge 0 -and $Lines[$headerAt] -match '^extra\s*:\s*(.*?)\s*$') { $inline = $Matches[1] }
+  if ($inline -and $inline -ne '{}' -and -not $inline.StartsWith('#')) {
+    Write-Warning "config.yaml: khong sua duoc 'extra: $inline' (viet dang khoi nhieu dong de installer ghi lai)"
+    return , [string[]]$Lines
+  }
+  [void]$out.Add('extra:')
+
+  # Các mục con: dòng `<thụt>khoá:` cùng độ thụt với mục đầu tiên mở một mục; dòng comment/trống ngay trước thuộc
+  # mục đó (`lead`), dòng thụt sâu hơn thuộc mục phía trên.
+  $entries = New-Object System.Collections.ArrayList
+  $pending = New-Object System.Collections.ArrayList
+  $indent = $null
+  $entry = $null
+  for ($i = $headerAt + 1; $i -lt $Lines.Count; $i++) {
+    $line = $Lines[$i]
+    if ($line -match '^(\s+)([A-Za-z_][A-Za-z0-9_-]*)\s*:' -and ($null -eq $indent -or $Matches[1] -eq $indent)) {
+      if ($null -eq $indent) { $indent = $Matches[1] }
+      $entry = [pscustomobject]@{ key = $Matches[2]; lead = @($pending); lines = (New-Object System.Collections.ArrayList) }
+      $pending.Clear()
+      [void]$entry.lines.Add($line)
+      [void]$entries.Add($entry)
+    } elseif ($line -match '^\s*(#|$)') {
+      [void]$pending.Add($line)
+    } elseif ($entry) {
+      foreach ($p in $pending) { [void]$entry.lines.Add($p) }
+      $pending.Clear()
+      [void]$entry.lines.Add($line)
+    } else { [void]$pending.Add($line) }
+  }
+  if ($null -eq $indent) { $indent = '  ' }
+
+  $done = @{}
+  foreach ($e in $entries) {
+    if ($Managed.Contains($e.key) -and $null -ne $Managed[$e.key]) {
+      $e.lines.Clear()
+      [void]$e.lines.Add("$indent$($e.key): $(ConvertTo-AgYamlValue $Managed[$e.key])")
+      $done[$e.key] = $true
+    }
+  }
+  $added = @()
+  foreach ($key in $Managed.Keys) {
+    if (-not $done.ContainsKey($key) -and $null -ne $Managed[$key]) { $added += "$indent${key}: $(ConvertTo-AgYamlValue $Managed[$key])" }
+  }
+
+  $body = New-Object System.Collections.ArrayList
+  foreach ($e in $entries) { foreach ($l in (@($e.lead) + @($e.lines))) { [void]$body.Add($l) } }
+  foreach ($p in $pending) { [void]$body.Add($p) }
+  # Khoá mới đặt sau dòng có nội dung cuối cùng (dòng trống cuối khối giữ ở cuối)
+  $lastContent = $body.Count - 1
+  while ($lastContent -ge 0 -and -not "$($body[$lastContent])".Trim()) { $lastContent-- }
+  for ($i = 0; $i -le $lastContent; $i++) { [void]$out.Add($body[$i]) }
+  foreach ($l in $added) { [void]$out.Add($l) }
+  for ($i = $lastContent + 1; $i -lt $body.Count; $i++) { [void]$out.Add($body[$i]) }
+  return , [string[]]$out
+}
+
+# Thêm khối mới vào cuối; dòng trống cuối khối đang đứng cuối được bỏ để khối mới không bị tách xa.
+function Add-AgYamlBlock {
+  param([System.Collections.ArrayList]$Blocks, [string]$Key, [string[]]$Lines)
+  if ($Blocks.Count -gt 0) {
+    $last = $Blocks[$Blocks.Count - 1].lines
+    while ($last.Count -gt 0 -and -not "$($last[$last.Count - 1])".Trim()) { $last.RemoveAt($last.Count - 1) }
+  }
+  [void]$Blocks.Add([pscustomobject]@{ key = $Key; lines = [System.Collections.ArrayList]@($Lines) })
+}
+
+# Viết config.yaml của một vai trò. Cài mới (`$Existing` rỗng) hay cập nhật đều qua đây:
+#   - giữ mọi khoá đang có (name, token, hub_url, cache, schedule, khoá người dùng tự thêm, khoá extra lạ);
+#   - `-Enrolled` (vừa đổi mã): ghi đè hub_url, token, name bằng node mới;
+#   - khoá còn thiếu (work_dir, cache, machine_file) thì thêm;
+#   - `extra`: viết lại các khoá installer quản lý ($Extra, giá trị $null = giữ như cũ);
+#   - `-OmitKinds`: bỏ danh sách `kinds` (worker tự tính loại job theo handler và máy); không thì ghi `Node.kinds`
+#     nếu có, giữ danh sách cũ nếu không.
+function New-AgConfigYaml {
+  param(
+    [string]$Hub, $Node, [string]$RoleDir, [string]$CacheDir, [int]$CacheGb, [string]$MachineFile,
+    [System.Collections.IDictionary]$Extra, [string]$Existing = '', [switch]$Enrolled, [switch]$OmitKinds
+  )
+  $blocks = Split-AgYamlBlocks $Existing
+  $fresh = -not ($blocks | Where-Object { $_.key })
+  if ($fresh) {
+    $blocks[0].lines.Clear()
+    [void]$blocks[0].lines.Add('# Cau hinh worker (install.ps1 tao). Token chi hien o day, dung chia se file nay.')
+    [void]$blocks[0].lines.Add('# Moi lan cap nhat, install.ps1 giu cac khoa dang co va viet lai cac khoa no quan ly trong extra')
+    [void]$blocks[0].lines.Add('# (python_bin, ytdlp_bin, hf_home, encoder, ollama_url, ...). Khong khai kinds: worker tu nhan moi loai job no chay duoc.')
+  }
+
+  $set = [ordered]@{}
+  $defaults = [ordered]@{
+    hub_url = @("hub_url: $(ConvertTo-AgYamlString $Hub)")
+    token = @("token: $(ConvertTo-AgYamlString $Node.token)")
+    name = @("name: $(ConvertTo-AgYamlString $Node.name)")
+  }
+  if ($Enrolled) { $set = $defaults; $defaults = [ordered]@{} }
+  $remove = @()
+  if ($OmitKinds) { $remove += 'kinds' }
+  elseif (@($Node.kinds).Count -gt 0) { $set['kinds'] = @('kinds:') + @($Node.kinds | ForEach-Object { "  - $_" }) }
+  $defaults['work_dir'] = @("work_dir: $(ConvertTo-AgYamlString (Join-Path $RoleDir 'work'))")
+  $defaults['cache'] = @('cache:', "  dir: $(ConvertTo-AgYamlString $CacheDir)", "  max_gb: $CacheGb")
+  $defaults['machine_file'] = @("machine_file: $(ConvertTo-AgYamlString $MachineFile)")
+
+  $result = New-Object System.Collections.ArrayList
+  foreach ($b in $blocks) { if (-not $b.key -or $remove -notcontains $b.key) { [void]$result.Add($b) } }
+  foreach ($key in $set.Keys) {
+    $b = $result | Where-Object { $_.key -eq $key } | Select-Object -First 1
+    if ($b) {
+      # Giữ comment ngay trên khoá, thay phần còn lại
+      $keep = @()
+      for ($i = 0; $i -lt $b.lines.Count -and $b.lines[$i] -notmatch "^${key}\s*:"; $i++) { $keep += $b.lines[$i] }
+      $b.lines.Clear()
+      foreach ($l in $keep) { [void]$b.lines.Add($l) }
+      foreach ($l in $set[$key]) { [void]$b.lines.Add($l) }
+    } else {
+      Add-AgYamlBlock $result $key $set[$key]
+    }
+  }
+  foreach ($key in $defaults.Keys) {
+    if (-not ($result | Where-Object { $_.key -eq $key })) {
+      Add-AgYamlBlock $result $key $defaults[$key]
+    }
+  }
+  if ($Extra -and $Extra.Count -gt 0) {
+    $b = $result | Where-Object { $_.key -eq 'extra' } | Select-Object -First 1
+    if ($b) {
+      $merged = Merge-AgYamlExtra -Lines ([string[]]@($b.lines)) -Managed $Extra
+      $b.lines.Clear()
+      foreach ($l in $merged) { [void]$b.lines.Add($l) }
+    } elseif (@($Extra.Values | Where-Object { $null -ne $_ }).Count -gt 0) {
+      $merged = Merge-AgYamlExtra -Lines @('extra:') -Managed $Extra
+      Add-AgYamlBlock $result 'extra' $merged
+    }
+  }
+
+  $lines = @()
+  foreach ($b in $result) { $lines += @($b.lines) }
+  while ($lines.Count -gt 0 -and -not "$($lines[$lines.Count - 1])".Trim()) { $lines = @($lines | Select-Object -First ($lines.Count - 1)) }
   return $lines -join "`r`n"
+}
+
+# Gói worker từ bản này trở đi đọc được config không có `kinds` (worker-sdk tự tính loại job). Gói cũ hơn bắt buộc có.
+$AgKindsOptionalSince = @{ 'ag-render-worker' = '0.9.0'; 'ag-scan-worker' = '0.4.0' }
+
+function Test-AgKindsOptional {
+  param([string]$Package, [string]$Version)
+  $since = $AgKindsOptionalSince[$Package]
+  if (-not $since -or -not $Version) { return $false }
+  $v = $null
+  if (-not [version]::TryParse(($Version -replace '[-+].*$', ''), [ref]$v)) { return $false }
+  return $v -ge [version]$since
 }
 
 # Đọc một khoá chuỗi trong config.yaml đã có (token, name, hub_url) khi cập nhật không kèm mã.
@@ -407,7 +578,8 @@ function Install-AgWorker {
     $version = Install-AgPackage -Hub $Hub -Latest $latest -PackageName $package -RoleDir $roleDir
     Write-Host "$package $version da cai vao $roleDir\app"
 
-    $extra = @{}
+    # Khoá extra installer quản lý (cài lẫn cập nhật đều ghi lại); khoá khác trong extra là của người dùng, giữ nguyên.
+    $extra = [ordered]@{}
     if ($role -eq 'scan') {
       $extra['ollama_url'] = 'http://127.0.0.1:11434'
       # Model phải trùng model chủ job gửi trong job (hub cấu hình); chỉ đoán theo VRAM khi hub không nói.
@@ -423,11 +595,17 @@ function Install-AgWorker {
       foreach ($k in $renderExtra.Keys) { if ($null -ne $renderExtra[$k]) { $extra[$k] = $renderExtra[$k] } }
     }
 
+    # Cài và cập nhật đều ghi lại config: giữ name, token, cache, khoá người dùng thêm; viết lại khoá extra quản lý;
+    # gói mới thì bỏ `kinds` (worker tự nhận mọi loại job nó chạy được), gói cũ vẫn cần danh sách đó.
     $configPath = Join-Path $roleDir 'config.yaml'
-    if ($Code) {
-      $yaml = New-AgConfigYaml -Hub $Hub -Node $node -RoleDir $roleDir -CacheDir (Join-Path $InstallDir "cache\$role") -CacheGb $cacheGb -MachineFile $machineFile -Extra $extra
-      [IO.File]::WriteAllText($configPath, $yaml, (New-Object Text.UTF8Encoding($false)))
+    $existing = ''
+    if (Test-Path -LiteralPath $configPath) {
+      $existing = Get-Content -Raw -Encoding UTF8 -LiteralPath $configPath
+      Copy-Item -Force -LiteralPath $configPath -Destination "$configPath.bak"
     }
+    $yaml = New-AgConfigYaml -Hub $Hub -Node $node -RoleDir $roleDir -CacheDir (Join-Path $InstallDir "cache\$role") -CacheGb $cacheGb `
+      -MachineFile $machineFile -Extra $extra -Existing $existing -Enrolled:([bool]$Code) -OmitKinds:(Test-AgKindsOptional -Package $package -Version $version)
+    [IO.File]::WriteAllText($configPath, $yaml, (New-Object Text.UTF8Encoding($false)))
 
     # Render ưu tiên thường; quét dưới mức thường (worker quét còn tự hạ thêm).
     $priority = 7
