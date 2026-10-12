@@ -64,6 +64,17 @@ Assert-Equal 'config token reads back' (Read-AgConfigValue $cfgPath 'token') "to
 Assert-Equal 'config name reads back' (Read-AgConfigValue $cfgPath 'name') 'lan-4060ti-scan'
 Assert-Equal 'config hub reads back' (Read-AgConfigValue $cfgPath 'hub_url') 'http://192.168.1.2:3010'
 
+$setup = [pscustomobject]@{ ok = $true; python_bin = 'C:\ag-farm\venv\Scripts\python.exe'; ytdlp_bin = 'C:\ag-farm\venv\Scripts\yt-dlp.exe'; hf_home = 'C:\ag-farm\models'; errors = @() }
+$re = Get-AgRenderExtra -SetupResult $setup
+Assert-Equal 'render extra: python_bin from setup' $re['python_bin'] 'C:\ag-farm\venv\Scripts\python.exe'
+Assert-Equal 'render extra: ytdlp_bin from setup' $re['ytdlp_bin'] 'C:\ag-farm\venv\Scripts\yt-dlp.exe'
+Assert-Equal 'render extra: hf_home from setup' $re['hf_home'] 'C:\ag-farm\models'
+Assert-Equal 'render extra: encoder' $re['encoder'] 'auto'
+Assert-Equal 'render extra: unload ollama' $re['unload_ollama_before_tts'] $true
+$re = Get-AgRenderExtra -SetupResult ([pscustomobject]@{ ok = $false; python_bin = $null; ytdlp_bin = $null; hf_home = 'C:\ag-farm\models'; errors = @('python: x') })
+Assert-Equal 'render extra: failed setup leaves python_bin unknown' ($null -eq $re['python_bin']) $true
+Assert-Equal 'render extra: old package (no setup) still sets encoder' (Get-AgRenderExtra -SetupResult $null)['encoder'] 'auto'
+
 if ($OutDir) {
   New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
   [IO.File]::WriteAllText((Join-Path $OutDir 'config.yaml'), $yaml, (New-Object Text.UTF8Encoding($false)))

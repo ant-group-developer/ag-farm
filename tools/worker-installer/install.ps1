@@ -10,12 +10,15 @@
 # Tuỳ chọn:
 #   -InstallDir C:\ag-farm   thư mục cài (mặc định C:\ag-farm)
 #   -Model qwen2.5vl:7b      model Ollama cho máy quét (mặc định: danh sách hub cấu hình FARM_OLLAMA_MODELS)
-#   -WithTts                 cài thêm Python + OmniVoice cho giọng đọc (máy render)
 #   -ReconfigureSlots        tính lại machine.yaml theo cấu hình máy
+#   -SkipModels              máy render: không tải trước model giọng đọc / nhận dạng lời nói (tải ở job đầu)
 #   -Yes                     không hỏi (cài Ollama, dừng worker cũ)
+#   -WithTts                 bỏ, không còn tác dụng (máy render luôn tự cài những gì nó cần, theo GPU của máy)
 #
 # Script làm: đổi mã lấy token trên hub, tải gói mới nhất, tự tính số slot, cài Ollama + model (máy quét),
-# chạy mỗi vai trò thành một task hệ thống (tự chạy khi bật máy, tự chạy lại khi chết), chờ máy Online.
+# chạy deploy\setup-render.ps1 của gói (máy render: Python 3.11, venv, yt-dlp, torch CUDA + OmniVoice + WhisperX và
+# model khi có GPU NVIDIA; log ở <InstallDir>\logs\setup.log), chạy mỗi vai trò thành một task hệ thống (tự chạy khi
+# bật máy, tự chạy lại khi chết), chờ máy Online.
 
 function Get-AgMachineInfo {
   $cores = [int](Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
@@ -265,6 +268,47 @@ function Install-AgPackage {
   return $info.version
 }
 
+# Chạy deploy\setup-render.ps1 của gói vừa cài (cả lúc cài lẫn lúc cập nhật; bước nào đã xong thì nó bỏ qua) và đọc
+# kết quả JSON của nó: { ok, python_bin, ytdlp_bin, hf_home, gpu, torch, cuda, errors[] }. $null nếu gói cũ không có.
+function Invoke-AgRenderSetup {
+  param([string]$AppDir, [string]$InstallDir, [switch]$SkipModels)
+  $setup = Join-Path $AppDir 'deploy\setup-render.ps1'
+  if (-not (Test-Path -LiteralPath $setup)) { return $null }
+  $resultFile = Join-Path $InstallDir 'logs\setup-result.json'
+  Remove-Item -Force -LiteralPath $resultFile -ErrorAction SilentlyContinue
+  Write-Host 'Cai Python, yt-dlp va (may co GPU NVIDIA) torch, OmniVoice, WhisperX, model. Lan dau co the mat 10-30 phut.'
+  $setupArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $setup, '-InstallDir', $InstallDir, '-ResultFile', $resultFile)
+  if ($SkipModels) { $setupArgs += '-SkipModels' }
+  & powershell @setupArgs
+  if (-not (Test-Path -LiteralPath $resultFile)) {
+    Write-Warning "setup-render.ps1 khong ghi ket qua. Xem $InstallDir\logs\setup.log"
+    return [pscustomobject]@{ ok = $false; python_bin = $null; ytdlp_bin = $null; hf_home = $null; errors = @('setup-render.ps1 khong ghi ket qua') }
+  }
+  $r = Get-Content -Raw -Encoding UTF8 -LiteralPath $resultFile | ConvertFrom-Json
+  foreach ($e in @($r.errors)) { if ($e) { Write-Warning $e } }
+  if (-not $r.ok) { Write-Warning "Cai dat may render chua tron ven. Xem $InstallDir\logs\setup.log, sua xong chay lai lenh cap nhat." }
+  return $r
+}
+
+# Các khoá `extra` installer quản lý cho máy render. Khoá setup không xác định được (lỗi, gói cũ) là $null: giữ giá trị cũ.
+function Get-AgRenderExtra {
+  param($SetupResult)
+  $extra = [ordered]@{
+    encoder = 'auto'
+    ollama_url = 'http://127.0.0.1:11434'
+    unload_ollama_before_tts = $true
+    python_bin = $null
+    ytdlp_bin = $null
+    hf_home = $null
+  }
+  if ($SetupResult) {
+    if ($SetupResult.python_bin) { $extra['python_bin'] = [string]$SetupResult.python_bin }
+    if ($SetupResult.ytdlp_bin) { $extra['ytdlp_bin'] = [string]$SetupResult.ytdlp_bin }
+    if ($SetupResult.hf_home) { $extra['hf_home'] = [string]$SetupResult.hf_home }
+  }
+  return $extra
+}
+
 function Wait-AgOnline {
   param([string]$Hub, [string]$Token, [string]$Name, [int]$Seconds)
   $deadline = (Get-Date).AddSeconds($Seconds)
@@ -284,8 +328,10 @@ function Install-AgWorker {
     [string]$Code,
     [string]$InstallDir = 'C:\ag-farm',
     [string]$Model,
+    # Bỏ: máy render luôn chạy setup-render.ps1. Vẫn nhận để lệnh cũ không lỗi.
     [switch]$WithTts,
     [switch]$ReconfigureSlots,
+    [switch]$SkipModels,
     [switch]$Yes
   )
   $ErrorActionPreference = 'Stop'
@@ -370,15 +416,11 @@ function Install-AgWorker {
       else { $models = @(Get-AgDefaultModel -Gpus $machineInfo.gpus) }
       Install-AgOllama -InstallDir $InstallDir -Models $models -Yes:$Yes
     } else {
-      $extra['encoder'] = 'auto'
-      $extra['ollama_url'] = 'http://127.0.0.1:11434'
-      $extra['unload_ollama_before_tts'] = $true
       if (-not (Test-Path -LiteralPath (Join-Path $env:WINDIR 'Fonts\arial.ttf'))) { Write-Warning 'Khong thay font Arial: job render co chu se loi fonts_missing' }
-      if ($WithTts) {
-        $venv = Join-Path $InstallDir 'venv'
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $roleDir 'app\deploy\setup-python.ps1') -Venv $venv
-        $extra['python_bin'] = Join-Path $venv 'Scripts\python.exe'
-      }
+      $setupResult = Invoke-AgRenderSetup -AppDir (Join-Path $roleDir 'app') -InstallDir $InstallDir -SkipModels:$SkipModels
+      if (-not $setupResult) { Write-Warning "Goi $package $version chua co deploy\setup-render.ps1: khong cai Python/yt-dlp" }
+      $renderExtra = Get-AgRenderExtra -SetupResult $setupResult
+      foreach ($k in $renderExtra.Keys) { if ($null -ne $renderExtra[$k]) { $extra[$k] = $renderExtra[$k] } }
     }
 
     $configPath = Join-Path $roleDir 'config.yaml'
