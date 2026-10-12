@@ -7,6 +7,7 @@ import {
   StudioTtsPayloadSchema,
   StudioExportPremierePayloadSchema,
   StudioTranscribePayloadSchema,
+  StudioReferenceFetchPayloadSchema,
 } from './studio';
 
 export type SlotKind = 'cpu' | 'gpu';
@@ -71,6 +72,13 @@ export const JOB_TYPE_SPECS: Record<JobType, JobTypeSpec> = {
     slot: 'gpu',
     payload: StudioTranscribePayloadSchema,
     baseRequirements: { gpu: true, python: true },
+  },
+  'studio.reference_fetch': {
+    owner: 'studio',
+    lane: 'interactive',
+    slot: 'cpu',
+    payload: StudioReferenceFetchPayloadSchema,
+    baseRequirements: { ytdlp: true },
   },
 };
 

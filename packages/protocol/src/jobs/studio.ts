@@ -290,3 +290,70 @@ export const TranscribeManifestSchema = z.strictObject({
   ),
 });
 export type TranscribeManifest = z.infer<typeof TranscribeManifestSchema>;
+
+// ---------------------------------------------------------------------------------------------
+// studio.reference_fetch: tải một video YouTube mẫu (≤ 480p, ≤ 30 phút, ≤ 300 MB) để Studio đo kiểu dựng, khi YouTube
+// chặn IP máy chủ Studio. Máy farm chạy yt-dlp với đúng cờ của Studio (`--ignore-config --no-cookies`, không đăng nhập,
+// không lách chặn — ADR-0001 mục 175), URL dựng lại từ `video_id` đã kiểm. Output: file video ở `output`, không manifest;
+// kết quả nằm trong `result.summary` (`StudioReferenceFetchResult`). Studio đọc xong thì xoá object đó.
+// ---------------------------------------------------------------------------------------------
+
+/** Trần của video mẫu: chiều cao, độ dài, dung lượng (300 MiB, đúng `--max-filesize 300M` của yt-dlp). */
+export const REFERENCE_MAX_HEIGHT = 480;
+export const REFERENCE_MAX_SECONDS = 1800;
+export const REFERENCE_MAX_BYTES = 300 * 1024 * 1024;
+
+/** Id video YouTube: đúng 11 ký tự `[A-Za-z0-9_-]`. */
+export const YoutubeVideoIdSchema = z.string().regex(/^[\w-]{11}$/);
+
+export const StudioReferenceFetchPayloadSchema = z.strictObject({
+  production_id: z.string().min(1).max(100),
+  video_id: YoutubeVideoIdSchema,
+  /** Chỉ được siết thêm, không nới quá trần. */
+  max_height: z.int().min(144).max(REFERENCE_MAX_HEIGHT).default(REFERENCE_MAX_HEIGHT),
+  max_seconds: z.int().min(1).max(REFERENCE_MAX_SECONDS).default(REFERENCE_MAX_SECONDS),
+  max_bytes: z.int().min(1024 * 1024).max(REFERENCE_MAX_BYTES).default(REFERENCE_MAX_BYTES),
+  /** File video kết quả dưới thư mục output của job, ví dụ `reference/<video_id>.mp4`. */
+  output: RelativePathSchema,
+});
+export type StudioReferenceFetchPayload = z.infer<typeof StudioReferenceFetchPayloadSchema>;
+
+/** `result.summary` của job `studio.reference_fetch` đã xong (`result.manifest` là `null`). */
+export const StudioReferenceFetchResultSchema = z.strictObject({
+  /** Đường dẫn file đã đẩy lên, tương đối dưới thư mục output của job (= `payload.output`). */
+  output: RelativePathSchema,
+  /** Container yt-dlp tải về (`mp4`, hiếm khi `webm`). */
+  ext: z.string().min(1).max(10),
+  duration_s: z.number().nonnegative(),
+  size_bytes: z.int().nonnegative(),
+  width: z.int().nonnegative(),
+  height: z.int().nonnegative(),
+  title: z.string().max(500),
+  channel: z.string().max(500),
+});
+export type StudioReferenceFetchResult = z.infer<typeof StudioReferenceFetchResultSchema>;
+
+/**
+ * `error.code` của job `studio.reference_fetch` hỏng vì yt-dlp/YouTube (cùng mã với `classifyYtDlp` của Studio).
+ * `youtube_blocked` = YouTube chặn chính máy này (bot check, "sign in", HTTP 429): video khác cũng sẽ hỏng y như vậy.
+ * Lỗi khác (payload sai, tải lên bucket hỏng…) giữ mã chung của worker (`INVALID_PAYLOAD`, `WORKER_ERROR`).
+ */
+export const REFERENCE_FETCH_ERROR_CODES = [
+  'youtube_blocked',
+  'private',
+  'unavailable',
+  'age_restricted',
+  'members_only',
+  'live',
+  'too_long',
+  'too_big',
+  'no_480p',
+  'network',
+  'timeout',
+  'other',
+] as const;
+export const ReferenceFetchErrorCodeSchema = z.enum(REFERENCE_FETCH_ERROR_CODES);
+export type ReferenceFetchErrorCode = z.infer<typeof ReferenceFetchErrorCodeSchema>;
+
+/** Mã đáng thử lại (`error.retryable: true`, hub giao lại khi còn lượt); các mã khác thử lại cũng hỏng như thế. */
+export const REFERENCE_FETCH_RETRYABLE_CODES: readonly ReferenceFetchErrorCode[] = ['network', 'timeout'];

@@ -55,8 +55,29 @@ Worker gửi danh sách thao tác, chủ job trả kết quả theo đúng thứ
 | `studio.render_final` | `studio` | interactive | cpu | `StudioRenderPayload` → `render.json` (`RenderManifest`) + video, thumbnail |
 | `studio.export_premiere` | `studio` | interactive | cpu | `StudioExportPremierePayload` → `premiere.json` (`PremiereManifest`) + zip |
 | `studio.transcribe` | `studio` | interactive | gpu | `StudioTranscribePayload` (WAV 16 kHz mono mỗi nguồn, `stage:`) → `transcribe.json` (`TranscribeManifest`) |
+| `studio.reference_fetch` | `studio` | interactive | cpu | `StudioReferenceFetchPayload` → video ở `output`, không manifest; `result.summary` là `StudioReferenceFetchResult` |
 
 `studio.tts` và `studio.transcribe` cần máy khai `gpu` và `python` (worker dò `import torch` bằng `python_bin` của nó).
+
+### `studio.reference_fetch`: video YouTube mẫu tải qua máy farm
+
+YouTube chặn IP máy chủ Studio ("Sign in to confirm you're not a bot"), nên Studio nhờ máy farm (cần `ytdlp`) tải video
+mẫu nó cần đo kiểu dựng. Vẫn theo ADR-0001 mục 175 của Studio: không cookie, không đăng nhập, không lách chặn.
+
+- Payload: `production_id`, `video_id` (đúng 11 ký tự `[A-Za-z0-9_-]`; worker tự dựng `https://www.youtube.com/watch?v=<id>`,
+  không bao giờ nhận URL), `max_height` (≤ 480, mặc định 480), `max_seconds` (≤ 1800, mặc định 1800), `max_bytes`
+  (≤ 300 MiB, mặc định 300 MiB), `output` (đường dẫn tương đối, ví dụ `reference/<video_id>.mp4`; Studio ghép với prefix output của job,
+  `productions/<project>/jobs/<stage>/<attempt>/out/`).
+- Worker chạy yt-dlp với đúng cờ của Studio (`--ignore-config --no-cookies --no-warnings --no-progress --js-runtimes
+  node:<node của worker> --no-playlist --no-part --restrict-filenames -f "bv*[height<=480]+ba/b[height<=480]/bv*[height<=480]"
+  --merge-output-format mp4 --max-filesize 300M --match-filter "duration<=1800 & !is_live" --ffmpeg-location <ffmpeg kèm gói>`,
+  số theo payload), đo bằng ffprobe, đẩy file lên `output`, rồi xoá mọi file trên máy.
+- Kết quả: `{ manifest: null, summary: { output, ext, duration_s, size_bytes, width, height, title, channel } }`.
+  Chủ job đọc xong thì tự xoá object (hub không xoá file của chủ job).
+- Lỗi do YouTube/yt-dlp: `error.code` thuộc `REFERENCE_FETCH_ERROR_CODES` (`youtube_blocked`, `private`, `unavailable`,
+  `age_restricted`, `members_only`, `live`, `too_long`, `too_big`, `no_480p`, `network`, `timeout`, `other`; cùng mã
+  `classifyYtDlp` của Studio), `error.message` là đầu dòng ERROR của yt-dlp. Chỉ `network` và `timeout` có
+  `retryable: true`. Lỗi khác giữ mã chung (`INVALID_PAYLOAD`, `WORKER_ERROR`…).
 
 Loại job worker báo (`kinds` ở heartbeat và claim): `kinds` trong config.yaml của worker là tuỳ chọn. Không khai thì
 worker-sdk (`workerKinds`) báo mọi loại có handler mà máy đáp ứng `JOB_TYPE_SPECS[type].baseRequirements` (GPU, Python

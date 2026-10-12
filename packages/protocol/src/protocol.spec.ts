@@ -19,6 +19,16 @@ import {
   StudioExportPremierePayloadSchema,
   StudioTtsPayloadSchema,
   StudioTranscribePayloadSchema,
+  StudioReferenceFetchPayloadSchema,
+  StudioReferenceFetchResultSchema,
+  REFERENCE_FETCH_ERROR_CODES,
+  REFERENCE_FETCH_RETRYABLE_CODES,
+  REFERENCE_MAX_BYTES,
+  REFERENCE_MAX_HEIGHT,
+  REFERENCE_MAX_SECONDS,
+  ReferenceFetchErrorCodeSchema,
+  JobErrorSchema,
+  JobResultSchema,
   TranscribeManifestSchema,
   TRANSCRIBE_MANIFEST_SCHEMA,
   JOB_TYPE_SPECS,
@@ -197,8 +207,16 @@ describe('requirements', () => {
 
   it('a render node takes every studio job type', () => {
     expect([...ROLE_KINDS.render].sort()).toEqual(
-      ['studio.export_premiere', 'studio.render_final', 'studio.render_preview', 'studio.transcribe', 'studio.tts'],
+      ['studio.export_premiere', 'studio.reference_fetch', 'studio.render_final', 'studio.render_preview', 'studio.transcribe', 'studio.tts'],
     );
+  });
+
+  it('studio.reference_fetch is a studio job on a CPU slot of a machine with yt-dlp', () => {
+    expect(JOB_TYPE_SPECS['studio.reference_fetch']).toMatchObject({ owner: 'studio', lane: 'interactive', slot: 'cpu' });
+    expect(mergeRequirements('studio.reference_fetch', {})).toEqual({ ytdlp: true });
+    expect(meetsRequirements(cpuBox, mergeRequirements('studio.reference_fetch', {}))).toBe(false);
+    const withYtdlp = { ...cpuBox, engines: { ...cpuBox.engines, ytdlp: '2026.09.01' } };
+    expect(meetsRequirements(withYtdlp, mergeRequirements('studio.reference_fetch', {}))).toBe(true);
   });
 });
 
@@ -370,6 +388,60 @@ describe('payloads', () => {
       expect(
         TranscribeManifestSchema.safeParse({ ...m, sources: [{ ...m.sources[1]!, alignment: 'line' }] }).success,
       ).toBe(false);
+    });
+  });
+
+  describe('studio.reference_fetch', () => {
+    const base = { production_id: 'p1', video_id: 'U_17EqTHUIo', output: 'reference/U_17EqTHUIo.mp4' };
+
+    it('fills the limits Studio keeps: 480p, 30 minutes, 300 MiB', () => {
+      const p = StudioReferenceFetchPayloadSchema.parse(base);
+      expect(p).toEqual({ ...base, max_height: 480, max_seconds: 1800, max_bytes: 300 * 1024 * 1024 });
+      expect([REFERENCE_MAX_HEIGHT, REFERENCE_MAX_SECONDS, REFERENCE_MAX_BYTES]).toEqual([480, 1800, 314572800]);
+      expect(JOB_TYPE_SPECS['studio.reference_fetch'].payload.safeParse(base).success).toBe(true);
+    });
+
+    it('takes tighter limits but never looser ones', () => {
+      expect(StudioReferenceFetchPayloadSchema.parse({ ...base, max_height: 360, max_seconds: 600 }).max_height).toBe(360);
+      expect(StudioReferenceFetchPayloadSchema.safeParse({ ...base, max_height: 720 }).success).toBe(false);
+      expect(StudioReferenceFetchPayloadSchema.safeParse({ ...base, max_seconds: 1801 }).success).toBe(false);
+      expect(StudioReferenceFetchPayloadSchema.safeParse({ ...base, max_bytes: REFERENCE_MAX_BYTES + 1 }).success).toBe(false);
+    });
+
+    it('takes an 11-character video id only, never a URL or anything a shell would read', () => {
+      for (const bad of ['U_17EqTHUI', 'U_17EqTHUIoo', 'https://youtu.be/U_17EqTHUIo', '../../etc/x', 'a b c d e f', '--exec=calc']) {
+        expect(StudioReferenceFetchPayloadSchema.safeParse({ ...base, video_id: bad }).success).toBe(false);
+      }
+      expect(StudioReferenceFetchPayloadSchema.safeParse({ ...base, video_id: 'abc-DEF_123' }).success).toBe(true);
+    });
+
+    it('writes under the job output only, and has no other field', () => {
+      expect(StudioReferenceFetchPayloadSchema.safeParse({ ...base, output: '../x.mp4' }).success).toBe(false);
+      expect(StudioReferenceFetchPayloadSchema.safeParse({ ...base, output: '/abs.mp4' }).success).toBe(false);
+      expect(StudioReferenceFetchPayloadSchema.safeParse({ ...base, url: 'https://youtube.com' }).success).toBe(false);
+      expect(StudioReferenceFetchPayloadSchema.safeParse({ ...base, cookies: 'x' }).success).toBe(false);
+    });
+
+    it('its result is a job summary Studio can read without the bucket', () => {
+      const summary = {
+        output: 'reference/U_17EqTHUIo.mp4', ext: 'mp4', duration_s: 612.4, size_bytes: 31_000_000,
+        width: 854, height: 480, title: 'Kyoto in a day', channel: 'Mei',
+      };
+      expect(StudioReferenceFetchResultSchema.parse(summary)).toEqual(summary);
+      expect(JobResultSchema.parse({ manifest: null, summary })).toEqual({ manifest: null, summary });
+      expect(StudioReferenceFetchResultSchema.safeParse({ ...summary, size_bytes: -1 }).success).toBe(false);
+    });
+
+    it('names each way YouTube says no with the codes Studio uses; only the network and a timeout are retried', () => {
+      expect([...REFERENCE_FETCH_ERROR_CODES]).toEqual([
+        'youtube_blocked', 'private', 'unavailable', 'age_restricted', 'members_only', 'live', 'too_long', 'too_big',
+        'no_480p', 'network', 'timeout', 'other',
+      ]);
+      expect(ReferenceFetchErrorCodeSchema.safeParse('youtube_blocked').success).toBe(true);
+      expect(ReferenceFetchErrorCodeSchema.safeParse('WORKER_ERROR').success).toBe(false);
+      expect([...REFERENCE_FETCH_RETRYABLE_CODES]).toEqual(['network', 'timeout']);
+      const error = { code: 'youtube_blocked', message: "Sign in to confirm you're not a bot", retryable: false };
+      expect(JobErrorSchema.parse(error)).toEqual(error);
     });
   });
 

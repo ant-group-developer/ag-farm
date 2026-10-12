@@ -70,6 +70,7 @@ export const vi = {
       render_final: 'Studio: render bản cuối',
       export_premiere: 'Studio: xuất Premiere',
       transcribe: 'Studio: nhận dạng lời nói',
+      reference_fetch: 'Studio: tải video mẫu',
     },
   },
   lane: {
