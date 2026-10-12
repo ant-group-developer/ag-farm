@@ -3,7 +3,7 @@
  */
 import { createServer } from 'node:http';
 import type { Server, IncomingMessage, ServerResponse } from 'node:http';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as os from 'node:os';
 import type { Capabilities } from '@ag-farm/protocol';
@@ -464,6 +464,122 @@ describe('runWorker - kinds', () => {
       });
       expect(heartbeatKinds[0]).toEqual(['scan.extract']);
       expect(claimKinds[0]).toEqual(['scan.extract']);
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 10_000);
+});
+
+describe('runWorker - self-update', () => {
+  it('a newer release: stops claiming, reports draining then installing, starts the updater task', async () => {
+    const tmpDir = makeTmpDir();
+    const updates: unknown[] = [];
+    let claimsAfterStart = 0;
+    let started: string | null = null;
+    const stopCtrl = new AbortController();
+
+    const { server, url } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const path = req.url ?? '';
+        const body = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString()) as { update?: unknown }) : {};
+        res.setHeader('Content-Type', 'application/json');
+        if (path.includes('heartbeat')) {
+          updates.push(body.update);
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path.includes('claim')) {
+          if (started) claimsAfterStart++;
+          res.writeHead(200); res.end(JSON.stringify({ job: null }));
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+
+    try {
+      const config = {
+        ...makeConfig(tmpDir, url),
+        updater_task: 'ag-farm-updater',
+        updater_dir: join(tmpDir, 'updater'),
+      };
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      const done = runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.9.0',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        stopSignal: stopCtrl.signal,
+        handlers: { 'scan.extract': async () => ({ manifest: null, summary: {} }) },
+        selfUpdate: { package: 'ag-scan-worker' },
+        selfUpdateTickMs: 50,
+        selfUpdateFirstCheckMs: 200,
+        selfUpdateDeps: {
+          me: async () => ({ auto_update: true, update_requested_at: null }),
+          latest: async () => '0.9.1',
+          startTask: async (name) => {
+            started = name;
+          },
+        },
+      });
+      const deadline = Date.now() + 5_000;
+      while (!started && Date.now() < deadline) await sleep(50);
+      await sleep(300);
+      stopCtrl.abort();
+      await done;
+
+      expect(started).toBe('ag-farm-updater');
+      expect(updates[0]).toEqual({ state: 'idle' });
+      const states = updates.map((u) => (u as { state: string }).state);
+      expect(states).toContain('draining');
+      expect(states).toContain('installing');
+      expect(claimsAfterStart).toBe(0);
+      const request = JSON.parse(readFileSync(join(tmpDir, 'updater', 'request-scan.json'), 'utf8')) as Record<string, unknown>;
+      expect(request).toMatchObject({ package: 'ag-scan-worker', from_version: '0.9.0', target_version: '0.9.1' });
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it('without updater_task in config: no update field, no self-update', async () => {
+    const tmpDir = makeTmpDir();
+    const bodies: Record<string, unknown>[] = [];
+    const stopCtrl = new AbortController();
+    const { server, url } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const path = req.url ?? '';
+        res.setHeader('Content-Type', 'application/json');
+        if (path.includes('heartbeat')) {
+          bodies.push(JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>);
+          stopCtrl.abort();
+          res.writeHead(200); res.end(heartbeatOk());
+        } else {
+          res.writeHead(200); res.end(JSON.stringify({ job: null }));
+        }
+      });
+    });
+    try {
+      const config = makeConfig(tmpDir, url);
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      let latestCalled = false;
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.9.0',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        stopSignal: stopCtrl.signal,
+        handlers: { 'scan.extract': async () => ({ manifest: null, summary: {} }) },
+        selfUpdate: { package: 'ag-scan-worker' },
+        selfUpdateDeps: { latest: async () => { latestCalled = true; return '9.9.9'; } },
+      });
+      expect(bodies[0]).not.toHaveProperty('update');
+      expect(latestCalled).toBe(false);
     } finally {
       await closeServer(server);
       rmSync(tmpDir, { recursive: true, force: true });

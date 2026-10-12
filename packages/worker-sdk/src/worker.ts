@@ -25,6 +25,17 @@ import { workerKinds } from './kinds';
 import { HubClient, LeaseLostError } from './hub-client';
 import type { Logger } from './logger';
 import { rootLogger } from './logger';
+import {
+  SelfUpdater,
+  UPDATE_CHECK_MINUTES_DEFAULT,
+  UPDATE_DRAIN_MINUTES_DEFAULT,
+  fetchLatestVersion,
+  readUpdateOutcome,
+  startScheduledTask,
+  updateRole,
+  writeUpdateRequest,
+} from './self-update';
+import type { SelfUpdaterDeps } from './self-update';
 import { SlotAllocator, loadMachineConfig } from './machine';
 import type { SlotHandle } from './machine';
 import { SignClient } from './sign-client';
@@ -107,6 +118,16 @@ export interface RunWorkerOptions {
   yieldPollMs?: number;
   /** Signal để dừng worker từ bên ngoài (không cần SIGTERM). */
   stopSignal?: AbortSignal;
+  /**
+   * Tự cập nhật: tên gói của worker trong `/dist/latest.json` (vd `ag-render-worker`). Chỉ chạy khi config có
+   * `updater_task` và `updater_dir` (máy cài bằng install.ps1); xem `self-update.ts`.
+   */
+  selfUpdate?: { package: string };
+  /** Thay phần gọi ra ngoài của tự cập nhật (tests). */
+  selfUpdateDeps?: Partial<SelfUpdaterDeps>;
+  /** Chu kỳ tick của tự cập nhật (ms, mặc định 10 s) và lần kiểm đầu. Dùng trong tests. */
+  selfUpdateTickMs?: number;
+  selfUpdateFirstCheckMs?: number;
 }
 
 // ---- Runner ----
@@ -169,34 +190,56 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
   process.once('SIGTERM', shutdown);
   options.stopSignal?.addEventListener('abort', shutdown, { once: true });
 
-  // Heartbeat loop
+  // Heartbeat
+  const sendHeartbeat = async (): Promise<void> => {
+    try {
+      const free = allocator.freeSlots();
+      const runningIds = [...activeJobs.keys()];
+      const res = await hub.heartbeat({
+        agent_version: version,
+        kinds: reportedKinds,
+        capabilities,
+        free_slots: free,
+        running_job_ids: runningIds,
+        // Chỉ máy tự cập nhật mới gửi: worker chạy tay vẫn nói chuyện được với hub chưa biết trường này.
+        ...(updater ? { update: updater.report } : {}),
+      });
+
+      if (res.status === 'disabled') {
+        claimEnabled = false;
+        log.info('Node disabled by hub');
+      } else {
+        claimEnabled = !config.schedule || isWithinSchedule(config.schedule ?? []);
+      }
+    } catch (err) {
+      log.warn('Heartbeat failed', { err: String(err) });
+    }
+  };
+
+  // Tự cập nhật (máy cài bằng install.ps1)
+  const updater = createUpdater();
   const heartbeatLoop = async (): Promise<void> => {
     while (running) {
-      try {
-        const free = allocator.freeSlots();
-        const runningIds = [...activeJobs.keys()];
-        const res = await hub.heartbeat({
-          agent_version: version,
-          kinds: reportedKinds,
-          capabilities,
-          free_slots: free,
-          running_job_ids: runningIds,
-        });
-
-        if (res.status === 'disabled') {
-          claimEnabled = false;
-          log.info('Node disabled by hub');
-        } else {
-          claimEnabled = !config.schedule || isWithinSchedule(config.schedule ?? []);
-        }
-      } catch (err) {
-        log.warn('Heartbeat failed', { err: String(err) });
-      }
+      await sendHeartbeat();
       await sleep(heartbeatMs);
     }
   };
 
   void heartbeatLoop();
+
+  if (updater) {
+    const tickMs = options.selfUpdateTickMs ?? 10_000;
+    void (async () => {
+      while (running) {
+        try {
+          await updater.tick(activeJobs.size);
+        } catch (err) {
+          log.warn('Update check failed', { err: String(err) });
+        }
+        await sleep(tickMs);
+      }
+    })();
+  }
 
   // Claim loop
   while (running || activeJobs.size > 0) {
@@ -210,8 +253,10 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     const withinSchedule = !config.schedule || isWithinSchedule(config.schedule ?? []);
     if (!withinSchedule) claimEnabled = false;
 
-    if (!claimEnabled) {
-      await sleep(3_000);
+    // Đang chờ việc chạy xong để cập nhật, hoặc đã giao cho updater: không nhận việc mới.
+    if (!claimEnabled || updater?.pausesClaims) {
+      if (updater?.pausesClaims) allocator.setWanted(false);
+      await sleep(updater?.pausesClaims ? 1_000 : 3_000);
       continue;
     }
 
@@ -278,6 +323,44 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
 
   allocator.setWanted(false);
   log.info('Worker stopped');
+
+  // ---- Tự cập nhật ----
+
+  function createUpdater(): SelfUpdater | null {
+    if (!options.selfUpdate) return null;
+    if (!config.updater_task || !config.updater_dir) {
+      log.info('Self-update off: config has no updater_task/updater_dir (install with install.ps1 to turn it on)');
+      return null;
+    }
+    const packageName = options.selfUpdate.package;
+    const role = updateRole(packageName);
+    const dir = config.updater_dir;
+    const deps: SelfUpdaterDeps = {
+      me: () => hub.me(),
+      latest: () => fetchLatestVersion(config.hub_url, packageName),
+      startTask: startScheduledTask,
+      writeRequest: (req) => writeUpdateRequest(dir, role, req),
+      now: () => Date.now(),
+      random: () => Math.random(),
+      ...options.selfUpdateDeps,
+    };
+    const u = new SelfUpdater({
+      packageName,
+      version,
+      updaterTask: config.updater_task,
+      updaterDir: dir,
+      checkMs: (config.update_check_minutes ?? UPDATE_CHECK_MINUTES_DEFAULT) * 60_000,
+      drainMs: (config.update_drain_minutes ?? UPDATE_DRAIN_MINUTES_DEFAULT) * 60_000,
+      ...(options.selfUpdateFirstCheckMs !== undefined ? { firstCheckMs: options.selfUpdateFirstCheckMs } : {}),
+      log: log.child({ part: 'update' }),
+      deps,
+      onChange: () => void sendHeartbeat(),
+    });
+    const outcome = readUpdateOutcome(dir, role);
+    u.init(outcome);
+    log.info('Self-update on', { package: packageName, task: config.updater_task, last: outcome?.state ?? null });
+    return u;
+  }
 
   // ---- Chờ slot cho job đã nhận ----
 

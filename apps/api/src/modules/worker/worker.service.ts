@@ -76,12 +76,17 @@ export class WorkerService {
       agent_version: fresh.agentVersion ?? null,
       last_seen_at: fresh.lastSeenAt ? fresh.lastSeenAt.toISOString() : null,
       ollama_models: ollamaModels(this.config.get<string>('FARM_OLLAMA_MODELS')),
+      // Worker tự cập nhật: admin cho phép không, và lần bấm "Cập nhật ngay" gần nhất.
+      auto_update: fresh.autoUpdate,
+      update_requested_at: fresh.updateRequestedAt ? fresh.updateRequestedAt.toISOString() : null,
     };
   }
 
   async heartbeat(node: FarmNodeEntity, req: HeartbeatRequest): Promise<HeartbeatResponse> {
     // Chỉ cập nhật `kinds` (kinds báo cáo) — không ghi đè `blocked_kinds` (do admin chỉnh).
+    // Trạng thái tự cập nhật chỉ ghi khi worker gửi (worker cũ không gửi: giữ giá trị cũ, thường là null).
     await this.nodeRepo.update(node.id, {
+      ...(req.update ? { updateStatus: req.update, updateStatusAt: new Date() } : {}),
       agentVersion: req.agent_version,
       kinds: req.kinds,
       capabilities: req.capabilities,

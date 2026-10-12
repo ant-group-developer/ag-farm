@@ -1,5 +1,5 @@
 import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
-import type { Capabilities, Slots } from '@ag-farm/protocol';
+import type { Capabilities, Slots, WorkerUpdateStatus } from '@ag-farm/protocol';
 
 /** Máy worker đã đăng ký. */
 @Entity('farm_nodes')
@@ -80,6 +80,21 @@ export class FarmNodeEntity {
 
   @Column({ name: 'agent_version', type: 'text', nullable: true })
   agentVersion!: string | null;
+
+  /** Máy tự lên bản mới khi phát hành (worker đọc qua `GET /v1/worker/me`). */
+  @Column({ name: 'auto_update', type: 'boolean', default: true })
+  autoUpdate!: boolean;
+
+  /** Admin bấm "Cập nhật ngay": worker cập nhật ở lần hỏi kế tiếp (dù `auto_update` tắt). */
+  @Column({ name: 'update_requested_at', type: 'timestamptz', nullable: true })
+  updateRequestedAt!: Date | null;
+
+  /** Trạng thái tự cập nhật ở heartbeat gần nhất có trường `update`. */
+  @Column({ name: 'update_status', type: 'jsonb', nullable: true })
+  updateStatus!: WorkerUpdateStatus | null;
+
+  @Column({ name: 'update_status_at', type: 'timestamptz', nullable: true })
+  updateStatusAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

@@ -70,4 +70,24 @@ Hub giao cho máy các loại nó báo trừ các loại admin chặn ở máy �
 `allowed_kinds` (danh sách cho phép) đã bỏ: migration `1900000000000` chuyển thành chặn = loại đã báo − loại được phép,
 và PATCH có `allowed_kinds` trả 400.
 
+### Tự cập nhật worker
+
+Máy cài bằng `install.ps1` có `updater_task`/`updater_dir` trong config.yaml và task `ag-farm-updater` (SYSTEM). Worker
+(`SelfUpdater` của worker-sdk, gói khai `selfUpdate: { package }`):
+
+1. mỗi `update_check_minutes` (mặc định 15, lệch ±20 %) đọc `/dist/latest.json` (`ReleaseManifest`) và so bản của gói
+   mình (`compareVersions`); mỗi phút hỏi `GET /v1/worker/me`: `auto_update` (tuỳ chọn, mặc định bật) và
+   `update_requested_at` (admin bấm "Cập nhật ngay": kiểm ngay, cập nhật cả khi `auto_update` tắt, bỏ nếu cũ hơn 1 giờ);
+2. có bản mới hơn và được phép: ngừng claim, chờ job đang chạy xong (tối đa `update_drain_minutes`, mặc định 30);
+3. ghi `<updater_dir>/request-<role>.json` rồi `schtasks /Run /TN ag-farm-updater`. Task dừng worker, cài như lệnh cập
+   nhật (giữ `app.prev`, chạy setup, ghi config), bản mới không heartbeat đúng phiên bản trong 3 phút thì trả `app.prev`
+   và `config.yaml.bak`. Kết quả ở `<updater_dir>/result-<role>.json`; worker đọc lúc khởi động. Task cũng chạy 03:00
+   mỗi đêm (dự phòng: chỉ vai trò có bản mới, hub cho phép, bản đó chưa từng hỏng trên máy).
+
+Heartbeat có `update` (tuỳ chọn; `WorkerUpdateStatus`: `state` `idle|draining|installing|failed`, `target_version`,
+`message`, `since`). Worker chỉ gửi khi tự cập nhật đang bật; hub lưu ở `farm_nodes.update_status`/`update_status_at`
+(heartbeat không có trường này giữ giá trị cũ). Hub build trước khi có trường này từ chối heartbeat có nó: **lên hub
+trước**. Bản đã hỏng không tự thử lại (mỗi lần thử là một lần ngừng nhận việc); "Cập nhật ngay" thử lại. Máy đang chạy
+render ≤ 0.8.1 / scan ≤ 0.3.5 chưa có bộ cập nhật: chạy lệnh cập nhật của `install.ps1` bằng tay một lần.
+
 Kết quả job (`JobResult`) chỉ gồm đường dẫn manifest và vài con số; dữ liệu đầy đủ nằm trong manifest ở bucket của chủ job.

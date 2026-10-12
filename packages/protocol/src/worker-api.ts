@@ -9,12 +9,39 @@ import {
   OwnerIdSchema,
 } from './common';
 
+/**
+ * Worker tự cập nhật đang ở đâu:
+ * - `idle`: không cập nhật (message: kết quả lần cập nhật trước, nếu có);
+ * - `draining`: có bản mới, ngừng nhận việc, chờ việc đang chạy xong;
+ * - `installing`: đã giao cho task `ag-farm-updater` (worker sắp bị dừng);
+ * - `failed`: lần cập nhật lên `target_version` hỏng (đã quay về bản cũ, hoặc không chạy được updater).
+ */
+export const WORKER_UPDATE_STATES = ['idle', 'draining', 'installing', 'failed'] as const;
+export const WorkerUpdateStateSchema = z.enum(WORKER_UPDATE_STATES);
+export type WorkerUpdateState = z.infer<typeof WorkerUpdateStateSchema>;
+
+export const WorkerUpdateStatusSchema = z.strictObject({
+  state: WorkerUpdateStateSchema,
+  /** Bản đang cập nhật lên (draining/installing/failed) hoặc bản vừa lên (idle sau một lần cập nhật). */
+  target_version: z.string().min(1).max(60).optional(),
+  /** Câu ngắn cho admin: lý do lỗi (kèm dòng cuối setup.log), "đã lên 0.9.1"... */
+  message: z.string().max(500).optional(),
+  /** Lúc vào trạng thái này. */
+  since: IsoDateTimeSchema.optional(),
+});
+export type WorkerUpdateStatus = z.infer<typeof WorkerUpdateStatusSchema>;
+
 export const HeartbeatRequestSchema = z.strictObject({
   agent_version: z.string().min(1).max(60),
   kinds: z.array(JobTypeSchema).min(1),
   capabilities: CapabilitiesSchema,
   free_slots: SlotsSchema,
   running_job_ids: z.array(z.uuid()).max(64),
+  /**
+   * Trạng thái tự cập nhật (tuỳ chọn: worker cũ không gửi). Hub build trước khi có trường này từ chối heartbeat có
+   * nó (`strictObject`): lên hub trước rồi mới lên worker.
+   */
+  update: WorkerUpdateStatusSchema.optional(),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequestSchema>;
 

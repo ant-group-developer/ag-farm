@@ -27,6 +27,10 @@ describe('admin views', () => {
       schedule: null,
       lastSeenAt: at,
       agentVersion: '0.1.0',
+      autoUpdate: true,
+      updateRequestedAt: null,
+      updateStatus: null,
+      updateStatusAt: null,
       createdAt: at,
       updatedAt: at,
     } as FarmNodeEntity;

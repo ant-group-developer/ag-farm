@@ -26,6 +26,7 @@ import { StudioTranscribe1600000000000 } from './database/migrations/16000000000
 import { StatsFinishedIndex1700000000000 } from './database/migrations/1700000000000-stats-finished-index';
 import { NodePriorityOrder1800000000000 } from './database/migrations/1800000000000-node-priority-order';
 import { NodeBlockedKinds1900000000000 } from './database/migrations/1900000000000-node-blocked-kinds';
+import { NodeSelfUpdate2000000000000 } from './database/migrations/2000000000000-node-self-update';
 import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
 import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
@@ -80,6 +81,7 @@ const MIGRATIONS = [
   StatsFinishedIndex1700000000000,
   NodePriorityOrder1800000000000,
   NodeBlockedKinds1900000000000,
+  NodeSelfUpdate2000000000000,
 ];
 
 /** Fake AccountMeClient → luôn trả ADMIN */
@@ -1982,5 +1984,95 @@ describe('node priority when claiming', () => {
     expect(ids.length).toBeLessThanOrEqual(8);
     const leased: { n: string }[] = await ds.query(`SELECT COUNT(*) AS n FROM farm_jobs WHERE status = 'leased'`);
     expect(Number(leased[0]!.n)).toBe(ids.length);
+  });
+});
+
+// ============================================================
+// Worker tự cập nhật
+// ============================================================
+
+describe('worker self-update', () => {
+  let app: INestApplication;
+  let ds: DataSource;
+
+  const HEARTBEAT = {
+    agent_version: '0.9.0',
+    kinds: ['studio.render_preview'],
+    capabilities: { os: 'windows', cpu_cores: 8, ram_mb: 16384, gpus: [], engines: { ffmpeg: '7.0', ollama_models: [], python: null } },
+    free_slots: { cpu: 1, gpu: 0 },
+    running_job_ids: [],
+  };
+
+  beforeAll(async () => {
+    app = await buildAdminApp();
+    ds = getDs(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await ds.query('TRUNCATE TABLE farm_jobs, farm_nodes, farm_owners, farm_enrollments RESTART IDENTITY CASCADE');
+  });
+
+  function heartbeat(token: string, extra: Record<string, unknown> = {}) {
+    return request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({ ...HEARTBEAT, ...extra });
+  }
+
+  it('worker/me: auto_update on by default, no update requested', async () => {
+    const { token } = await createNode(ds);
+    const me = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${token}`);
+    expect(me.status).toBe(200);
+    expect(me.body.data.auto_update).toBe(true);
+    expect(me.body.data.update_requested_at).toBeNull();
+  });
+
+  it('worker/me: says what the admin set', async () => {
+    const { node, token } = await createNode(ds);
+    await ds.query(`UPDATE farm_nodes SET auto_update = false, update_requested_at = '2026-10-12T10:00:00Z' WHERE id = $1`, [node.id]);
+    const me = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${token}`);
+    expect(me.body.data.auto_update).toBe(false);
+    expect(me.body.data.update_requested_at).toBe('2026-10-12T10:00:00.000Z');
+  });
+
+  it('a heartbeat with update is stored; one without (older worker) keeps it', async () => {
+    const { node, token } = await createNode(ds);
+    const update = { state: 'draining', target_version: '0.9.1', since: '2026-10-12T10:00:00.000Z' };
+    expect((await heartbeat(token, { update })).status).toBe(200);
+    let row = await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id });
+    expect(row.updateStatus).toEqual(update);
+    expect(row.updateStatusAt).toBeInstanceOf(Date);
+
+    expect((await heartbeat(token)).status).toBe(200);
+    row = await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id });
+    expect(row.updateStatus).toEqual(update);
+    expect(row.agentVersion).toBe('0.9.0');
+  });
+
+  it('a heartbeat with an unknown update state is refused', async () => {
+    const { token } = await createNode(ds);
+    expect((await heartbeat(token, { update: { state: 'sleeping' } })).status).toBe(400);
+  });
+
+  it('migration down/up keeps the other node columns', async () => {
+    const { node } = await createNode(ds);
+    const runner = ds.createQueryRunner();
+    try {
+      const m = new NodeSelfUpdate2000000000000();
+      await m.down(runner);
+      const cols: { column_name: string }[] = await runner.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_name = 'farm_nodes' AND column_name IN ('auto_update', 'update_requested_at', 'update_status', 'update_status_at')`,
+      );
+      expect(cols).toHaveLength(0);
+      await m.up(runner);
+      const rows: { auto_update: boolean }[] = await runner.query(`SELECT auto_update FROM farm_nodes WHERE id = $1`, [node.id]);
+      expect(rows[0]!.auto_update).toBe(true);
+    } finally {
+      await runner.release();
+    }
   });
 });

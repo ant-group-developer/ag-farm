@@ -9,6 +9,7 @@ export * from './hub-client';
 export * from './kinds';
 export * from './logger';
 export * from './machine';
+export * from './self-update';
 export * from './sign-client';
 export * from './transfer';
 export * from './worker';
