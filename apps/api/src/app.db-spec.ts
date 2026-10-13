@@ -738,6 +738,56 @@ describe('ag-farm DB integration', () => {
     expect(bad.status).toBe(400);
   });
 
+  // ---- Nâng một job đang chờ ----
+  it('raises a queued job of its own owner so the next claim takes it, and refuses one that is not queued', async () => {
+    const { key } = await createOwner(ds, 'ag-go', ['scan.prep']);
+    const { key: otherKey } = await createOwner(ds, 'other', ['scan.prep']);
+    const { token } = await createNode(ds, ['scan.prep']);
+    const submit = (ownerKey: string, correlation: string) =>
+      request(app.getHttpServer())
+        .post('/v1/owner/jobs')
+        .set('Authorization', `Owner ${ownerKey}`)
+        .send({ type: 'scan.prep', priority: -10, correlation_id: correlation, group_key: 'backfill:1', payload: { asset_id: randomUUID(), source: 'source' } });
+    const first = (await submit(key, 'prep-1')).body.data.job;
+    const second = (await submit(key, 'prep-2')).body.data.job;
+    const others = (await submit(otherKey, 'prep-o')).body.data.job;
+    expect(second).toMatchObject({ lane: 'batch', priority: -10, status: 'queued' });
+
+    const raise = (id: string, body: object, ownerKey = key) =>
+      request(app.getHttpServer()).post(`/v1/owner/jobs/${id}/raise`).set('Authorization', `Owner ${ownerKey}`).send(body);
+
+    // Chỉ đổi priority: lane giữ nguyên
+    const quiet = await raise(first.id, { priority: 5 });
+    expect(quiet.status).toBe(200);
+    expect(quiet.body.data).toMatchObject({ id: first.id, lane: 'batch', priority: 5, status: 'queued' });
+
+    const raised = await raise(second.id, { lane: 'interactive', priority: 50 });
+    expect(raised.status).toBe(200);
+    expect(raised.body.data).toMatchObject({ id: second.id, lane: 'interactive', priority: 50, status: 'queued' });
+
+    // Job của chủ khác, id lạ, id sai dạng: 404; body sai: 400
+    expect((await raise(others.id, { priority: 100 })).status).toBe(404);
+    expect((await raise(randomUUID(), { priority: 100 })).status).toBe(404);
+    expect((await raise('not-a-uuid', { priority: 100 })).status).toBe(404);
+    expect((await raise(first.id, { priority: 101 })).status).toBe(400);
+    expect((await raise(first.id, { lane: 'urgent', priority: 1 })).status).toBe(400);
+
+    // Lần claim kế tiếp lấy job vừa nâng, dù nó vào hàng sau
+    const claim = await request(app.getHttpServer())
+      .post('/v1/worker/claim')
+      .set('Authorization', `Node ${token}`)
+      .send({ kinds: ['scan.prep'], free_slots: { cpu: 1, gpu: 0 }, lanes: ['interactive', 'batch'] });
+    expect(claim.body.data.job).toMatchObject({ id: second.id, lane: 'interactive' });
+
+    // Job đã chạy thì không nâng được nữa
+    const late = await raise(second.id, { priority: 100 });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('job_not_queued');
+    const stored = await ds.getRepository(FarmJobEntity).findOneByOrFail({ id: second.id });
+    expect(stored).toMatchObject({ status: 'leased', priority: 50 });
+    expect((await ds.getRepository(FarmJobEntity).findOneByOrFail({ id: others.id })).priority).toBe(-10);
+  });
+
   // ---- Mã cài đặt máy worker ----
   it('enrollment code gives one token per role, once, and re-enrolling a machine rotates its tokens', async () => {
     const enroll = app.get(EnrollService);

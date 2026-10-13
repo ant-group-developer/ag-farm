@@ -20,6 +20,8 @@ import {
   scanPrepSheetPath,
   AssetDescriptionSchema,
   JobControlRequestSchema,
+  RaiseJobRequestSchema,
+  OWNER_API,
   SCAN_AI_MAX_KEYFRAMES,
   signTicket,
   SignRequestSchema,
@@ -533,6 +535,15 @@ describe('payloads', () => {
       };
       expect(StudioTranscribePayloadSchema.parse(payload)).toEqual(payload);
     });
+  });
+
+  it('raises a queued job: priority -100..100, lane optional, nothing else', () => {
+    expect(RaiseJobRequestSchema.parse({ priority: 50 })).toEqual({ priority: 50 });
+    expect(RaiseJobRequestSchema.parse({ lane: 'interactive', priority: 100 })).toEqual({ lane: 'interactive', priority: 100 });
+    for (const bad of [{}, { priority: 101 }, { priority: -101 }, { priority: 1.5 }, { lane: 'urgent', priority: 1 }, { priority: 1, status: 'queued' }]) {
+      expect(RaiseJobRequestSchema.safeParse(bad).success).toBe(false);
+    }
+    expect(OWNER_API.raise('abc')).toBe('/v1/owner/jobs/abc/raise');
   });
 
   it('StudioExportPremierePayloadSchema: media_names defaults to {} and keeps given names', () => {

@@ -165,6 +165,26 @@ describe('FarmOwnerClient', () => {
     }
   });
 
+  it('raiseJob calls POST /v1/owner/jobs/:id/raise with the lane and priority', async () => {
+    let receivedPath = '';
+    let receivedBody = '';
+    const { url, close } = await makeServer((req, res) => {
+      receivedPath = req.url ?? '';
+      req.on('data', (c: Buffer) => (receivedBody += c.toString()));
+      req.on('end', () => jsonRes(res, 200, { ...JOB_VIEW, lane: 'interactive', priority: 50 }));
+    });
+    try {
+      const client = new FarmOwnerClient({ baseUrl: url, ownerKey: 'k' });
+      const job = await client.raiseJob(JOB_VIEW.id, { lane: 'interactive', priority: 50 });
+      expect(job).toMatchObject({ lane: 'interactive', priority: 50 });
+      expect(receivedPath).toBe(`/v1/owner/jobs/${JOB_VIEW.id}/raise`);
+      expect(JSON.parse(receivedBody)).toEqual({ lane: 'interactive', priority: 50 });
+      await expect(client.raiseJob(JOB_VIEW.id, { priority: 101 })).rejects.toThrow();
+    } finally {
+      await close();
+    }
+  });
+
   it('listNodes calls GET /v1/owner/nodes', async () => {
     const node = {
       id: '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b', name: 'render-01', online: true, kinds: ['studio.render_final'],
