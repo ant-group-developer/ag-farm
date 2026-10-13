@@ -749,7 +749,7 @@ describe('ag-farm DB integration', () => {
       ['scan', 'lan-4060ti-scan', 'ag-scan-worker'],
       ['render', 'lan-4060ti-render', 'ag-render-worker'],
     ]);
-    expect(nodes[0]!.kinds).toEqual(['scan.extract', 'scan.ai']);
+    expect(nodes[0]!.kinds).toEqual(['scan.extract', 'scan.ai', 'scan.prep']);
     // Bộ cài tải đúng model chủ job dùng
     expect(res.body.data.ollama_models).toEqual(['qwen2.5vl:3b', 'qwen2.5vl:7b']);
 

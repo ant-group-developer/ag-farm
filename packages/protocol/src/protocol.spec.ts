@@ -10,6 +10,14 @@ import {
   RelativePathSchema,
   ScanAiPayloadSchema,
   ScanExtractPayloadSchema,
+  ScanPrepManifestSchema,
+  ScanPrepParamsSchema,
+  ScanPrepPayloadSchema,
+  SCAN_PREP_AUDIO_PATH,
+  SCAN_PREP_MANIFEST_PATH,
+  SCAN_PREP_MANIFEST_SCHEMA,
+  scanPrepFramePath,
+  scanPrepSheetPath,
   AssetDescriptionSchema,
   JobControlRequestSchema,
   SCAN_AI_MAX_KEYFRAMES,
@@ -203,6 +211,13 @@ describe('requirements', () => {
 
   it('studio.transcribe is a studio job on a GPU slot', () => {
     expect(JOB_TYPE_SPECS['studio.transcribe']).toMatchObject({ owner: 'studio', lane: 'interactive', slot: 'gpu' });
+  });
+
+  it('scan.prep is an ag-go batch job on a CPU slot, run by scan nodes', () => {
+    expect(JOB_TYPE_SPECS['scan.prep']).toMatchObject({ owner: 'ag-go', lane: 'batch', slot: 'cpu', baseRequirements: {} });
+    expect(mergeRequirements('scan.prep', {})).toEqual({});
+    expect(meetsRequirements(cpuBox, mergeRequirements('scan.prep', {}))).toBe(true);
+    expect([...ROLE_KINDS.scan].sort()).toEqual(['scan.ai', 'scan.extract', 'scan.prep']);
   });
 
   it('a render node takes every studio job type', () => {
@@ -442,6 +457,81 @@ describe('payloads', () => {
       expect([...REFERENCE_FETCH_RETRYABLE_CODES]).toEqual(['network', 'timeout']);
       const error = { code: 'youtube_blocked', message: "Sign in to confirm you're not a bot", retryable: false };
       expect(JobErrorSchema.parse(error)).toEqual(error);
+    });
+  });
+
+  describe('scan.prep', () => {
+    const assetId = randomUUID();
+
+    it('fills the rules Studio cuts by: 0.3, 1 s to 20 s, 480 px frames, 4 x 16 sheets, audio', () => {
+      const p = ScanPrepPayloadSchema.parse({ asset_id: assetId, source: 'source' });
+      expect(p).toEqual({
+        asset_id: assetId,
+        source: 'source',
+        params: {
+          scene_threshold: 0.3, min_shot_s: 1, max_shot_s: 20, frame_width: 480, sheet_cols: 4, sheet_shots: 16, audio: true,
+        },
+      });
+      expect(ScanPrepPayloadSchema.parse({ asset_id: assetId, source: 'source', params: { audio: false } }).params).toEqual({
+        ...p.params, audio: false,
+      });
+      expect(JOB_TYPE_SPECS['scan.prep'].payload.safeParse({ asset_id: assetId, source: 'source' }).success).toBe(true);
+    });
+
+    it('keeps each param in its range and refuses unknown fields', () => {
+      const bad = [
+        { scene_threshold: 1.5 }, { min_shot_s: 0 }, { max_shot_s: -1 }, { frame_width: 32 }, { frame_width: 480.5 },
+        { frame_width: 4000 }, { sheet_cols: 0 }, { sheet_cols: 9 }, { sheet_shots: 65 }, { audio: 'yes' }, { extra: 1 },
+      ];
+      for (const params of bad) expect(ScanPrepParamsSchema.safeParse(params).success).toBe(false);
+      expect(ScanPrepPayloadSchema.safeParse({ asset_id: 'not-a-uuid', source: 'source' }).success).toBe(false);
+      expect(ScanPrepPayloadSchema.safeParse({ asset_id: assetId, source: '../x' }).success).toBe(false);
+      expect(ScanPrepPayloadSchema.safeParse({ asset_id: assetId, source: 'source', asset: {} }).success).toBe(false);
+    });
+
+    it('names its outputs frames/NNN.jpg, sheets/NN.jpg, audio.wav and prep.json', () => {
+      expect([scanPrepFramePath(1), scanPrepFramePath(42), scanPrepSheetPath(1), scanPrepSheetPath(12)]).toEqual([
+        'frames/001.jpg', 'frames/042.jpg', 'sheets/01.jpg', 'sheets/12.jpg',
+      ]);
+      expect([SCAN_PREP_MANIFEST_PATH, SCAN_PREP_AUDIO_PATH, SCAN_PREP_MANIFEST_SCHEMA]).toEqual([
+        'prep.json', 'audio.wav', 'ag.scan.prep/v1',
+      ]);
+      for (const path of [scanPrepFramePath(1), scanPrepSheetPath(1), SCAN_PREP_AUDIO_PATH, SCAN_PREP_MANIFEST_PATH]) {
+        expect(RelativePathSchema.safeParse(path).success).toBe(true);
+      }
+    });
+
+    it('reads a prep.json with and without sound', () => {
+      const manifest = {
+        schema: 'ag.scan.prep/v1',
+        asset_id: assetId,
+        media: { duration_s: 31.5, width: 854, height: 480, fps: 29.97, has_audio: true },
+        scene: { threshold: 0.3, min_shot_s: 1, max_shot_s: 20 },
+        shots: [
+          { n: 1, in: 0, out: 12.4, frame: 'frames/001.jpg' },
+          { n: 2, in: 12.4, out: 31.5, frame: 'frames/002.jpg' },
+        ],
+        sheets: [{ file: 'sheets/01.jpg', shots: [1, 2] }],
+        audio: 'audio.wav',
+        tools: { ffmpeg: '7.1', worker_version: '0.5.0' },
+      };
+      expect(ScanPrepManifestSchema.parse(manifest)).toEqual(manifest);
+      const { tools: _tools, ...withoutTools } = manifest;
+      const silent = { ...withoutTools, media: { ...manifest.media, has_audio: false, fps: null }, audio: null };
+      expect(ScanPrepManifestSchema.parse(silent)).toEqual(silent);
+      expect(ScanPrepManifestSchema.safeParse({ ...manifest, schema: 'ag.scan.prep/v2' }).success).toBe(false);
+      expect(ScanPrepManifestSchema.safeParse({ ...manifest, shots: [{ n: 0, in: 0, out: 1, frame: 'frames/000.jpg' }] }).success).toBe(false);
+      expect(ScanPrepManifestSchema.safeParse({ ...manifest, transcript: [] }).success).toBe(false);
+    });
+
+    it('ag-go transcribes the prep audio with the studio.transcribe it already has', () => {
+      const payload = {
+        production_id: randomUUID(),
+        model: 'large-v3',
+        align_words: true,
+        sources: [{ source_id: assetId.replace(/-/g, ''), audio: `artifact:${SCAN_PREP_AUDIO_PATH}`, language: null }],
+      };
+      expect(StudioTranscribePayloadSchema.parse(payload)).toEqual(payload);
     });
   });
 

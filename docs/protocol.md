@@ -50,6 +50,7 @@ Worker gửi danh sách thao tác, chủ job trả kết quả theo đúng thứ
 |---|---|---|---|---|
 | `scan.extract` | `ag-go` | batch | cpu | `ScanExtractPayload` → `extract.json` (`ExtractManifest`) |
 | `scan.ai` | `ag-go` | batch | gpu | `ScanAiPayload` (≤ 30 đoạn) → `ai-<chunk>.json` (`AiManifest`) |
+| `scan.prep` | `ag-go` | batch | cpu | `ScanPrepPayload` → `prep.json` (`ScanPrepManifest`) + `frames/NNN.jpg`, `sheets/NN.jpg`, `audio.wav` |
 | `studio.tts` | `studio` | interactive | gpu | `StudioTtsPayload` → `tts.json` (`TtsManifest`) + `tts/<line_id>.wav` |
 | `studio.render_preview` | `studio` | interactive | cpu | `StudioRenderPayload` → `render.json` (`RenderManifest`) + video |
 | `studio.render_final` | `studio` | interactive | cpu | `StudioRenderPayload` → `render.json` (`RenderManifest`) + video, thumbnail |
@@ -58,6 +59,21 @@ Worker gửi danh sách thao tác, chủ job trả kết quả theo đúng thứ
 | `studio.reference_fetch` | `studio` | interactive | cpu | `StudioReferenceFetchPayload` → video ở `output`, không manifest; `result.summary` là `StudioReferenceFetchResult` |
 
 `studio.tts` và `studio.transcribe` cần máy khai `gpu` và `python` (worker dò `import torch` bằng `python_bin` của nó).
+
+### `scan.prep`: đầu vào cho Studio chuẩn bị sẵn ở ag-go
+
+Mỗi footage chuẩn bị một lần ở ag-go, Studio chỉ tải kết quả về (không tải video, không cắt cảnh nữa).
+
+- Payload: `asset_id`, `source` (tên input; ag-go ký GET của bản sạch nhỏ nhất), `params` (`scene_threshold` 0,3,
+  `min_shot_s` 1, `max_shot_s` 20, `frame_width` 480, `sheet_cols` 4, `sheet_shots` 16, `audio` true).
+- Cảnh theo đúng luật của Studio: `select='gt(scene\,T)',showinfo` trên cả video (không giới hạn thời gian dò, timeout
+  theo thời lượng), mốc cắt làm tròn lưới 0,1 s, rồi `buildShots` (gộp cảnh < `min_shot_s` vào cảnh trước, cảnh đầu
+  gộp vào cảnh sau; chia đều cảnh > `max_shot_s`; `in`/`out` làm tròn 3 chữ số).
+- Đầu ra: `frames/NNN.jpg` (pad3, từ 1; khung tại `round(((in+out)/2)*1000)/1000`, `scale=<frame_width>:-2`),
+  `sheets/NN.jpg` (pad2, từ 1; `sheet_shots` cảnh mỗi tờ theo thứ tự, ffmpeg `tile=<cols>x<ceil(n/cols)>`),
+  `audio.wav` (16 kHz mono pcm_s16le; chỉ khi có tiếng và `params.audio`), `prep.json` (`ScanPrepManifest`,
+  schema `ag.scan.prep/v1`). ag-go gửi tiếp `studio.transcribe` với `audio: 'artifact:audio.wav'` (owner `ag-go` được
+  phép cả hai loại).
 
 ### `studio.reference_fetch`: video YouTube mẫu tải qua máy farm
 

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { JobType, Lane } from '../common';
 import { RequirementsSchema, type Requirements } from '../capabilities';
 import { ScanAiPayloadSchema, ScanExtractPayloadSchema } from './scan';
+import { ScanPrepPayloadSchema } from './scan-prep';
 import {
   StudioRenderPayloadSchema,
   StudioTtsPayloadSchema,
@@ -37,6 +38,13 @@ export const JOB_TYPE_SPECS: Record<JobType, JobTypeSpec> = {
     slot: 'gpu',
     payload: ScanAiPayloadSchema,
     baseRequirements: { gpu: true },
+  },
+  'scan.prep': {
+    owner: 'ag-go',
+    lane: 'batch',
+    slot: 'cpu',
+    payload: ScanPrepPayloadSchema,
+    baseRequirements: {},
   },
   'studio.tts': {
     owner: 'studio',

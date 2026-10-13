@@ -65,6 +65,7 @@ export const en: LocaleMessages = {
     scan: {
       extract: 'Scan: extract frames',
       ai: 'Scan: AI description',
+      prep: 'Scan: prepare for Studio',
     },
     studio: {
       tts: 'Studio: voice-over (TTS)',

@@ -5,6 +5,7 @@ export * from './enroll';
 export * from './envelope';
 export * from './jobs/registry';
 export * from './jobs/scan';
+export * from './jobs/scan-prep';
 export * from './jobs/studio';
 export * from './metrics';
 export * from './owner-api';

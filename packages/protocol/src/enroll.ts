@@ -11,7 +11,7 @@ export type WorkerRole = z.infer<typeof WorkerRoleSchema>;
 
 /** Loại job mỗi vai trò nhận; cũng là tên gói phát hành cài cho vai trò đó. */
 export const ROLE_KINDS = {
-  scan: ['scan.extract', 'scan.ai'],
+  scan: ['scan.extract', 'scan.ai', 'scan.prep'],
   render: ['studio.render_preview', 'studio.render_final', 'studio.tts', 'studio.export_premiere', 'studio.transcribe', 'studio.reference_fetch'],
 } as const satisfies Record<WorkerRole, readonly z.infer<typeof JobTypeSchema>[]>;
 
