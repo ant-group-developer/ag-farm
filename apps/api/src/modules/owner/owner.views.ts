@@ -1,5 +1,6 @@
 import type { OwnerNodeView } from '@ag-farm/protocol';
 import type { FarmNodeEntity } from '../../database/entities/farm-node.entity';
+import { effectiveKinds } from '../worker/node-priority';
 
 /**
  * A node as a job owner sees it (`GET /v1/owner/nodes`), or `null` when it is disabled or takes none of the owner's
@@ -7,7 +8,7 @@ import type { FarmNodeEntity } from '../../database/entities/farm-node.entity';
  */
 export function toOwnerNodeView(node: FarmNodeEntity, online: boolean, ownerTypes: readonly string[]): OwnerNodeView | null {
   if (node.status !== 'active') return null;
-  const takes = node.allowedKinds != null ? node.kinds.filter((k) => node.allowedKinds!.includes(k)) : node.kinds;
+  const takes = effectiveKinds(node.kinds, node.blockedKinds);
   const kinds = takes.filter((k) => ownerTypes.includes(k));
   if (kinds.length === 0) return null;
   const gpus = Array.isArray(node.gpus) ? (node.gpus as { name?: unknown; vram_mb?: unknown; nvenc?: unknown }[]) : [];

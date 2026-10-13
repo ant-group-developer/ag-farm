@@ -35,8 +35,11 @@ export const WorkerConfigSchema = z
     token_file: z.string().min(1).optional(),
     /** Tên hiển thị của node này. */
     name: z.string().min(1).max(100),
-    /** Loại job node này nhận. */
-    kinds: z.array(JobTypeSchema).min(1),
+    /**
+     * Loại job node này nhận (tuỳ chọn). Không khai: worker nhận mọi loại có handler mà máy chạy được
+     * (`workerKinds`). Khai: danh sách ép, giao với các handler của worker.
+     */
+    kinds: z.array(JobTypeSchema).min(1).optional(),
     /** Thư mục làm việc tạm cho mỗi job. */
     work_dir: z.string().min(1),
     cache: z.object({
@@ -50,6 +53,21 @@ export const WorkerConfigSchema = z
      * Ví dụ: [{days:[1,2,3,4,5], from:'19:00', to:'07:00'}]
      */
     schedule: z.array(ScheduleWindowSchema).optional(),
+    /**
+     * Tự cập nhật (install.ps1 ghi): task Windows chạy bộ cập nhật (`ag-farm-updater`) và thư mục của nó (worker ghi
+     * yêu cầu, đọc kết quả lần trước). Thiếu một trong hai: worker không tự cập nhật (máy dev, Linux).
+     */
+    updater_task: z.string().min(1).max(200).optional(),
+    updater_dir: z.string().min(1).optional(),
+    /** Mỗi chừng này phút xem hub có bản mới không (mặc định 15). */
+    update_check_minutes: z.number().positive().max(1440).optional(),
+    /** Có bản mới: chờ việc đang chạy xong tối đa chừng này phút rồi cập nhật (mặc định 30). */
+    update_drain_minutes: z.number().nonnegative().max(1440).optional(),
+    /**
+     * Đo tình trạng máy (CPU, RAM, ổ, mạng, GPU) mỗi 15 s và gửi kèm heartbeat. Mặc định bật; `false` thì không đo,
+     * không gửi (hub chưa biết trường `metrics` cũng tự bị bỏ, xem worker.ts).
+     */
+    metrics: z.boolean().optional(),
     /** Passthrough: các trường tuỳ worker, ví dụ ollama_url. */
     extra: z.record(z.string(), z.unknown()).optional(),
   })

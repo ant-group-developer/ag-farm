@@ -7,7 +7,8 @@ export type JobType =
   | 'studio.render_preview'
   | 'studio.render_final'
   | 'studio.export_premiere'
-  | 'studio.transcribe';
+  | 'studio.transcribe'
+  | 'studio.reference_fetch';
 
 export const JOB_TYPES: JobType[] = [
   'scan.extract',
@@ -17,6 +18,7 @@ export const JOB_TYPES: JobType[] = [
   'studio.render_final',
   'studio.export_premiere',
   'studio.transcribe',
+  'studio.reference_fetch',
 ];
 
 export type JobStatus = 'queued' | 'leased' | 'paused' | 'completed' | 'failed' | 'cancelled';
@@ -40,6 +42,8 @@ export interface NodeCapabilities {
     ffmpeg: string | null;
     ollama_models: string[];
     python: string | null;
+    /** yt-dlp version; absent from workers that do not probe it. */
+    ytdlp?: string | null;
   };
 }
 
@@ -53,9 +57,11 @@ export interface NodeView {
   name: string;
   machine: string;
   kinds: JobType[];
-  /** Admin-set allowed kinds; null = all reported kinds are allowed */
-  allowed_kinds: JobType[] | null;
+  /** Job types the admin turned off on this node; the node takes every other kind it reports. */
+  blocked_kinds: JobType[];
   status: 'active' | 'disabled';
+  /** Thứ tự nhận việc, số nhỏ trước: máy xếp trước còn slot thì nhận job trước máy xếp sau. */
+  priority_order: number;
   os: string | null;
   cpu_cores: number | null;
   ram_mb: number | null;
@@ -68,10 +74,104 @@ export interface NodeView {
   schedule: unknown | null;
   last_seen_at: string | null;
   agent_version: string | null;
+  /** The worker updates itself when the farm publishes a newer release (default on). */
+  auto_update: boolean;
+  /** Last time an admin pressed "Update now". */
+  update_requested_at: string | null;
+  /** Self-update state from the worker's latest heartbeat that carried one; null for workers without self-update. */
+  update: NodeUpdateStatus | null;
+  update_at: string | null;
+  /** Latest machine reading (CPU, RAM, disks, network, GPU); absent from hubs before metrics, null before the first one. */
+  metrics?: MachineMetrics | null;
+  /** When the hub got `metrics`; older than 2 minutes means the reading is stale. */
+  metrics_at?: string | null;
   created_at: string;
   updated_at: string;
   /** Computed by server: last_seen_at within NODE_OFFLINE_AFTER_SECONDS */
   online: boolean;
+}
+
+export interface DiskMetrics {
+  /** `C:` on Windows, the directory on Linux. */
+  path: string;
+  free_mb: number;
+  total_mb: number;
+}
+
+export interface GpuMetrics {
+  index: number;
+  util_pct?: number;
+  vram_used_mb?: number;
+  vram_total_mb?: number;
+  temp_c?: number;
+}
+
+/** What a worker measured on its machine; anything it could not measure is left out. */
+export interface MachineMetrics {
+  cpu_pct?: number;
+  ram_used_mb?: number;
+  ram_total_mb?: number;
+  disks?: DiskMetrics[];
+  /** Bytes per second, all network cards of the machine. */
+  net_rx_bps?: number;
+  net_tx_bps?: number;
+  gpus?: GpuMetrics[];
+  uptime_s?: number;
+}
+
+export type MetricRange = '1h' | '24h' | '7d';
+
+export interface MachineMetricGpuPoint {
+  index: number;
+  util_pct: number | null;
+  vram_used_mb: number | null;
+  vram_total_mb: number | null;
+  temp_c: number | null;
+}
+
+/** One chart point: averages over the bucket (disk: lowest free; GPU temperature: highest); null when nothing came in. */
+export interface MachineMetricPoint {
+  t: string;
+  cpu_pct: number | null;
+  ram_used_mb: number | null;
+  ram_total_mb: number | null;
+  disk_free_mb: number | null;
+  disk_total_mb: number | null;
+  net_rx_bps: number | null;
+  net_tx_bps: number | null;
+  gpus: MachineMetricGpuPoint[];
+}
+
+export interface MachineMetricsSeries {
+  machine: string;
+  range: MetricRange;
+  bucket_seconds: number;
+  from: string;
+  to: string;
+  points: MachineMetricPoint[];
+}
+
+export type NodeUpdateState = 'idle' | 'draining' | 'installing' | 'failed';
+
+export interface NodeUpdateStatus {
+  state: NodeUpdateState;
+  target_version?: string;
+  /** Why it failed (with the last line of setup.log), or how the last update went. */
+  message?: string;
+  since?: string;
+}
+
+export interface ReleaseEntry {
+  version: string;
+  file: string;
+  sha256: string;
+  size_bytes: number;
+  built_at?: string;
+}
+
+/** The hub's /dist/latest.json: the newest release of each worker package. */
+export interface ReleaseManifest {
+  packages: Record<string, ReleaseEntry>;
 }
 
 export interface JobError {
@@ -128,7 +228,7 @@ export interface PagedResponse<T> {
 }
 
 export type JobSortBy = 'createdAt' | 'updatedAt' | 'priority' | 'status' | 'type';
-export type NodeSortBy = 'name' | 'lastSeenAt' | 'createdAt';
+export type NodeSortBy = 'priorityOrder' | 'name' | 'lastSeenAt' | 'createdAt';
 export type OwnerSortBy = 'name' | 'createdAt';
 export type SortOrder = 'asc' | 'desc';
 
@@ -222,8 +322,10 @@ export interface CreateNodeRequest {
 
 export interface PatchNodeRequest {
   name?: string;
-  allowed_kinds?: JobType[] | null;
+  blocked_kinds?: JobType[];
   status?: 'active' | 'disabled';
+  priority_order?: number;
+  auto_update?: boolean;
 }
 
 export interface CreateOwnerRequest {

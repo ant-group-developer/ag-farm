@@ -11,9 +11,10 @@ describe('admin views', () => {
       name: 'local-render',
       machine: 'PC',
       kinds: ['studio.tts'],
-      allowedKinds: null,
+      blockedKinds: [],
       tokenHash: 'a'.repeat(64),
       status: 'active',
+      priorityOrder: 3,
       os: 'windows',
       cpuCores: 8,
       ramMb: 16384,
@@ -26,6 +27,12 @@ describe('admin views', () => {
       schedule: null,
       lastSeenAt: at,
       agentVersion: '0.1.0',
+      autoUpdate: true,
+      updateRequestedAt: null,
+      updateStatus: null,
+      updateStatusAt: null,
+      metrics: { cpu_pct: 12.5, disks: [{ path: 'C:', free_mb: 1000, total_mb: 2000 }] },
+      metricsAt: at,
       createdAt: at,
       updatedAt: at,
     } as FarmNodeEntity;
@@ -33,6 +40,7 @@ describe('admin views', () => {
     const view = toNodeView(node, true);
 
     expect(view).toMatchObject({
+      priority_order: 3,
       cpu_cores: 8,
       ram_mb: 16384,
       free_slots: { cpu: 2, gpu: 1 },
@@ -40,6 +48,8 @@ describe('admin views', () => {
       last_seen_at: at.toISOString(),
       agent_version: '0.1.0',
       online: true,
+      metrics: { cpu_pct: 12.5, disks: [{ path: 'C:', free_mb: 1000, total_mb: 2000 }] },
+      metrics_at: at.toISOString(),
     });
     expect(JSON.stringify(view)).not.toMatch(/token|Hash/);
   });
@@ -55,7 +65,7 @@ describe('admin views', () => {
       createdAt: at,
       updatedAt: at,
     } as unknown as FarmNodeEntity;
-    expect(toNodeView(node, false)).toMatchObject({ last_seen_at: null, running_job_ids: [] });
+    expect(toNodeView(node, false)).toMatchObject({ last_seen_at: null, running_job_ids: [], metrics: null, metrics_at: null });
   });
 
   it('trả chủ job dạng snake_case, không kèm hash khoá', () => {

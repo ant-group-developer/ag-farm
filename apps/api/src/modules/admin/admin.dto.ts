@@ -10,12 +10,35 @@ export type CreateNodeDto = z.infer<typeof CreateNodeSchema>;
 
 export const PatchNodeSchema = z.strictObject({
   name: z.string().min(1).max(200).optional(),
-  // Không có `kinds`: worker tự báo qua heartbeat (ghi đè mỗi lần), admin giới hạn bằng allowed_kinds.
-  allowed_kinds: z.array(JobTypeSchema).nullable().optional(),
+  // Không có `kinds`: worker tự báo qua heartbeat (ghi đè mỗi lần), admin chặn từng loại bằng blocked_kinds
+  // (rỗng = không chặn). Có thể chặn trước loại máy chưa báo.
+  blocked_kinds: z
+    .array(JobTypeSchema)
+    .max(100)
+    .transform((kinds) => [...new Set(kinds)])
+    .optional(),
+  // Đã thay bằng blocked_kinds: web cũ gửi khoá này thì báo rõ thay vì bỏ qua lặng lẽ.
+  allowed_kinds: z
+    .never({ error: 'allowed_kinds was replaced by blocked_kinds (the job types this node must not take); reload the farm web' })
+    .optional(),
   status: z.enum(['active', 'disabled']).optional(),
   schedule: z.unknown().optional(),
+  /** Máy tự lên bản mới khi phát hành (worker đọc qua `GET /v1/worker/me`). */
+  auto_update: z.boolean().optional(),
+  /** Số nhỏ trước. Muốn xếp lại cả danh sách thì dùng `POST nodes/reorder`. */
+  priority_order: z.number().int().min(0).max(1_000_000).optional(),
 });
 export type PatchNodeDto = z.infer<typeof PatchNodeSchema>;
+
+/** Xếp lại thứ tự máy: các id theo thứ tự mới thành 1..n, máy còn lại giữ thứ tự cũ, đứng sau. */
+export const ReorderNodesSchema = z.strictObject({
+  ids: z
+    .array(z.uuid())
+    .min(1)
+    .max(1000)
+    .refine((ids) => new Set(ids).size === ids.length, { message: 'ids must not repeat' }),
+});
+export type ReorderNodesDto = z.infer<typeof ReorderNodesSchema>;
 
 export const CreateOwnerSchema = z.strictObject({
   id: z.string().min(1).max(40).regex(/^[a-z][a-z0-9-]*$/),
@@ -69,8 +92,9 @@ export type AdminListJobsQuery = z.infer<typeof AdminListJobsQuerySchema>;
 export const AdminListNodesQuerySchema = z.strictObject({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(20),
-  sortBy: z.enum(['name', 'lastSeenAt', 'createdAt']).default('createdAt'),
-  sortOrder: SortOrderSchema,
+  // Mặc định theo thứ tự ưu tiên (thứ tự máy nhận việc), số nhỏ trước.
+  sortBy: z.enum(['priorityOrder', 'name', 'lastSeenAt', 'createdAt']).default('priorityOrder'),
+  sortOrder: z.enum(['asc', 'desc']).default('asc'),
   status: z.enum(['active', 'disabled']).optional(),
   q: z.string().max(200).optional(),
 });

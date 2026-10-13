@@ -12,7 +12,7 @@ export type WorkerRole = z.infer<typeof WorkerRoleSchema>;
 /** Loại job mỗi vai trò nhận; cũng là tên gói phát hành cài cho vai trò đó. */
 export const ROLE_KINDS = {
   scan: ['scan.extract', 'scan.ai'],
-  render: ['studio.render_preview', 'studio.render_final', 'studio.tts', 'studio.export_premiere', 'studio.transcribe'],
+  render: ['studio.render_preview', 'studio.render_final', 'studio.tts', 'studio.export_premiere', 'studio.transcribe', 'studio.reference_fetch'],
 } as const satisfies Record<WorkerRole, readonly z.infer<typeof JobTypeSchema>[]>;
 
 export const ROLE_PACKAGES = {
@@ -77,7 +77,10 @@ export const EnrollResponseSchema = z.strictObject({
 });
 export type EnrollResponse = z.infer<typeof EnrollResponseSchema>;
 
-/** `GET /v1/worker/me` (token node): script cài chờ tới khi worker vừa cài đã gửi heartbeat. */
+/**
+ * `GET /v1/worker/me` (token node): script cài chờ tới khi worker vừa cài đã gửi heartbeat; worker tự cập nhật hỏi
+ * hub có cho cập nhật không.
+ */
 export const WorkerMeResponseSchema = z.strictObject({
   node_id: z.uuid(),
   name: z.string(),
@@ -85,5 +88,9 @@ export const WorkerMeResponseSchema = z.strictObject({
   agent_version: z.string().nullable(),
   last_seen_at: IsoDateTimeSchema.nullable(),
   ollama_models: OllamaModelsSchema,
+  /** Admin cho máy tự cập nhật khi có bản mới (mặc định có). Tuỳ chọn: hub cũ không gửi = cho phép. */
+  auto_update: z.boolean().optional(),
+  /** Admin bấm "Cập nhật ngay" lúc này: cập nhật dù `auto_update` tắt, kể cả lên lại bản từng hỏng. */
+  update_requested_at: IsoDateTimeSchema.nullable().optional(),
 });
 export type WorkerMeResponse = z.infer<typeof WorkerMeResponseSchema>;

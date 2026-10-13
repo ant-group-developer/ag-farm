@@ -7,6 +7,6 @@ coverage/
 !.env.example
 *.log
 .history
-releases/
+/releases/
 .claude
 .history

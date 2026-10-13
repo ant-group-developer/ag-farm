@@ -19,6 +19,11 @@ export const CapabilitiesSchema = z.strictObject({
     ollama_models: z.array(z.string().max(200)).max(200),
     /** Phiên bản Python có torch dùng được, `null` nếu không có. */
     python: z.string().max(100).nullable(),
+    /**
+     * Phiên bản yt-dlp worker chạy được (`yt-dlp --version`). Tuỳ chọn: worker không dò thì không gửi. Hub build trước
+     * khi có trường này từ chối heartbeat có nó (`strictObject`): lên hub trước rồi mới lên worker.
+     */
+    ytdlp: z.string().max(100).nullable().optional(),
   }),
 });
 export type Capabilities = z.infer<typeof CapabilitiesSchema>;
@@ -37,6 +42,8 @@ export const RequirementsSchema = z.strictObject({
   /** Mọi model trong danh sách phải có sẵn trong Ollama của máy. */
   ollama_models: z.array(z.string().max(200)).max(10).optional(),
   python: z.boolean().optional(),
+  /** Máy có yt-dlp (`engines.ytdlp`). */
+  ytdlp: z.boolean().optional(),
   os: z.enum(['windows', 'linux']).optional(),
   /**
    * Chỉ máy có id này nhận job (chủ job ghim một máy cụ thể, xem `GET /v1/owner/nodes`). Hub và worker build trước
@@ -57,6 +64,7 @@ export function meetsRequirements(capabilities: Capabilities, requirements: Requ
   }
   if (requirements.nvenc && !gpus.some((gpu) => gpu.nvenc)) return false;
   if (requirements.python && !capabilities.engines.python) return false;
+  if (requirements.ytdlp && !capabilities.engines.ytdlp) return false;
   if (requirements.ollama_models?.length) {
     const available = new Set(capabilities.engines.ollama_models.map(normalizeModelName));
     if (!requirements.ollama_models.every((model) => available.has(normalizeModelName(model)))) {

@@ -8,12 +8,14 @@ import { ACCOUNT_ME_CLIENT, AccountMeClientImpl, AdminGuard } from '../../auth/a
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { EnrollModule } from '../enroll/enroll.module';
+import { MachinesModule } from '../machines/machines.module';
 
 @Module({
   imports: [
     ConfigModule,
     TypeOrmModule.forFeature([FarmNodeEntity, FarmJobEntity, FarmOwnerEntity]),
     EnrollModule,
+    MachinesModule,
   ],
   controllers: [AdminController],
   providers: [

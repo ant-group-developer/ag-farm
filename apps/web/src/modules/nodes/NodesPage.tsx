@@ -15,29 +15,49 @@ import {
   Select,
   Space,
   Switch,
-  Table,
   Tag,
   Tooltip,
   Typography,
   message,
 } from 'antd';
-import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
+import { DragSortTable, type ProColumns } from '@ant-design/pro-components';
+import type { TablePaginationConfig } from 'antd/es/table';
 import { parseAsInteger, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import { useState, type ReactNode } from 'react';
-import { createNode, deleteNode, listNodes, patchNode } from '../../api/admin';
+import {
+  createNode,
+  deleteNode,
+  getLatestReleases,
+  listNodes,
+  patchNode,
+  reorderNodes,
+  requestNodeUpdate,
+} from '../../api/admin';
 import { SecretModal } from '../../shared/components/SecretModal';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { SortDropdown } from '../../shared/components/SortDropdown';
 import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
-import { jobTypeLabel, jobTypeOptions } from '../../shared/lib/job-labels';
+import { jobTypeOptions } from '../../shared/lib/job-labels';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import { columnsWidth } from '../../shared/lib/table-width';
-import type { JobType, NodeCapabilities, NodeSortBy, NodeView, SortOrder } from '../../types/api';
+import { BlockedKindsField, KindSwitches } from './KindSwitches';
+import type {
+  JobType,
+  NodeCapabilities,
+  NodeSortBy,
+  NodeUpdateStatus,
+  NodeView,
+  PagedResponse,
+  ReleaseManifest,
+  SortOrder,
+} from '../../types/api';
 import { formatDateTime } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronDown,
   Cpu,
+  Download,
+  GripVertical,
   Gpu,
   KeyRound,
   MemoryStick,
@@ -48,18 +68,16 @@ import {
   Trash2,
 } from 'lucide-react';
 import { EnrollModal } from './EnrollModal';
+import { NODE_ORDER_PAGE_SIZE, canDragSort, isOrderView, renumber, slotsAreLive } from './node-order';
+import { isOutdated, latestFor, missingTools, visibleUpdate, type MissingTool } from './node-update';
+import { formatGb, isMetricKey, machineKey, sortByMetric, type MetricKey, type MetricSortOrder } from './machine-health';
+import { CpuCell, DiskCell, GpuCell, HealthSummaryBar, MachineDrawer, NetCell, RamCell } from './MachineHealth';
 
 const { Text } = Typography;
 
 const OS_LABELS: Record<string, string> = { windows: 'Windows', linux: 'Linux', darwin: 'macOS' };
 
 const SPEC_ICON_STYLE = { flexShrink: 0, color: 'rgba(0, 0, 0, 0.45)' } as const;
-
-/** MB → GB: whole numbers from 10 GB up, one decimal below (8 GB VRAM vs 1.5 GB). */
-function formatGb(mb: number): string {
-  const gb = mb / 1024;
-  return String(gb >= 10 ? Math.round(gb) : Math.round(gb * 10) / 10);
-}
 
 function Spec({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
@@ -70,11 +88,86 @@ function Spec({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   );
 }
 
-/** Machine specs on separate lines: OS · CPU · RAM, one line per GPU, then installed engines. */
-function NodeSpecs({ caps }: { caps: NodeCapabilities | null }) {
+/** What a render worker lacks (Python, CUDA, yt-dlp, NVENC), each with what it costs. */
+function MissingTools({ missing }: { missing: MissingTool[] }) {
+  const { t } = useTranslation();
+  if (missing.length === 0) return null;
+  return (
+    <Flex wrap gap={4} align="center">
+      <Text type="secondary">{t('nodes.missing')}</Text>
+      {missing.map((m) => (
+        <Tooltip key={m} title={t(`nodes.missingHelp.${m}`)}>
+          <Tag color="red" bordered={false} style={{ marginInlineEnd: 0 }}>
+            {t(`nodes.missingTool.${m}`)}
+          </Tag>
+        </Tooltip>
+      ))}
+    </Flex>
+  );
+}
+
+const UPDATE_TAG_COLORS: Record<NodeUpdateStatus['state'], string> = {
+  idle: 'default',
+  draining: 'processing',
+  installing: 'processing',
+  failed: 'error',
+};
+
+/** Self-update state the worker reported: waiting for jobs / installing / failed (why), or how the last update went. */
+function UpdateState({ update }: { update: NodeUpdateStatus }) {
+  const { t } = useTranslation();
+  const version = update.target_version ?? '';
+  const tip = (
+    <>
+      {update.message && <div>{update.message}</div>}
+      {update.since && <div>{t('nodes.updateSince', { at: formatDateTime(update.since) })}</div>}
+    </>
+  );
+  if (update.state === 'idle') {
+    return (
+      <Tooltip title={update.since ? t('nodes.updateSince', { at: formatDateTime(update.since) }) : undefined}>
+        <Text type="secondary" ellipsis style={{ fontSize: 12, maxWidth: '100%' }}>
+          {update.message}
+        </Text>
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip title={update.message || update.since ? tip : undefined}>
+      <Tag color={UPDATE_TAG_COLORS[update.state]} bordered={false} style={{ marginInlineEnd: 0, whiteSpace: 'normal' }}>
+        {t(`nodes.updateState.${update.state}`, { version })}
+      </Tag>
+    </Tooltip>
+  );
+}
+
+/** Running version, "old" next to it when the farm has a newer release, and the self-update state. */
+function NodeVersion({ node, latest }: { node: NodeView; latest: ReleaseManifest | undefined }) {
+  const { t } = useTranslation();
+  const newest = latestFor(node, latest);
+  const update = visibleUpdate(node);
+  return (
+    <Flex vertical gap={4} style={{ minWidth: 0 }}>
+      <Flex align="center" gap={6} wrap>
+        {node.agent_version ? <Text>{node.agent_version}</Text> : <Text type="secondary">-</Text>}
+        {isOutdated(node, latest) ? (
+          <Tooltip title={t('nodes.versionOutdatedHelp', { latest: newest })}>
+            <Tag color="orange" bordered={false} style={{ marginInlineEnd: 0 }}>
+              {t('nodes.versionOutdated')}
+            </Tag>
+          </Tooltip>
+        ) : null}
+      </Flex>
+      {update && <UpdateState update={update} />}
+    </Flex>
+  );
+}
+
+/** Machine specs on separate lines: OS · CPU · RAM, one line per GPU, then installed engines and what is missing. */
+function NodeSpecs({ caps, missing = [] }: { caps: NodeCapabilities | null; missing?: MissingTool[] }) {
   const { t } = useTranslation();
   if (!caps) return <Text type="secondary">-</Text>;
-  const { ffmpeg, python, ollama_models: models } = caps.engines;
+  const { ffmpeg, python, ytdlp, ollama_models: models } = caps.engines;
   return (
     <Flex vertical gap={4}>
       <Flex wrap gap="4px 16px">
@@ -109,7 +202,7 @@ function NodeSpecs({ caps }: { caps: NodeCapabilities | null }) {
           <Text type="secondary">{t('nodes.noGpu')}</Text>
         </Spec>
       )}
-      {(ffmpeg || python || models.length > 0) && (
+      {(ffmpeg || python || ytdlp || models.length > 0) && (
         <Flex wrap gap={4}>
           {ffmpeg && (
             <Tooltip title={`ffmpeg ${ffmpeg}`}>
@@ -118,6 +211,11 @@ function NodeSpecs({ caps }: { caps: NodeCapabilities | null }) {
           )}
           {python && (
             <Tag bordered={false} style={{ marginInlineEnd: 0 }}>Python {python}</Tag>
+          )}
+          {ytdlp && (
+            <Tooltip title={`yt-dlp ${ytdlp}`}>
+              <Tag bordered={false} style={{ marginInlineEnd: 0 }}>yt-dlp</Tag>
+            </Tooltip>
           )}
           {models.length > 0 && (
             <Tooltip title={models.join(', ')}>
@@ -128,6 +226,7 @@ function NodeSpecs({ caps }: { caps: NodeCapabilities | null }) {
           )}
         </Flex>
       )}
+      <MissingTools missing={missing} />
     </Flex>
   );
 }
@@ -140,40 +239,68 @@ export function NodesPage() {
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [editNode, setEditNode] = useState<NodeView | null>(null);
   const [secret, setSecret] = useState<{ title: string; label: string; value: string } | null>(null);
+  /** Machine whose charts are open in the drawer. */
+  const [openMachine, setOpenMachine] = useState<string | null>(null);
+  /**
+   * A health column sorts the rows of the page here (the table's own local sort does not run inside ProTable); drag to
+   * reorder is off meanwhile, the rows are not in priority order.
+   */
+  const [metricSort, setMetricSort] = useState<{ key: MetricKey; order: MetricSortOrder } | null>(null);
+  const metricSorted = metricSort !== null;
   const [form] = Form.useForm<{ name: string; machine?: string; kinds: JobType[] }>();
-  const [editForm] = Form.useForm<{ name: string; allowed_kinds: JobType[] | null }>();
+  const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[] }>();
 
   // URL state via nuqs
   const [query, setQuery] = useQueryStates({
     page: parseAsInteger.withDefault(1),
     pageSize: parseAsInteger.withDefault(20),
-    sortBy: parseAsStringEnum<NodeSortBy>(['name', 'lastSeenAt', 'createdAt']).withDefault('createdAt'),
-    sortOrder: parseAsStringEnum<SortOrder>(['asc', 'desc']).withDefault('desc'),
+    sortBy: parseAsStringEnum<NodeSortBy>(['priorityOrder', 'name', 'lastSeenAt', 'createdAt']).withDefault(
+      'priorityOrder',
+    ),
+    sortOrder: parseAsStringEnum<SortOrder>(['asc', 'desc']).withDefault('asc'),
     q: parseAsString.withDefault(''),
   });
 
+  // Xem theo thứ tự nhận việc: tải cả danh sách một trang để kéo thả cả farm.
+  const orderView = isOrderView(query);
   const apiQuery = {
-    page: query.page,
-    pageSize: query.pageSize,
+    page: orderView ? 1 : query.page,
+    pageSize: orderView ? NODE_ORDER_PAGE_SIZE : query.pageSize,
     sortBy: query.sortBy,
     sortOrder: query.sortOrder,
     q: query.q || undefined,
   };
+  const queryKey = ['nodes', apiQuery];
 
   const nodesQuery = useQuery({
-    queryKey: ['nodes', apiQuery],
+    queryKey,
     queryFn: () => listNodes(apiQuery),
     refetchInterval: 10_000,
   });
 
   const sortFields: readonly { value: NodeSortBy; label: string }[] = [
+    { value: 'priorityOrder', label: t('nodes.order') },
     { value: 'createdAt', label: t('common.createdAt') },
     { value: 'name', label: t('nodes.name') },
     { value: 'lastSeenAt', label: t('nodes.lastSeen') },
   ];
 
   const nodes = nodesQuery.data?.items ?? [];
+  const shownNodes = metricSort ? sortByMetric(nodes, metricSort.key, metricSort.order) : nodes;
   const total = nodesQuery.data?.total ?? 0;
+  const draggable = canDragSort(orderView, nodes.length, total) && !metricSorted;
+
+  const reorderMut = useMutation({
+    mutationFn: (ordered: NodeView[]) => reorderNodes(ordered.map((n) => n.id)),
+    onMutate: async (ordered) => {
+      // Hiện thứ tự mới ngay, không đợi hub (và không để lần tải định kỳ kéo về thứ tự cũ giữa chừng).
+      await qc.cancelQueries({ queryKey: ['nodes'] });
+      qc.setQueryData<PagedResponse<NodeView>>(queryKey, (old) => (old ? { ...old, items: renumber(ordered) } : old));
+    },
+    onSuccess: () => void messageApi.success(t('nodes.orderSaved')),
+    onError: (e) => void messageApi.error(String(e)),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['nodes'] }),
+  });
 
   const createMut = useMutation({
     mutationFn: createNode,
@@ -199,7 +326,53 @@ export function NodesPage() {
     onError: (e) => void messageApi.error(String(e)),
   });
 
-  const columns: ColumnsType<NodeView> = [
+  // Bản mới nhất của từng gói worker (latest.json của hub), để so với bản máy đang chạy.
+  const latestQuery = useQuery({
+    queryKey: ['releases-latest'],
+    queryFn: getLatestReleases,
+    refetchInterval: 60_000,
+  });
+  const latest = latestQuery.data;
+
+  const updateNowMut = useMutation({
+    mutationFn: (id: string) => requestNodeUpdate(id),
+    onSuccess: () => {
+      void messageApi.success(t('nodes.updateNowSent'));
+      void qc.invalidateQueries({ queryKey: ['nodes'] });
+    },
+    onError: (e) => void messageApi.error(String(e)),
+  });
+
+  /** Why "Update now" is off for a node, or null when it can be pressed. */
+  const updateNowBlocked = (r: NodeView): string | null => {
+    if (!r.update) return t('nodes.updateNowUnsupported');
+    if (r.update.state === 'draining' || r.update.state === 'installing') return t('nodes.updateNowBusy');
+    if (!isOutdated(r, latest)) return t('nodes.updateNowLatest');
+    return null;
+  };
+
+  const openOnClick = (r: NodeView) => ({
+    onClick: () => setOpenMachine(machineKey(r)),
+    style: { cursor: 'pointer' },
+  });
+
+  const columns: ProColumns<NodeView>[] = [
+    {
+      // Cột chứa tay nắm kéo thả (dragSortKey) khi đang xem theo thứ tự.
+      title: t('nodes.order'),
+      tooltip: t('nodes.orderHelp'),
+      key: 'priority_order',
+      dataIndex: 'priority_order',
+      width: 90,
+      render: (_: unknown, r: NodeView) =>
+        draggable ? (
+          <Text strong>{r.priority_order}</Text>
+        ) : (
+          <Tooltip title={orderView ? undefined : t('nodes.orderDragOff')}>
+            <Text type={orderView ? undefined : 'secondary'}>{r.priority_order}</Text>
+          </Tooltip>
+        ),
+    },
     {
       title: t('nodes.connection'),
       key: 'online',
@@ -216,12 +389,19 @@ export function NodesPage() {
       dataIndex: 'name',
       key: 'name',
       width: 200,
-      render: (v: string, r: NodeView) => (
+      render: (_: unknown, r: NodeView) => (
         <Flex vertical style={{ minWidth: 0 }}>
-          <Text strong ellipsis={{ tooltip: v }}>{v}</Text>
-          <Text type="secondary" ellipsis={{ tooltip: r.machine || undefined }}>
-            {r.machine || '-'}
-          </Text>
+          <Text strong ellipsis={{ tooltip: r.name }}>{r.name}</Text>
+          <Tooltip title={t('nodes.health.openChart', { machine: machineKey(r) })}>
+            <Typography.Link
+              ellipsis
+              type="secondary"
+              onClick={() => setOpenMachine(machineKey(r))}
+              style={{ maxWidth: '100%' }}
+            >
+              {r.machine || '-'}
+            </Typography.Link>
+          </Tooltip>
         </Flex>
       ),
     },
@@ -241,51 +421,106 @@ export function NodesPage() {
         />
       ),
     },
+    // Tình trạng máy (worker đo mỗi 15 s): bấm ô mở biểu đồ của máy; sắp xếp trên trang đang xem.
     {
-      title: t('common.jobTypes'),
+      title: t('nodes.health.cpu'),
+      tooltip: t('nodes.health.help'),
+      key: 'cpu',
+      dataIndex: 'cpu',
+      width: 100,
+      sorter: true,
+      sortDirections: ['descend', 'ascend'],
+      onCell: openOnClick,
+      render: (_: unknown, r: NodeView) => <CpuCell node={r} />,
+    },
+    {
+      title: t('nodes.health.ram'),
+      key: 'ram',
+      dataIndex: 'ram',
+      width: 120,
+      sorter: true,
+      sortDirections: ['descend', 'ascend'],
+      onCell: openOnClick,
+      render: (_: unknown, r: NodeView) => <RamCell node={r} />,
+    },
+    {
+      title: t('nodes.health.disk'),
+      key: 'disk',
+      dataIndex: 'disk',
+      width: 130,
+      // Ít chỗ trống nhất trước
+      sorter: true,
+      sortDirections: ['ascend', 'descend'],
+      onCell: openOnClick,
+      render: (_: unknown, r: NodeView) => <DiskCell node={r} />,
+    },
+    {
+      title: t('nodes.health.network'),
+      key: 'net',
+      dataIndex: 'net',
+      width: 120,
+      sorter: true,
+      sortDirections: ['descend', 'ascend'],
+      onCell: openOnClick,
+      render: (_: unknown, r: NodeView) => <NetCell node={r} />,
+    },
+    {
+      title: t('nodes.health.gpu'),
+      key: 'gpu',
+      dataIndex: 'gpu',
+      width: 150,
+      sorter: true,
+      sortDirections: ['descend', 'ascend'],
+      onCell: openOnClick,
+      render: (_: unknown, r: NodeView) => <GpuCell node={r} />,
+    },
+    {
+      // Worker tự báo loại làm được (ghi đè mỗi heartbeat); admin chỉ tắt/bật từng loại (`blocked_kinds`).
+      title: t('nodes.kinds'),
+      tooltip: t('nodes.kindsHelp'),
       key: 'kinds',
-      width: 210,
-      render: (_: unknown, r: NodeView) => {
-        const effective = r.allowed_kinds ?? r.kinds;
-        const isRestricted = r.allowed_kinds !== null;
-        return (
-          <Tooltip
-            title={isRestricted ? `${t('nodes.allowedKinds')}: ${effective.map(jobTypeLabel).join(', ')}` : undefined}
-          >
-            <Flex wrap gap={4}>
-              {effective.map((k) => (
-                <Tag key={k} color={isRestricted ? 'orange' : 'blue'} style={{ marginInlineEnd: 0 }}>
-                  {jobTypeLabel(k)}
-                </Tag>
-              ))}
-            </Flex>
-          </Tooltip>
-        );
-      },
+      width: 230,
+      render: (_: unknown, r: NodeView) => (
+        <KindSwitches
+          reported={r.kinds}
+          blocked={r.blocked_kinds ?? []}
+          loading={patchMut.isPending && patchMut.variables?.id === r.id && patchMut.variables.body.blocked_kinds !== undefined}
+          onChange={(blocked) => patchMut.mutate({ id: r.id, body: { blocked_kinds: blocked } })}
+        />
+      ),
     },
     {
       title: t('nodes.capabilities'),
       key: 'caps',
       width: 340,
-      render: (_: unknown, r: NodeView) => <NodeSpecs caps={r.capabilities} />,
+      render: (_: unknown, r: NodeView) => <NodeSpecs caps={r.capabilities} missing={missingTools(r)} />,
     },
     {
       title: t('nodes.freeSlots'),
       key: 'slots',
       width: 120,
-      render: (_: unknown, r: NodeView) =>
-        r.free_slots ? (
-          <Flex vertical>
-            <Text>
-              <Text type="secondary">CPU</Text> {r.free_slots.cpu}
-            </Text>
-            <Text>
-              <Text type="secondary">GPU</Text> {r.free_slots.gpu}
-            </Text>
-          </Flex>
-        ) : (
-          <Text type="secondary">-</Text>
-        ),
+      render: (_: unknown, r: NodeView) => {
+        if (!r.free_slots) return <Text type="secondary">-</Text>;
+        // Máy offline hay tắt: số này là của lần kết nối cuối, không phải chỗ nó đang nhận việc.
+        const live = slotsAreLive(r);
+        const slot = (label: string, free: number) => (
+          <Tag
+            bordered={false}
+            color={live ? (free > 0 ? 'green' : 'default') : undefined}
+            style={{ marginInlineEnd: 0, opacity: live ? 1 : 0.55 }}
+          >
+            {label} {free}
+          </Tag>
+        );
+        return (
+          <Tooltip title={live ? undefined : t('nodes.slotsStale')}>
+            <Flex wrap gap={4}>
+              {slot('CPU', r.free_slots.cpu)}
+              {slot('GPU', r.free_slots.gpu)}
+            </Flex>
+          </Tooltip>
+        );
+      },
     },
     {
       title: t('nodes.running'),
@@ -294,9 +529,16 @@ export function NodesPage() {
       align: 'center',
       render: (_: unknown, r: NodeView) =>
         r.running_job_ids.length > 0 ? (
-          <Text strong>{r.running_job_ids.length}</Text>
+          <Tooltip title={t('nodes.runningIds', { ids: r.running_job_ids.join(', ') })}>
+            <Badge
+              count={r.running_job_ids.length}
+              color="blue"
+              overflowCount={999}
+              showZero={false}
+            />
+          </Tooltip>
         ) : (
-          <Text type="secondary">-</Text>
+          <Text type="secondary">0</Text>
         ),
     },
     {
@@ -317,9 +559,42 @@ export function NodesPage() {
       title: t('nodes.version'),
       dataIndex: 'agent_version',
       key: 'version',
-      width: 120,
-      ellipsis: true,
-      render: (v: string | null) => (v ? <Text>{v}</Text> : <Text type="secondary">-</Text>),
+      width: 180,
+      render: (_: unknown, r: NodeView) => <NodeVersion node={r} latest={latest} />,
+    },
+    {
+      title: t('nodes.autoUpdate'),
+      tooltip: t('nodes.autoUpdateHelp'),
+      key: 'auto_update',
+      width: 160,
+      render: (_: unknown, r: NodeView) => {
+        const blocked = updateNowBlocked(r);
+        const requested = r.update_requested_at
+          ? t('nodes.updateNowRequested', { at: formatDateTime(r.update_requested_at) })
+          : null;
+        return (
+          <Flex vertical gap={6} align="flex-start">
+            <Switch
+              size="small"
+              aria-label={t('nodes.autoUpdate')}
+              checked={r.auto_update}
+              loading={patchMut.isPending && patchMut.variables?.id === r.id && patchMut.variables.body.auto_update !== undefined}
+              onChange={(checked) => patchMut.mutate({ id: r.id, body: { auto_update: checked } })}
+            />
+            <Tooltip title={[blocked, requested].filter(Boolean).join(' · ') || undefined}>
+              <Button
+                size="small"
+                icon={<Download size={14} />}
+                disabled={blocked !== null}
+                loading={updateNowMut.isPending && updateNowMut.variables === r.id}
+                onClick={() => updateNowMut.mutate(r.id)}
+              >
+                {t('nodes.updateNow')}
+              </Button>
+            </Tooltip>
+          </Flex>
+        );
+      },
     },
     {
       title: t('common.actions'),
@@ -337,7 +612,7 @@ export function NodesPage() {
                 setEditNode(r);
                 editForm.setFieldsValue({
                   name: r.name,
-                  allowed_kinds: r.allowed_kinds ?? undefined,
+                  blocked_kinds: r.blocked_kinds ?? [],
                 });
               }}
             />
@@ -359,14 +634,18 @@ export function NodesPage() {
     },
   ];
 
-  const pagination: TablePaginationConfig = {
-    current: query.page,
-    pageSize: query.pageSize,
-    total,
-    showSizeChanger: true,
-    pageSizeOptions: ['10', '20', '50', '100'],
-    onChange: (p, ps) => void setQuery({ page: p, pageSize: ps }),
-  };
+  // Xem theo thứ tự: cả danh sách trong một trang, không phân trang (trừ farm quá 200 máy).
+  const pagination: TablePaginationConfig | false =
+    orderView && total <= nodes.length
+      ? false
+      : {
+          current: apiQuery.page,
+          pageSize: apiQuery.pageSize,
+          total,
+          showSizeChanger: !orderView,
+          pageSizeOptions: ['10', '20', '50', '100'],
+          onChange: (p, ps) => void setQuery({ page: p, pageSize: ps }),
+        };
 
   return (
     <>
@@ -418,15 +697,32 @@ export function NodesPage() {
         }
       />
 
-      <Table
+      <HealthSummaryBar nodes={nodes} />
+
+      <DragSortTable<NodeView>
         rowKey="id"
-        dataSource={nodes}
+        onChange={(_pagination, _filters, sorter) => {
+          const s = Array.isArray(sorter) ? sorter[0] : sorter;
+          setMetricSort(s?.order && isMetricKey(s.columnKey) ? { key: s.columnKey, order: s.order } : null);
+        }}
+        dataSource={shownNodes}
         columns={columns}
-        loading={nodesQuery.isLoading}
+        loading={nodesQuery.isLoading || reorderMut.isPending}
         pagination={pagination}
         sticky={PAGE_TABLE_STICKY}
         tableLayout="fixed"
         scroll={{ x: columnsWidth(columns) }}
+        search={false}
+        options={false}
+        toolBarRender={false}
+        ghost
+        dragSortKey={draggable ? 'priority_order' : undefined}
+        dragSortHandlerRender={() => (
+          <Tooltip title={t('nodes.orderDragHint')}>
+            <GripVertical size={16} style={{ cursor: 'grab', color: 'rgba(0, 0, 0, 0.45)' }} />
+          </Tooltip>
+        )}
+        onDragSortEnd={(_from, _to, ordered) => reorderMut.mutate(ordered)}
       />
 
       {/* Create modal */}
@@ -480,41 +776,18 @@ export function NodesPage() {
           <Form.Item name="name" label={t('nodes.nameLabel')} rules={[{ required: true, message: t('nodes.nameRequired') }]}>
             <Input placeholder={t('nodes.namePlaceholder')} />
           </Form.Item>
-          {/* Chỉ xem: worker ghi đè `kinds` ở mỗi heartbeat, admin giới hạn bằng `allowed_kinds`. */}
-          <Form.Item label={t('nodes.reportedKinds')} tooltip={t('nodes.reportedKindsHelp')}>
-            {editNode && editNode.kinds.length > 0 ? (
-              <Flex wrap gap={4}>
-                {editNode.kinds.map((k) => (
-                  <Tag key={k} style={{ marginInlineEnd: 0 }}>
-                    {jobTypeLabel(k)}
-                  </Tag>
-                ))}
-              </Flex>
-            ) : (
-              <Text type="secondary">-</Text>
-            )}
-          </Form.Item>
-          <Form.Item
-            name="allowed_kinds"
-            label={t('nodes.allowedKinds')}
-            tooltip={t('nodes.allowedKindsHelp')}
-          >
-            <Select
-              mode="multiple"
-              allowClear
-              options={
-                editNode
-                  ? jobTypeOptions(editNode.kinds)
-                  : jobTypeOptions()
-              }
-              placeholder={t('nodes.allowedKindsAll')}
-              onChange={(vals: JobType[]) => {
-                editForm.setFieldValue('allowed_kinds', vals.length > 0 ? vals : null);
-              }}
-            />
+          {/* Worker ghi đè `kinds` ở mỗi heartbeat; admin chỉ tắt/bật từng loại (`blocked_kinds`). */}
+          <Form.Item name="blocked_kinds" label={t('nodes.kinds')} tooltip={t('nodes.kindsHelp')}>
+            <BlockedKindsField reported={editNode?.kinds ?? []} />
           </Form.Item>
         </Form>
       </Modal>
+
+      <MachineDrawer
+        machine={openMachine}
+        nodes={openMachine ? nodes.filter((n) => machineKey(n) === openMachine) : []}
+        onClose={() => setOpenMachine(null)}
+      />
 
       <EnrollModal
         open={enrollOpen}

@@ -22,12 +22,15 @@ import {
   CreateOwnerSchema,
   PatchNodeSchema,
   PatchOwnerSchema,
+  ReorderNodesSchema,
 } from './admin.dto';
 import { AdminService } from './admin.service';
 import type { AdminJobControlDto } from './admin.dto';
 import type { JobSelector } from '../../common/job-control';
 import { CreateEnrollmentRequestSchema } from '@ag-farm/protocol';
 import { EnrollService } from '../enroll/enroll.service';
+import { MachineMetricsQuerySchema } from '../machines/machine-metrics';
+import { MachineMetricsService } from '../machines/machine-metrics.service';
 
 function toSelector(body: AdminJobControlDto): JobSelector {
   return {
@@ -45,6 +48,7 @@ export class AdminController {
   constructor(
     private readonly svc: AdminService,
     private readonly enroll: EnrollService,
+    private readonly machineMetrics: MachineMetricsService,
   ) {}
 
   // ---- Mã cài đặt máy worker ----
@@ -69,6 +73,20 @@ export class AdminController {
     return { ...node, token };
   }
 
+  /** Xếp lại thứ tự ưu tiên của máy (kéo thả trên web): `ids` thành 1..n, máy còn lại đứng sau. */
+  @Post('nodes/reorder')
+  @HttpCode(200)
+  async reorderNodes(@Body(new ZodValidationPipe(ReorderNodesSchema)) body: any) {
+    return this.svc.reorderNodes(body.ids);
+  }
+
+  /** "Cập nhật ngay": máy cập nhật ở lần hỏi hub kế tiếp (trong khoảng một phút), sau khi việc đang chạy xong. */
+  @Post('nodes/:id/update-now')
+  @HttpCode(200)
+  async requestNodeUpdate(@Param('id') id: string) {
+    return this.svc.requestUpdate(id);
+  }
+
   @Patch('nodes/:id')
   async patchNode(
     @Param('id') id: string,
@@ -81,6 +99,17 @@ export class AdminController {
   @HttpCode(204)
   async deleteNode(@Param('id') id: string) {
     await this.svc.deleteNode(id);
+  }
+
+  // ---- Tình trạng máy ----
+
+  /** Biểu đồ một máy (`farm_nodes.machine`, node không có máy thì tên node): `range` 1h | 24h | 7d, ≤ 300 điểm. */
+  @Get('machines/:machine/metrics')
+  async machineMetricsSeries(
+    @Param('machine') machine: string,
+    @Query(new ZodValidationPipe(MachineMetricsQuerySchema)) query: any,
+  ) {
+    return this.machineMetrics.series(machine.slice(0, 200), query.range);
   }
 
   // ---- Jobs ----
