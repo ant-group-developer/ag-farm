@@ -37,6 +37,8 @@ Sao chép `apps/api/.env.example` → `apps/api/.env` rồi điền:
 | `FARM_TICKET_PUBLIC_KEY` | Ed25519 SPKI PEM (dấu xuống dòng thay bằng `\n`) |
 | `REAPER_INTERVAL_MS` | Chu kỳ reaper thu hồi lease hết hạn (mặc định `15000`) |
 | `NODE_OFFLINE_AFTER_SECONDS` | Thời gian không heartbeat coi node offline (mặc định `90`) |
+| `NODE_PRIORITY_GRACE_SECONDS` | Job chờ quá ngần này giây thì máy xếp sau cũng nhận, không nhường máy xếp trước nữa (mặc định `10`, `0` = tắt thứ tự máy) |
+| `MACHINE_METRICS_KEEP_DAYS` | Giữ lịch sử số đo máy (`farm_machine_metrics`) bấy nhiêu ngày; reaper xoá dòng cũ hơn mỗi 10 phút (mặc định `7`) |
 
 ### Sinh cặp khoá ticket
 
@@ -171,7 +173,7 @@ yarn workspace @ag-farm/web test
 | Đường dẫn | Tên | Mô tả |
 |-----------|-----|-------|
 | `/stats` | Thống kê | Số lượng job theo trạng thái × loại, số máy online |
-| `/nodes` | Máy | Danh sách máy worker, tạo/sửa/xóa, bật/tắt; poll 10 s |
+| `/nodes` | Máy | Danh sách máy worker, tạo/sửa/xóa, bật/tắt; tình trạng từng máy (CPU, RAM, ổ, mạng ↓↑, GPU: vàng ≥ 80 %, đỏ ≥ 95 % hay ổ trống < 20 GB, số đo cũ hơn 2 phút làm mờ, sắp xếp được), đầu trang báo gộp máy sắp đầy ổ / RAM > 90 %; bấm tên máy mở biểu đồ 1 giờ / 24 giờ / 7 ngày; poll 10 s |
 | `/jobs` | Việc | Hàng việc với bộ lọc, cursor pagination, drawer chi tiết; poll 5 s khi có job đang chạy |
 | `/owners` | Chủ job | Danh sách chủ job, tạo (key hiện một lần), sửa |
 

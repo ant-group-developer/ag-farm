@@ -20,6 +20,15 @@ import { Initial1000000000000 } from './database/migrations/1000000000000-initia
 import { Enrollments1100000000000 } from './database/migrations/1100000000000-enrollments';
 import { JobPause1200000000000 } from './database/migrations/1200000000000-job-pause';
 import { AdminListIndexes1300000000000 } from './database/migrations/1300000000000-admin-list-indexes';
+import { StudioExportPremiere1400000000000 } from './database/migrations/1400000000000-studio-export-premiere';
+import { DropOwnerDefaultLane1500000000000 } from './database/migrations/1500000000000-drop-owner-default-lane';
+import { StudioTranscribe1600000000000 } from './database/migrations/1600000000000-studio-transcribe';
+import { StatsFinishedIndex1700000000000 } from './database/migrations/1700000000000-stats-finished-index';
+import { NodePriorityOrder1800000000000 } from './database/migrations/1800000000000-node-priority-order';
+import { NodeBlockedKinds1900000000000 } from './database/migrations/1900000000000-node-blocked-kinds';
+import { NodeSelfUpdate2000000000000 } from './database/migrations/2000000000000-node-self-update';
+import { MachineMetrics2100000000000 } from './database/migrations/2100000000000-machine-metrics';
+import { StudioReferenceFetch2200000000000 } from './database/migrations/2200000000000-studio-reference-fetch';
 import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
 import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
@@ -63,6 +72,22 @@ const TEST_ENV = {
   FARM_OLLAMA_MODELS: 'qwen2.5vl:3b, qwen2.5vl:7b',
 };
 
+const MIGRATIONS = [
+  Initial1000000000000,
+  Enrollments1100000000000,
+  JobPause1200000000000,
+  AdminListIndexes1300000000000,
+  StudioExportPremiere1400000000000,
+  DropOwnerDefaultLane1500000000000,
+  StudioTranscribe1600000000000,
+  StatsFinishedIndex1700000000000,
+  NodePriorityOrder1800000000000,
+  NodeBlockedKinds1900000000000,
+  NodeSelfUpdate2000000000000,
+  MachineMetrics2100000000000,
+  StudioReferenceFetch2200000000000,
+];
+
 /** Fake AccountMeClient → luôn trả ADMIN */
 const fakeAccountMeClient = { getMe: async () => ({ user_type: 'ADMIN' }) };
 
@@ -79,7 +104,7 @@ async function buildApp(): Promise<INestApplication> {
         type: 'postgres',
         url: TEST_DB_URL,
         entities: [FarmOwnerEntity, FarmNodeEntity, FarmJobEntity, FarmEnrollmentEntity],
-        migrations: [Initial1000000000000, Enrollments1100000000000, JobPause1200000000000, AdminListIndexes1300000000000],
+        migrations: MIGRATIONS,
         migrationsRun: true,
         synchronize: false,
         dropSchema: true, // reset DB mỗi lần test
@@ -118,7 +143,7 @@ async function buildAdminApp(): Promise<INestApplication> {
         type: 'postgres',
         url: TEST_DB_URL,
         entities: [FarmOwnerEntity, FarmNodeEntity, FarmJobEntity, FarmEnrollmentEntity],
-        migrations: [Initial1000000000000, Enrollments1100000000000, JobPause1200000000000, AdminListIndexes1300000000000],
+        migrations: MIGRATIONS,
         migrationsRun: true,
         synchronize: false,
         dropSchema: true,
@@ -228,6 +253,7 @@ describe('ag-farm DB integration', () => {
       await runner.query(`DROP TABLE IF EXISTS farm_nodes`);
       await runner.query(`DROP TABLE IF EXISTS farm_owners`);
       await runner.query(`DROP TABLE IF EXISTS farm_enrollments`);
+      await runner.query(`DROP TABLE IF EXISTS farm_machine_metrics`);
       await runner.query(`DELETE FROM migrations`);
       // up lại
       await ds.runMigrations();
@@ -1444,8 +1470,8 @@ describe('ag-farm GĐ4 DB integration', () => {
     expect(long.status).toBe(400);
   });
 
-  // ---- Node kinds intersection: allowed_kinds restricts claim ----
-  it('allowed_kinds intersection: intersection is empty → no jobs claimed', async () => {
+  // ---- Node kinds: blocked_kinds stops a claim ----
+  it('blocked_kinds: a kind the admin blocked on the node is not claimed', async () => {
     const { key } = await createOwner(ds, 'ag-go');
     const { token, node } = await createNode(ds, ['scan.extract']);
 
@@ -1476,16 +1502,16 @@ describe('ag-farm GĐ4 DB integration', () => {
     expect(submit.status).toBe(200);
     const jobId = submit.body.data.job.id as string;
 
-    // Đặt allowed_kinds = ['scan.ai'] → node chỉ được phép claim scan.ai
-    // nhưng node báo cáo kinds = ['scan.extract'], giao = [] → không claim được
-    await ds.getRepository(FarmNodeEntity).update(node.id, { allowedKinds: ['scan.ai'] });
+    // Admin chặn scan.extract trên node: node báo scan.extract, trừ đi phần bị chặn còn rỗng
+    // → không claim được
+    await ds.getRepository(FarmNodeEntity).update(node.id, { blockedKinds: ['scan.extract'] });
 
     const claimRes = await request(app.getHttpServer())
       .post('/v1/worker/claim')
       .set('Authorization', `Node ${token}`)
       .send({ kinds: ['scan.extract'], free_slots: { cpu: 4, gpu: 0 }, cached_affinity: [] });
     expect(claimRes.status).toBe(200);
-    // Giao rỗng → không nhận được job nào
+    // Không còn loại nào → không nhận được job nào
     expect(claimRes.body.data.job).toBeNull();
 
     // Job vẫn queued
@@ -1493,8 +1519,8 @@ describe('ag-farm GĐ4 DB integration', () => {
     expect(j.status).toBe('queued');
   });
 
-  // ---- Node kinds intersection: allowed_kinds = subset → only matching jobs claimed ----
-  it('allowed_kinds intersection: only jobs whose type is in the intersection are claimed', async () => {
+  // ---- Node kinds: blocking another kind leaves the rest ----
+  it('blocked_kinds: blocking another kind still claims the kinds left', async () => {
     const { key } = await createOwner(ds, 'ag-go');
     const { token, node } = await createNode(ds, ['scan.extract']);
 
@@ -1523,8 +1549,8 @@ describe('ag-farm GĐ4 DB integration', () => {
       });
     expect(submit.status).toBe(200);
 
-    // allowed_kinds = ['scan.extract'] (khớp) → claim được
-    await ds.getRepository(FarmNodeEntity).update(node.id, { allowedKinds: ['scan.extract'] });
+    // chặn scan.ai, không chặn scan.extract → claim được
+    await ds.getRepository(FarmNodeEntity).update(node.id, { blockedKinds: ['scan.ai'] });
 
     const claimRes = await request(app.getHttpServer())
       .post('/v1/worker/claim')
@@ -1535,23 +1561,29 @@ describe('ag-farm GĐ4 DB integration', () => {
     expect(claimRes.body.data.job.type).toBe('scan.extract');
   });
 
-  // ---- Node kinds intersection: allowed_kinds = null → tất cả kinds được phép ----
-  it('allowed_kinds = null allows all reported kinds', async () => {
+  // ---- Node kinds: nothing blocked → every reported kind ----
+  it('blocked_kinds empty (the default) allows every reported kind', async () => {
     const { key } = await createOwner(ds, 'ag-go');
-    const { token } = await createNode(ds, ['scan.extract']);
+    const { token, node } = await createNode(ds, ['scan.extract']);
 
-    await request(app.getHttpServer())
+    // Worker mới khai thêm engines.ytdlp: hub nhận
+    const hb = await request(app.getHttpServer())
       .post('/v1/worker/heartbeat')
       .set('Authorization', `Node ${token}`)
       .send({
         agent_version: '1.0',
         kinds: ['scan.extract'],
-        capabilities: { os: 'linux', cpu_cores: 4, ram_mb: 8192, gpus: [], engines: { ffmpeg: null, ollama_models: [], python: null } },
+        capabilities: {
+          os: 'linux', cpu_cores: 4, ram_mb: 8192, gpus: [],
+          engines: { ffmpeg: null, ollama_models: [], python: null, ytdlp: '2026.08.19' },
+        },
         free_slots: { cpu: 4, gpu: 0 },
         running_job_ids: [],
       });
+    expect(hb.status).toBe(200);
+    expect((await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id })).capabilities?.engines.ytdlp).toBe('2026.08.19');
 
-    // allowed_kinds là null (mặc định) → nhận được job scan.extract
+    // blocked_kinds rỗng (mặc định) → nhận được job scan.extract
     await request(app.getHttpServer())
       .post('/v1/owner/jobs')
       .set('Authorization', `Owner ${key}`)
@@ -1619,5 +1651,681 @@ describe('ag-farm GĐ4 DB integration', () => {
     const del = await request(app.getHttpServer()).delete(`/v1/admin/nodes/${node.id}`);
     expect(del.status).toBe(204);
   });
+
+  // ---- Thứ tự ưu tiên của máy ----
+  describe('node priority order', () => {
+    async function addNode(name: string): Promise<string> {
+      const res = await request(app.getHttpServer())
+        .post('/v1/admin/nodes')
+        .send({ name, machine: 'm', kinds: ['scan.extract'] });
+      expect(res.status).toBe(201);
+      return res.body.data.id as string;
+    }
+
+    async function listedNames(query = ''): Promise<string[]> {
+      const res = await request(app.getHttpServer()).get(`/v1/admin/nodes${query}`);
+      expect(res.status).toBe(200);
+      return (res.body.data.items as Array<{ name: string }>).map((n) => n.name);
+    }
+
+    it('new nodes go last, and GET /v1/admin/nodes lists in that order by default', async () => {
+      await addNode('zeta');
+      await addNode('alpha');
+      await addNode('mid');
+      const res = await request(app.getHttpServer()).get('/v1/admin/nodes');
+      const items = res.body.data.items as Array<{ name: string; priority_order: number }>;
+      expect(items.map((n) => n.name)).toEqual(['zeta', 'alpha', 'mid']);
+      expect(items[0]!.priority_order).toBeLessThan(items[1]!.priority_order);
+      expect(items[1]!.priority_order).toBeLessThan(items[2]!.priority_order);
+      // Các cách sắp khác vẫn dùng được
+      expect(await listedNames('?sortBy=name&sortOrder=asc')).toEqual(['alpha', 'mid', 'zeta']);
+    });
+
+    it('POST /v1/admin/nodes/reorder numbers the given ids 1..n and keeps the others after, in their order', async () => {
+      const a = await addNode('a');
+      const b = await addNode('b');
+      const c = await addNode('c');
+      const d = await addNode('d');
+
+      const res = await request(app.getHttpServer()).post('/v1/admin/nodes/reorder').send({ ids: [c, a] });
+      expect(res.status).toBe(200);
+      const items = res.body.data.items as Array<{ id: string; priority_order: number }>;
+      expect(items.map((n) => [n.id, n.priority_order])).toEqual([
+        [c, 1],
+        [a, 2],
+        [b, 3],
+        [d, 4],
+      ]);
+      expect(await listedNames()).toEqual(['c', 'a', 'b', 'd']);
+
+      // Máy thêm sau vẫn đứng cuối
+      await addNode('e');
+      expect(await listedNames()).toEqual(['c', 'a', 'b', 'd', 'e']);
+    });
+
+    it('POST /v1/admin/nodes/reorder rejects unknown and repeated ids without changing anything', async () => {
+      await addNode('a');
+      const b = await addNode('b');
+      const unknown = await request(app.getHttpServer())
+        .post('/v1/admin/nodes/reorder')
+        .send({ ids: [b, randomUUID()] });
+      expect(unknown.status).toBe(404);
+      const repeated = await request(app.getHttpServer()).post('/v1/admin/nodes/reorder').send({ ids: [b, b] });
+      expect(repeated.status).toBe(400);
+      const empty = await request(app.getHttpServer()).post('/v1/admin/nodes/reorder').send({ ids: [] });
+      expect(empty.status).toBe(400);
+      expect(await listedNames()).toEqual(['a', 'b']);
+    });
+
+    it('PATCH /v1/admin/nodes/:id sets priority_order, and nodes added later still go last', async () => {
+      const a = await addNode('a');
+      await addNode('b');
+      const res = await request(app.getHttpServer()).patch(`/v1/admin/nodes/${a}`).send({ priority_order: 500 });
+      expect(res.status).toBe(200);
+      expect(res.body.data.priority_order).toBe(500);
+      expect(await listedNames()).toEqual(['b', 'a']);
+      await addNode('c');
+      expect(await listedNames()).toEqual(['b', 'a', 'c']);
+    });
+
+    it('PATCH /v1/admin/nodes/:id blocks job kinds; the old allowed_kinds is refused clearly', async () => {
+      const a = await addNode('a');
+      const res = await request(app.getHttpServer())
+        .patch(`/v1/admin/nodes/${a}`)
+        .send({ blocked_kinds: ['scan.ai', 'scan.ai', 'studio.tts'] });
+      expect(res.status).toBe(200);
+      expect(res.body.data.blocked_kinds).toEqual(['scan.ai', 'studio.tts']);
+      expect(res.body.data.allowed_kinds).toBeUndefined();
+      expect((await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: a })).blockedKinds).toEqual(['scan.ai', 'studio.tts']);
+
+      const cleared = await request(app.getHttpServer()).patch(`/v1/admin/nodes/${a}`).send({ blocked_kinds: [] });
+      expect(cleared.body.data.blocked_kinds).toEqual([]);
+
+      const old = await request(app.getHttpServer()).patch(`/v1/admin/nodes/${a}`).send({ allowed_kinds: ['scan.ai'] });
+      expect(old.status).toBe(400);
+      expect(JSON.stringify(old.body)).toContain('blocked_kinds');
+      const unknownKind = await request(app.getHttpServer()).patch(`/v1/admin/nodes/${a}`).send({ blocked_kinds: ['nope'] });
+      expect(unknownKind.status).toBe(400);
+    });
+
+    it('a new node blocks nothing', async () => {
+      const a = await addNode('a');
+      const res = await request(app.getHttpServer()).get('/v1/admin/nodes');
+      const item = (res.body.data.items as Array<{ id: string; blocked_kinds: string[] }>).find((n) => n.id === a);
+      expect(item?.blocked_kinds).toEqual([]);
+    });
+
+    it('GET /v1/owner/nodes lists the nodes in priority order', async () => {
+      const { key } = await createOwner(ds, 'ag-go');
+      const a = await addNode('a');
+      const b = await addNode('b');
+      const c = await addNode('c');
+      await request(app.getHttpServer()).post('/v1/admin/nodes/reorder').send({ ids: [c, a, b] });
+      const res = await request(app.getHttpServer()).get('/v1/owner/nodes').set('Authorization', `Owner ${key}`);
+      expect(res.status).toBe(200);
+      expect((res.body.data.nodes as Array<{ name: string }>).map((n) => n.name)).toEqual(['c', 'a', 'b']);
+      // Không thêm khoá nào vào dạng node của chủ job (schema chặt ở client)
+      expect(Object.keys(res.body.data.nodes[0]).sort()).toEqual(
+        ['gpus', 'id', 'kinds', 'last_seen_at', 'name', 'online', 'running_jobs'].sort(),
+      );
+    });
+  });
 });
 
+// ============================================================
+// Thứ tự máy khi claim
+// ============================================================
+
+describe('node priority when claiming', () => {
+  let app: INestApplication;
+  let ds: DataSource;
+  let ownerKey: string;
+
+  const CAPS = {
+    os: 'linux',
+    cpu_cores: 4,
+    ram_mb: 8192,
+    gpus: [],
+    engines: { ffmpeg: null, ollama_models: [], python: null },
+  };
+  type Slots = { cpu: number; gpu: number };
+  type NodeOpts = { kinds?: string[]; free?: Slots; caps?: typeof CAPS };
+
+  beforeAll(async () => {
+    app = await buildAdminApp();
+    ds = getDs(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await ds.query('TRUNCATE TABLE farm_jobs, farm_nodes, farm_owners, farm_enrollments RESTART IDENTITY CASCADE');
+    ownerKey = (await createOwner(ds, 'ag-go')).key;
+  });
+
+  async function heartbeat(token: string, opts: NodeOpts = {}): Promise<void> {
+    const res = await request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({
+        agent_version: '1.0',
+        kinds: opts.kinds ?? ['scan.extract'],
+        capabilities: opts.caps ?? CAPS,
+        free_slots: opts.free ?? { cpu: 2, gpu: 0 },
+        running_job_ids: [],
+      });
+    expect(res.status).toBe(200);
+  }
+
+  /** Máy mới (đứng cuối thứ tự), đã heartbeat: online, báo loại job và slot trống. */
+  async function addNode(name: string, opts: NodeOpts = {}): Promise<{ id: string; token: string }> {
+    const token = randomBytes(16).toString('base64url');
+    const repo = ds.getRepository(FarmNodeEntity);
+    const saved = await repo.save(
+      repo.create({
+        name,
+        machine: name,
+        kinds: opts.kinds ?? ['scan.extract'],
+        tokenHash: createHash('sha256').update(token).digest('hex'),
+        status: 'active',
+      }),
+    );
+    await heartbeat(token, opts);
+    return { id: saved.id, token };
+  }
+
+  async function claim(token: string, free: Slots = { cpu: 2, gpu: 0 }) {
+    const res = await request(app.getHttpServer())
+      .post('/v1/worker/claim')
+      .set('Authorization', `Node ${token}`)
+      .send({ kinds: ['scan.extract'], free_slots: free, cached_affinity: [] });
+    expect(res.status).toBe(200);
+    return res.body.data as { job: { id: string } | null; waiting_interactive?: unknown };
+  }
+
+  async function submit(correlationId: string, requirements?: Record<string, unknown>): Promise<string> {
+    const res = await request(app.getHttpServer())
+      .post('/v1/owner/jobs')
+      .set('Authorization', `Owner ${ownerKey}`)
+      .send({
+        type: 'scan.extract',
+        correlation_id: correlationId,
+        ...(requirements ? { requirements } : {}),
+        payload: {
+          asset: {
+            id: randomUUID(),
+            kind: 'video',
+            mime_type: 'video/mp4',
+            size_bytes: null,
+            checksum_sha256: null,
+            duration_ms: null,
+            width: null,
+            height: null,
+          },
+          extract_version: 'x1',
+        },
+        max_attempts: 1,
+      });
+    expect(res.status).toBe(200);
+    return res.body.data.job.id as string;
+  }
+
+  it('an idle earlier node keeps the job: the later node gets nothing, the earlier one gets it', async () => {
+    const a = await addNode('a');
+    const b = await addNode('b');
+    const jobId = await submit('p-idle');
+
+    expect(await claim(b.token)).toEqual({ job: null });
+    expect((await claim(a.token)).job?.id).toBe(jobId);
+  });
+
+  it('the order follows the admin reorder', async () => {
+    const a = await addNode('a');
+    const b = await addNode('b');
+    await request(app.getHttpServer()).post('/v1/admin/nodes/reorder').send({ ids: [b.id, a.id] });
+    const jobId = await submit('p-reorder');
+
+    expect((await claim(a.token)).job).toBeNull();
+    expect((await claim(b.token)).job?.id).toBe(jobId);
+  });
+
+  it('the later node claims when the earlier node has no free slot', async () => {
+    await addNode('a', { free: { cpu: 0, gpu: 0 } });
+    const b = await addNode('b');
+    const jobId = await submit('p-busy');
+    expect((await claim(b.token)).job?.id).toBe(jobId);
+  });
+
+  it('jobs leased to the earlier node since its heartbeat use up its free slots', async () => {
+    const a = await addNode('a', { free: { cpu: 1, gpu: 0 } });
+    const b = await addNode('b');
+    const first = await submit('p-lease-1');
+    expect((await claim(a.token)).job?.id).toBe(first);
+    // A báo 1 slot trống ở heartbeat, nhưng đã nhận 1 job sau đó: hết chỗ, B nhận job tiếp theo.
+    const second = await submit('p-lease-2');
+    expect((await claim(b.token)).job?.id).toBe(second);
+  });
+
+  it('a later node only yields as many jobs as the earlier node has free slots', async () => {
+    const a = await addNode('a', { free: { cpu: 1, gpu: 0 } });
+    const b = await addNode('b');
+    const first = await submit('p-slots-1');
+    const second = await submit('p-slots-2');
+    // A còn 1 slot: job đầu nhường A, job sau B nhận.
+    expect((await claim(b.token)).job?.id).toBe(second);
+    expect((await claim(a.token)).job?.id).toBe(first);
+  });
+
+  it('the later node claims when the earlier node is offline', async () => {
+    const a = await addNode('a');
+    const b = await addNode('b');
+    await ds.query(`UPDATE farm_nodes SET last_seen_at = now() - interval '10 minutes' WHERE id = $1`, [a.id]);
+    const jobId = await submit('p-offline');
+    expect((await claim(b.token)).job?.id).toBe(jobId);
+  });
+
+  it('the later node claims when the earlier node is disabled or paused', async () => {
+    const a = await addNode('a');
+    const b = await addNode('b');
+    await ds.getRepository(FarmNodeEntity).update(a.id, { status: 'disabled' });
+    const first = await submit('p-disabled');
+    expect((await claim(b.token)).job?.id).toBe(first);
+
+    await ds.getRepository(FarmNodeEntity).update(a.id, { status: 'active', schedule: { paused: true } });
+    const second = await submit('p-paused');
+    expect((await claim(b.token)).job?.id).toBe(second);
+  });
+
+  it('the later node claims when the earlier node does not take that job type', async () => {
+    const a = await addNode('a', { kinds: ['scan.ai'] });
+    const b = await addNode('b');
+    const first = await submit('p-kind');
+    expect((await claim(b.token)).job?.id).toBe(first);
+
+    // Máy báo nhận loại này nhưng admin chặn
+    await heartbeat(a.token, { kinds: ['scan.extract'] });
+    await ds.getRepository(FarmNodeEntity).update(a.id, { blockedKinds: ['scan.extract'] });
+    const second = await submit('p-allowed');
+    expect((await claim(b.token)).job?.id).toBe(second);
+  });
+
+  it('the later node claims when the earlier node does not meet the job requirements', async () => {
+    await addNode('a');
+    const b = await addNode('b', { caps: { ...CAPS, os: 'windows' } });
+    const jobId = await submit('p-reqs', { os: 'windows' });
+    expect((await claim(b.token)).job?.id).toBe(jobId);
+  });
+
+  it('after the grace period any node takes the job', async () => {
+    await addNode('a');
+    const b = await addNode('b');
+    const jobId = await submit('p-grace');
+    expect((await claim(b.token)).job).toBeNull();
+    await ds.query(
+      `UPDATE farm_jobs SET created_at = now() - interval '1 minute', updated_at = now() - interval '1 minute' WHERE id = $1`,
+      [jobId],
+    );
+    expect((await claim(b.token)).job?.id).toBe(jobId);
+  });
+
+  it('a job pinned to a node is not held for an earlier node', async () => {
+    await addNode('a');
+    const b = await addNode('b');
+    const jobId = await submit('p-pinned', { node_id: b.id });
+    expect((await claim(b.token)).job?.id).toBe(jobId);
+  });
+
+  it('concurrent claims from nodes in order never hand out a job twice', async () => {
+    const nodes: Array<{ id: string; token: string }> = [];
+    for (let i = 0; i < 5; i++) nodes.push(await addNode(`n${i}`));
+    for (let i = 0; i < 8; i++) await submit(`p-conc-${i}`);
+
+    const claims = await Promise.all([...nodes, ...nodes, ...nodes].map((n) => claim(n.token)));
+    const ids = claims.map((c) => c.job?.id).filter((id): id is string => id != null);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids.length).toBeLessThanOrEqual(8);
+    const leased: { n: string }[] = await ds.query(`SELECT COUNT(*) AS n FROM farm_jobs WHERE status = 'leased'`);
+    expect(Number(leased[0]!.n)).toBe(ids.length);
+  });
+});
+
+// ============================================================
+// Worker tự cập nhật
+// ============================================================
+
+describe('worker self-update', () => {
+  let app: INestApplication;
+  let ds: DataSource;
+
+  const HEARTBEAT = {
+    agent_version: '0.9.0',
+    kinds: ['studio.render_preview'],
+    capabilities: { os: 'windows', cpu_cores: 8, ram_mb: 16384, gpus: [], engines: { ffmpeg: '7.0', ollama_models: [], python: null } },
+    free_slots: { cpu: 1, gpu: 0 },
+    running_job_ids: [],
+  };
+
+  beforeAll(async () => {
+    app = await buildAdminApp();
+    ds = getDs(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await ds.query('TRUNCATE TABLE farm_jobs, farm_nodes, farm_owners, farm_enrollments RESTART IDENTITY CASCADE');
+  });
+
+  function heartbeat(token: string, extra: Record<string, unknown> = {}) {
+    return request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({ ...HEARTBEAT, ...extra });
+  }
+
+  it('worker/me: auto_update on by default, no update requested', async () => {
+    const { token } = await createNode(ds);
+    const me = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${token}`);
+    expect(me.status).toBe(200);
+    expect(me.body.data.auto_update).toBe(true);
+    expect(me.body.data.update_requested_at).toBeNull();
+  });
+
+  it('worker/me: says what the admin set', async () => {
+    const { node, token } = await createNode(ds);
+    await ds.query(`UPDATE farm_nodes SET auto_update = false, update_requested_at = '2026-10-12T10:00:00Z' WHERE id = $1`, [node.id]);
+    const me = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${token}`);
+    expect(me.body.data.auto_update).toBe(false);
+    expect(me.body.data.update_requested_at).toBe('2026-10-12T10:00:00.000Z');
+  });
+
+  it('a heartbeat with update is stored; one without (older worker) keeps it', async () => {
+    const { node, token } = await createNode(ds);
+    const update = { state: 'draining', target_version: '0.9.1', since: '2026-10-12T10:00:00.000Z' };
+    expect((await heartbeat(token, { update })).status).toBe(200);
+    let row = await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id });
+    expect(row.updateStatus).toEqual(update);
+    expect(row.updateStatusAt).toBeInstanceOf(Date);
+
+    expect((await heartbeat(token)).status).toBe(200);
+    row = await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id });
+    expect(row.updateStatus).toEqual(update);
+    expect(row.agentVersion).toBe('0.9.0');
+  });
+
+  it('a heartbeat with an unknown update state is refused', async () => {
+    const { token } = await createNode(ds);
+    expect((await heartbeat(token, { update: { state: 'sleeping' } })).status).toBe(400);
+  });
+
+  it('admin turns auto-update off and on; the worker sees it', async () => {
+    const { node, token } = await createNode(ds);
+    const off = await request(app.getHttpServer()).patch(`/v1/admin/nodes/${node.id}`).send({ auto_update: false });
+    expect(off.status).toBe(200);
+    expect(off.body.data.auto_update).toBe(false);
+    let me = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${token}`);
+    expect(me.body.data.auto_update).toBe(false);
+    await request(app.getHttpServer()).patch(`/v1/admin/nodes/${node.id}`).send({ auto_update: true });
+    me = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${token}`);
+    expect(me.body.data.auto_update).toBe(true);
+    expect((await request(app.getHttpServer()).patch(`/v1/admin/nodes/${node.id}`).send({ auto_update: 'yes' })).status).toBe(400);
+  });
+
+  it('"update now" stamps the node; the worker sees the time', async () => {
+    const { node, token } = await createNode(ds);
+    const before = Date.now();
+    const res = await request(app.getHttpServer()).post(`/v1/admin/nodes/${node.id}/update-now`);
+    expect(res.status).toBe(200);
+    const at = Date.parse(res.body.data.update_requested_at);
+    expect(at).toBeGreaterThanOrEqual(before - 1000);
+    const me = await request(app.getHttpServer()).get('/v1/worker/me').set('Authorization', `Node ${token}`);
+    expect(me.body.data.update_requested_at).toBe(res.body.data.update_requested_at);
+    expect((await request(app.getHttpServer()).post(`/v1/admin/nodes/${randomUUID()}/update-now`)).status).toBe(404);
+  });
+
+  it('the admin node list shows the update state the worker reported', async () => {
+    const { node, token } = await createNode(ds);
+    const update = { state: 'failed', target_version: '0.9.1', message: 'no heartbeat in 3 min | setup.log: pip failed' };
+    await heartbeat(token, { update });
+    const list = await request(app.getHttpServer()).get('/v1/admin/nodes');
+    const row = list.body.data.items.find((n: { id: string }) => n.id === node.id);
+    expect(row).toMatchObject({ auto_update: true, update_requested_at: null, update, agent_version: '0.9.0' });
+    expect(typeof row.update_at).toBe('string');
+  });
+
+  it('migration down/up keeps the other node columns', async () => {
+    const { node } = await createNode(ds);
+    const runner = ds.createQueryRunner();
+    try {
+      const m = new NodeSelfUpdate2000000000000();
+      await m.down(runner);
+      const cols: { column_name: string }[] = await runner.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_name = 'farm_nodes' AND column_name IN ('auto_update', 'update_requested_at', 'update_status', 'update_status_at')`,
+      );
+      expect(cols).toHaveLength(0);
+      await m.up(runner);
+      const rows: { auto_update: boolean }[] = await runner.query(`SELECT auto_update FROM farm_nodes WHERE id = $1`, [node.id]);
+      expect(rows[0]!.auto_update).toBe(true);
+    } finally {
+      await runner.release();
+    }
+  });
+});
+
+// ============================================================
+// Tình trạng máy
+// ============================================================
+
+describe('machine metrics', () => {
+  let app: INestApplication;
+  let ds: DataSource;
+
+  const HEARTBEAT = {
+    agent_version: '0.9.0',
+    kinds: ['studio.render_preview'],
+    capabilities: { os: 'windows', cpu_cores: 8, ram_mb: 16384, gpus: [], engines: { ffmpeg: '7.0', ollama_models: [], python: null } },
+    free_slots: { cpu: 1, gpu: 0 },
+    running_job_ids: [],
+  };
+  const METRICS = {
+    cpu_pct: 42.5,
+    ram_used_mb: 12_000,
+    ram_total_mb: 16_384,
+    disks: [
+      { path: 'C:', free_mb: 80_000, total_mb: 500_000 },
+      { path: 'D:', free_mb: 15_000, total_mb: 1_000_000 },
+    ],
+    net_rx_bps: 125_000,
+    net_tx_bps: 4_000,
+    gpus: [{ index: 0, util_pct: 88, vram_used_mb: 6000, vram_total_mb: 8192, temp_c: 70 }],
+    uptime_s: 3600,
+  };
+
+  beforeAll(async () => {
+    app = await buildAdminApp();
+    ds = getDs(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await ds.query('TRUNCATE TABLE farm_jobs, farm_nodes, farm_owners, farm_enrollments, farm_machine_metrics RESTART IDENTITY CASCADE');
+  });
+
+  async function nodeOn(machine: string, name: string): Promise<{ node: FarmNodeEntity; token: string }> {
+    const token = randomBytes(24).toString('base64url');
+    const repo = ds.getRepository(FarmNodeEntity);
+    const node = await repo.save(
+      repo.create({
+        name,
+        machine,
+        kinds: ['studio.render_preview'],
+        tokenHash: createHash('sha256').update(token).digest('hex'),
+        status: 'active',
+      }),
+    );
+    return { node, token };
+  }
+
+  function heartbeat(token: string, extra: Record<string, unknown> = {}) {
+    return request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({ ...HEARTBEAT, ...extra });
+  }
+
+  async function machineRows(): Promise<Array<Record<string, unknown>>> {
+    return ds.query(`SELECT * FROM farm_machine_metrics ORDER BY machine, at`);
+  }
+
+  it('a heartbeat with metrics keeps them on the node and in the machine history', async () => {
+    const { node, token } = await nodeOn('PC1', 'PC1-render');
+    expect((await heartbeat(token, { metrics: METRICS })).status).toBe(200);
+    const saved = await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id });
+    expect(saved.metrics).toEqual(METRICS);
+    expect(saved.metricsAt).toBeInstanceOf(Date);
+
+    const rows = await machineRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      machine: 'PC1',
+      cpu_pct: 42.5,
+      ram_used_mb: 12_000,
+      ram_total_mb: 16_384,
+      disk_free_mb: 15_000,
+      disk_total_mb: 1_000_000,
+      net_rx_bps: 125_000,
+      net_tx_bps: 4_000,
+      disks: METRICS.disks,
+      gpu: METRICS.gpus,
+    });
+    expect((rows[0]!['at'] as Date).getUTCSeconds()).toBe(0);
+
+    // Trang Máy thấy số đo mới nhất
+    const list = await request(app.getHttpServer()).get('/v1/admin/nodes');
+    const view = list.body.data.items.find((n: { id: string }) => n.id === node.id);
+    expect(view.metrics).toEqual(METRICS);
+    expect(typeof view.metrics_at).toBe('string');
+  });
+
+  it('nodes of one machine share one row per minute; a reading without a value keeps the earlier one', async () => {
+    const render = await nodeOn('PC2', 'PC2-render');
+    const scan = await nodeOn('PC2', 'PC2-scan');
+    const loner = await nodeOn('', 'old-node');
+    expect((await heartbeat(render.token, { metrics: METRICS })).status).toBe(200);
+    expect((await heartbeat(scan.token, { metrics: { cpu_pct: 90, ram_used_mb: 13_000, ram_total_mb: 16_384 } })).status).toBe(200);
+    expect((await heartbeat(loner.token, { metrics: { cpu_pct: 5 } })).status).toBe(200);
+    const rows = await machineRows();
+    expect(rows.map((r) => r['machine']).sort()).toEqual(['PC2', 'old-node']);
+    const pc2 = rows.find((r) => r['machine'] === 'PC2');
+    // Cùng phút: số mới nhất của máy; GPU/ổ giữ từ lần trước vì lần sau không có
+    expect(pc2).toMatchObject({ cpu_pct: 90, ram_used_mb: 13_000, disk_free_mb: 15_000, gpu: METRICS.gpus });
+  });
+
+  it('a heartbeat without metrics (older worker) keeps the last reading and writes no history', async () => {
+    const { node, token } = await nodeOn('PC3', 'PC3-render');
+    await heartbeat(token, { metrics: METRICS });
+    await ds.query(`DELETE FROM farm_machine_metrics`);
+    expect((await heartbeat(token)).status).toBe(200);
+    const saved = await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id });
+    expect(saved.metrics).toEqual(METRICS);
+    expect(await machineRows()).toHaveLength(0);
+  });
+
+  it('a heartbeat with bad metrics is refused', async () => {
+    const { token } = await nodeOn('PC4', 'PC4-render');
+    expect((await heartbeat(token, { metrics: { cpu_pct: 250 } })).status).toBe(400);
+    expect((await heartbeat(token, { metrics: { temperature: 1 } })).status).toBe(400);
+  });
+
+  it('GET machines/:machine/metrics gives buckets for 1h, 24h, 7d', async () => {
+    const now = Date.now();
+    const minute = (ago: number) => new Date(Math.floor((now - ago * 60_000) / 60_000) * 60_000).toISOString();
+    const samples: Array<[number, number]> = [
+      [2, 10],
+      [3, 30],
+      [200, 50],
+      [3 * 24 * 60, 70],
+      [8 * 24 * 60, 99],
+    ];
+    for (const [ago, cpu] of samples) {
+      await ds.query(
+        `INSERT INTO farm_machine_metrics (machine, at, cpu_pct, ram_used_mb, ram_total_mb) VALUES ('PC 5', $1, $2, 1000, 2000)`,
+        [minute(ago), cpu],
+      );
+    }
+    const get = (range?: string) =>
+      request(app.getHttpServer()).get(`/v1/admin/machines/${encodeURIComponent('PC 5')}/metrics${range ? `?range=${range}` : ''}`);
+    const cpus = (body: { data: { points: Array<{ cpu_pct: number | null }> } }) =>
+      body.data.points.map((p) => p.cpu_pct).filter((v): v is number => v != null);
+
+    const hour = await get();
+    expect(hour.status).toBe(200);
+    expect(hour.body.data).toMatchObject({ machine: 'PC 5', range: '1h', bucket_seconds: 60 });
+    expect(cpus(hour.body)).toEqual([30, 10]);
+    expect(hour.body.data.points.length).toBeLessThanOrEqual(61);
+
+    const day = await get('24h');
+    expect(day.body.data.bucket_seconds).toBe(300);
+    expect(day.body.data.points.length).toBeLessThanOrEqual(300);
+    expect(cpus(day.body)[0]).toBe(50);
+
+    const week = await get('7d');
+    expect(week.body.data.bucket_seconds).toBe(3600);
+    expect(week.body.data.points.length).toBeLessThanOrEqual(300);
+    expect(cpus(week.body)[0]).toBe(70); // 8 ngày trước nằm ngoài 7d
+
+    expect((await get('30d')).status).toBe(400);
+    const none = await request(app.getHttpServer()).get('/v1/admin/machines/unknown/metrics');
+    expect(none.status).toBe(200);
+    expect(cpus(none.body)).toEqual([]);
+  });
+
+  it('the reaper deletes readings older than 7 days, in batches', async () => {
+    const now = new Date();
+    await ds.query(
+      `INSERT INTO farm_machine_metrics (machine, at, cpu_pct)
+       SELECT 'PC6', $1::timestamptz - make_interval(mins => g), 1 FROM generate_series(0, 11999) g`,
+      [new Date(now.getTime() - 8 * 24 * 60 * 60_000).toISOString()],
+    );
+    await ds.query(`INSERT INTO farm_machine_metrics (machine, at, cpu_pct) VALUES ('PC6', $1, 2)`, [
+      new Date(now.getTime() - 6 * 24 * 60 * 60_000).toISOString(),
+    ]);
+    const reaper = app.get(ReaperService);
+    expect(await reaper.pruneMetrics(now)).toBe(12_000);
+    const left: Array<{ cpu_pct: number }> = await ds.query(`SELECT cpu_pct FROM farm_machine_metrics`);
+    expect(left).toEqual([{ cpu_pct: 2 }]);
+    expect(await reaper.pruneMetrics(now)).toBe(0);
+  });
+
+  it('migration down/up drops and restores the metrics columns and table', async () => {
+    const { node, token } = await nodeOn('PC7', 'PC7-render');
+    await heartbeat(token, { metrics: METRICS });
+    const runner = ds.createQueryRunner();
+    try {
+      const m = new MachineMetrics2100000000000();
+      await m.down(runner);
+      const cols: unknown[] = await runner.query(
+        `SELECT 1 FROM information_schema.columns WHERE table_name = 'farm_nodes' AND column_name IN ('metrics', 'metrics_at')`,
+      );
+      expect(cols).toHaveLength(0);
+      expect(await runner.query(`SELECT 1 FROM pg_tables WHERE tablename = 'farm_machine_metrics'`)).toHaveLength(0);
+      await m.up(runner);
+      const rows: Array<{ metrics: unknown }> = await runner.query(`SELECT metrics FROM farm_nodes WHERE id = $1`, [node.id]);
+      expect(rows[0]!.metrics).toBeNull();
+      const idx: unknown[] = await runner.query(
+        `SELECT 1 FROM pg_indexes WHERE tablename = 'farm_machine_metrics' AND indexname = 'farm_machine_metrics_at_idx'`,
+      );
+      expect(idx).toHaveLength(1);
+    } finally {
+      await runner.release();
+    }
+  });
+});

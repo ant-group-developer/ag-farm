@@ -16,6 +16,7 @@ import {
   ProgressRequestSchema,
   ProgressResponseSchema,
   WORKER_API,
+  WorkerMeResponseSchema,
   apiErrorOf,
   unwrapApiResponse,
 } from '@ag-farm/protocol';
@@ -28,6 +29,7 @@ import type {
   HeartbeatResponse,
   ProgressRequest,
   ProgressResponse,
+  WorkerMeResponse,
 } from '@ag-farm/protocol';
 
 const HUB_REQUEST_TIMEOUT_MS = 30_000;
@@ -42,11 +44,35 @@ export class LeaseLostError extends Error {
   }
 }
 
+/** Hub trả mã lỗi HTTP (không phải 409 lease). */
+export class HubRequestError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'HubRequestError';
+  }
+}
+
 export class HubClient {
   constructor(
     private readonly hubUrl: string,
     private readonly token: string,
   ) {}
+
+  /**
+   * `GET /v1/worker/me`: hub có cho tự cập nhật không. Đọc lỏng (hub mới thêm khoá thì worker này vẫn đọc được).
+   */
+  async me(): Promise<WorkerMeResponse> {
+    const path = '/v1/worker/me';
+    const res = await fetch(`${this.hubUrl.replace(/\/$/, '')}${path}`, {
+      headers: { Authorization: `${AUTH_SCHEMES.node} ${this.token}` },
+      signal: AbortSignal.timeout(HUB_REQUEST_TIMEOUT_MS),
+    });
+    await this.checkStatus(res, path);
+    return WorkerMeResponseSchema.loose().parse(unwrapApiResponse(await res.json()));
+  }
 
   async heartbeat(req: HeartbeatRequest): Promise<HeartbeatResponse> {
     const body = HeartbeatRequestSchema.parse(req);
@@ -117,7 +143,7 @@ export class HubClient {
     }
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`Hub request ${path} failed: HTTP ${res.status} - ${text}`);
+      throw new HubRequestError(res.status, `Hub request ${path} failed: HTTP ${res.status} - ${text}`);
     }
   }
 }

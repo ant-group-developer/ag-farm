@@ -3,6 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FarmJobEntity } from '../../database/entities/farm-job.entity';
+import { MachineMetricsService } from '../machines/machine-metrics.service';
+
+/** Dọn lịch sử số đo máy mỗi 10 phút (lần đầu sau 1 phút). */
+const METRICS_PRUNE_INTERVAL_MS = 10 * 60_000;
 
 /** Kiểu giá trị cho UPDATE của TypeORM (khác Partial ở các cột jsonb). */
 type JobPatch = Parameters<Repository<FarmJobEntity>['update']>[1];
@@ -19,11 +23,14 @@ function backoffMs(attempt: number): number {
 export class ReaperService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ReaperService.name);
   private timer?: ReturnType<typeof setInterval>;
+  private pruneTimer?: ReturnType<typeof setInterval>;
+  private pruneFirst?: ReturnType<typeof setTimeout>;
 
   constructor(
     @InjectRepository(FarmJobEntity)
     private readonly jobRepo: Repository<FarmJobEntity>,
     private readonly config: ConfigService,
+    private readonly machineMetrics: MachineMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -33,10 +40,29 @@ export class ReaperService implements OnModuleInit, OnModuleDestroy {
         this.logger.error('Reaper error', err);
       });
     }, intervalMs);
+    const prune = () => {
+      this.pruneMetrics().catch((err: unknown) => {
+        this.logger.error('Machine metrics prune error', err);
+      });
+    };
+    this.pruneFirst = setTimeout(prune, 60_000);
+    this.pruneFirst.unref?.();
+    this.pruneTimer = setInterval(prune, METRICS_PRUNE_INTERVAL_MS);
+    this.pruneTimer.unref?.();
   }
 
   onModuleDestroy(): void {
     if (this.timer) clearInterval(this.timer);
+    if (this.pruneTimer) clearInterval(this.pruneTimer);
+    if (this.pruneFirst) clearTimeout(this.pruneFirst);
+  }
+
+  /** Xoá số đo máy cũ hơn `MACHINE_METRICS_KEEP_DAYS` (mặc định 7 ngày), từng lô. Dùng trong test để gọi thủ công. */
+  async pruneMetrics(now: Date = new Date()): Promise<number> {
+    const before = new Date(now.getTime() - this.machineMetrics.keepDays() * 24 * 60 * 60_000);
+    const deleted = await this.machineMetrics.prune(before);
+    if (deleted > 0) this.logger.log(`Pruned ${deleted} machine metric rows older than ${before.toISOString()}`);
+    return deleted;
   }
 
   /** Dùng trong test để gọi thủ công */

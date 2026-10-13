@@ -163,3 +163,42 @@ describe('HubClient — LeaseLost via envelope', () => {
     }
   });
 });
+
+describe('HubClient — worker/me', () => {
+  const ME = {
+    node_id: NODE_UUID,
+    name: 'n-render',
+    status: 'active',
+    agent_version: '0.9.0',
+    last_seen_at: TS,
+    ollama_models: [],
+  };
+
+  it('reads auto_update and update_requested_at, sends the node token', async () => {
+    let auth = '';
+    const { server, url } = await startServer((req, res) => {
+      auth = String(req.headers['authorization']);
+      jsonResponse(res, 200, envelope({ ...ME, auto_update: false, update_requested_at: TS }));
+    });
+    try {
+      const me = await new HubClient(url, 'tok').me();
+      expect(auth).toBe('Node tok');
+      expect(me.auto_update).toBe(false);
+      expect(me.update_requested_at).toBe(TS);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it('an older hub without the fields, or a newer one with more keys, still parses', async () => {
+    const { server, url } = await startServer((req, res) => {
+      jsonResponse(res, 200, envelope({ ...ME, something_new: 1 }));
+    });
+    try {
+      const me = await new HubClient(url, 'tok').me();
+      expect(me.auto_update).toBeUndefined();
+    } finally {
+      await closeServer(server);
+    }
+  });
+});

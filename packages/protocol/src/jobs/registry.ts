@@ -7,6 +7,7 @@ import {
   StudioTtsPayloadSchema,
   StudioExportPremierePayloadSchema,
   StudioTranscribePayloadSchema,
+  StudioReferenceFetchPayloadSchema,
 } from './studio';
 
 export type SlotKind = 'cpu' | 'gpu';
@@ -72,6 +73,13 @@ export const JOB_TYPE_SPECS: Record<JobType, JobTypeSpec> = {
     payload: StudioTranscribePayloadSchema,
     baseRequirements: { gpu: true, python: true },
   },
+  'studio.reference_fetch': {
+    owner: 'studio',
+    lane: 'interactive',
+    slot: 'cpu',
+    payload: StudioReferenceFetchPayloadSchema,
+    baseRequirements: { ytdlp: true },
+  },
 };
 
 /** Gộp điều kiện gốc của loại job với điều kiện chủ job gửi (chủ job chỉ được siết thêm). */
@@ -81,6 +89,7 @@ export function mergeRequirements(type: JobType, extra: Requirements): Requireme
   if (base.gpu) merged.gpu = true;
   if (base.python) merged.python = true;
   if (base.nvenc) merged.nvenc = true;
+  if (base.ytdlp) merged.ytdlp = true;
   if (base.os) merged.os = base.os;
   if (base.min_vram_mb !== undefined) {
     merged.min_vram_mb = Math.max(base.min_vram_mb, extra.min_vram_mb ?? 0);

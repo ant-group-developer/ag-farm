@@ -1,4 +1,4 @@
-import { detectPython, type PythonExec } from './capabilities';
+import { detectCapabilities, detectPython, detectYtdlp, type PythonExec } from './capabilities';
 
 function fakeExec(answers: Record<string, string | Error>): { exec: PythonExec; calls: string[] } {
   const calls: string[] = [];
@@ -42,4 +42,26 @@ describe('detectPython', () => {
     const { exec } = fakeExec({});
     await expect(detectPython(undefined, exec)).resolves.toBeNull();
   });
+});
+
+describe('detectYtdlp', () => {
+  it('runs the given yt-dlp and reports its version', async () => {
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const exec: PythonExec = async (file, args) => { calls.push({ file, args }); return { stdout: '2026.08.19\r\n' }; };
+    await expect(detectYtdlp('C:/ag-farm/venv/Scripts/yt-dlp.exe', exec)).resolves.toBe('2026.08.19');
+    expect(calls).toEqual([{ file: 'C:/ag-farm/venv/Scripts/yt-dlp.exe', args: ['--version'] }]);
+  });
+
+  it('reports nothing when yt-dlp does not run', async () => {
+    const exec: PythonExec = async () => { throw new Error('ENOENT'); };
+    await expect(detectYtdlp('yt-dlp', exec)).resolves.toBeNull();
+  });
+});
+
+describe('detectCapabilities', () => {
+  it('does not send engines.ytdlp when it was not asked for or not found (older hubs reject the key)', async () => {
+    const caps = await detectCapabilities({ ffmpegPath: 'no-such-ffmpeg-xyz', ollamaUrl: 'http://127.0.0.1:1', ytdlpBin: 'no-such-yt-dlp-xyz' });
+    expect('ytdlp' in caps.engines).toBe(false);
+    expect(caps.engines.ffmpeg).toBeNull();
+  }, 30_000);
 });

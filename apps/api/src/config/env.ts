@@ -30,12 +30,28 @@ export const EnvSchema = z.object({
   // Node online threshold
   NODE_OFFLINE_AFTER_SECONDS: z.coerce.number().int().min(10).default(90),
 
+  /**
+   * Thứ tự máy: job chờ chưa quá ngần này giây thì máy xếp sau nhường cho máy xếp trước đang rảnh;
+   * quá thì máy nào cũng nhận (máy xếp trước chậm hay kẹt không giữ việc lại). 0 = tắt thứ tự máy.
+   */
+  NODE_PRIORITY_GRACE_SECONDS: z.coerce.number().int().min(0).default(10),
+
+  /** Giữ lịch sử số đo máy (CPU, RAM, ổ, mạng, GPU) bấy nhiêu ngày; reaper xoá dòng cũ hơn. */
+  MACHINE_METRICS_KEEP_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+
   FRONTEND_ORIGIN: z.string().default('*'),
 
   /** Địa chỉ hub mà máy worker gọi tới, hiện trong lệnh cài máy (vd. https://farm-api-dev.ant-group.net). */
   FARM_PUBLIC_URL: z.string().url().optional(),
   /** Thư mục gói phát hành worker (zip + latest.json), phục vụ ở `/dist/`. */
   FARM_RELEASES_DIR: z.string().optional(),
+  /**
+   * Khoá phát hành worker (`POST /v1/admin/releases` với `Authorization: Release <khoá>`, cho `release.mjs --upload`).
+   * Không đặt: chỉ admin đăng nhập (Auth0) mới phát hành được.
+   */
+  FARM_RELEASE_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(32).optional()),
+  /** Dung lượng tối đa một gói phát hành tải lên (MB). */
+  FARM_RELEASE_MAX_MB: z.coerce.number().int().min(1).max(4096).default(1024),
   /** Thư mục chứa install.ps1/uninstall.ps1, phục vụ ở `/dist/`. */
   FARM_INSTALLER_DIR: z.string().optional(),
   /** Model Ollama máy quét cần có (phân cách bởi dấu phẩy), trùng ANALYSIS_MODEL của ag-go. Bộ cài tải các model này. */

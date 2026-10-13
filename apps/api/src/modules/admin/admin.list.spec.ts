@@ -3,6 +3,8 @@ import {
   AdminListNodesQuerySchema,
   AdminListOwnersQuerySchema,
   AdminStatsPeriodQuerySchema,
+  PatchNodeSchema,
+  ReorderNodesSchema,
 } from './admin.dto';
 
 describe('AdminListJobsQuerySchema', () => {
@@ -52,12 +54,18 @@ describe('AdminListJobsQuerySchema', () => {
 });
 
 describe('AdminListNodesQuerySchema', () => {
-  it('dùng giá trị mặc định', () => {
+  it('mặc định theo thứ tự ưu tiên, số nhỏ trước', () => {
     const result = AdminListNodesQuerySchema.parse({});
     expect(result.page).toBe(1);
     expect(result.pageSize).toBe(20);
-    expect(result.sortBy).toBe('createdAt');
-    expect(result.sortOrder).toBe('desc');
+    expect(result.sortBy).toBe('priorityOrder');
+    expect(result.sortOrder).toBe('asc');
+  });
+
+  it('vẫn cho sắp theo tên, lần thấy cuối, ngày tạo', () => {
+    for (const sortBy of ['name', 'lastSeenAt', 'createdAt']) {
+      expect(AdminListNodesQuerySchema.parse({ sortBy, sortOrder: 'desc' })).toMatchObject({ sortBy, sortOrder: 'desc' });
+    }
   });
 
   it('chấp nhận lọc theo status', () => {
@@ -121,5 +129,31 @@ describe('AdminStatsPeriodQuerySchema', () => {
 
   it('từ chối bucket lạ (bucket được ghép vào SQL)', () => {
     expect(() => AdminStatsPeriodQuerySchema.parse({ ...day, bucket: "hour'; DROP TABLE farm_jobs; --" })).toThrow();
+  });
+});
+
+describe('PatchNodeSchema priority_order', () => {
+  it('nhận số nguyên không âm', () => {
+    expect(PatchNodeSchema.parse({ priority_order: 2 })).toEqual({ priority_order: 2 });
+  });
+
+  it('từ chối số âm, số lẻ', () => {
+    expect(() => PatchNodeSchema.parse({ priority_order: -1 })).toThrow();
+    expect(() => PatchNodeSchema.parse({ priority_order: 1.5 })).toThrow();
+  });
+});
+
+describe('ReorderNodesSchema', () => {
+  const a = '6f1c1d2e-0000-4000-8000-000000000001';
+  const b = '6f1c1d2e-0000-4000-8000-000000000002';
+
+  it('nhận danh sách id theo thứ tự mới', () => {
+    expect(ReorderNodesSchema.parse({ ids: [b, a] }).ids).toEqual([b, a]);
+  });
+
+  it('từ chối danh sách rỗng, id trùng, id không phải uuid', () => {
+    expect(() => ReorderNodesSchema.parse({ ids: [] })).toThrow();
+    expect(() => ReorderNodesSchema.parse({ ids: [a, a] })).toThrow();
+    expect(() => ReorderNodesSchema.parse({ ids: ['x'] })).toThrow();
   });
 });

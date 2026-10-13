@@ -55,11 +55,14 @@ export class OwnerService {
     private readonly config: ConfigService,
   ) {}
 
-  /** The active nodes that take at least one of the owner's job types, by name. */
+  /** The active nodes that take at least one of the owner's job types, in the farm's priority order (then by name). */
   async listNodes(owner: FarmOwnerEntity): Promise<ListOwnerNodesResponse> {
     const offlineSeconds = this.config.get<number>('NODE_OFFLINE_AFTER_SECONDS') ?? 90;
     const threshold = Date.now() - offlineSeconds * 1000;
-    const nodes = await this.nodeRepo.find({ where: { status: 'active' }, order: { name: 'ASC' } });
+    const nodes = await this.nodeRepo.find({
+      where: { status: 'active' },
+      order: { priorityOrder: 'ASC', name: 'ASC' },
+    });
     return {
       nodes: nodes
         .map((n) => toOwnerNodeView(n, n.lastSeenAt != null && n.lastSeenAt.getTime() >= threshold, owner.allowedTypes))
