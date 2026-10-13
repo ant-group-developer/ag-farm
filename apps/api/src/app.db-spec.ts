@@ -29,6 +29,7 @@ import { NodeBlockedKinds1900000000000 } from './database/migrations/19000000000
 import { NodeSelfUpdate2000000000000 } from './database/migrations/2000000000000-node-self-update';
 import { MachineMetrics2100000000000 } from './database/migrations/2100000000000-machine-metrics';
 import { StudioReferenceFetch2200000000000 } from './database/migrations/2200000000000-studio-reference-fetch';
+import { AgGoPrep2300000000000 } from './database/migrations/2300000000000-ag-go-prep';
 import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
 import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
@@ -86,6 +87,7 @@ const MIGRATIONS = [
   NodeSelfUpdate2000000000000,
   MachineMetrics2100000000000,
   StudioReferenceFetch2200000000000,
+  AgGoPrep2300000000000,
 ];
 
 /** Fake AccountMeClient → luôn trả ADMIN */

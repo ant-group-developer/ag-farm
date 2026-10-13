@@ -39,7 +39,7 @@ async function main() {
       id: ownerId,
       keyHash,
       signUrl,
-      allowedTypes: allowedTypes.length > 0 ? allowedTypes : ['scan.extract', 'scan.ai'],
+      allowedTypes: allowedTypes.length > 0 ? allowedTypes : ['scan.extract', 'scan.ai', 'scan.prep', 'studio.transcribe'],
     },
     ['id'],
   );
