@@ -3,6 +3,7 @@
 export type JobType =
   | 'scan.extract'
   | 'scan.ai'
+  | 'scan.prep'
   | 'studio.tts'
   | 'studio.render_preview'
   | 'studio.render_final'
@@ -13,6 +14,7 @@ export type JobType =
 export const JOB_TYPES: JobType[] = [
   'scan.extract',
   'scan.ai',
+  'scan.prep',
   'studio.tts',
   'studio.render_preview',
   'studio.render_final',

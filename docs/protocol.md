@@ -27,6 +27,9 @@ queued/leased ──cancel (chủ job)──► cancelled   (worker nhận 409 j
 
 - Claim chọn job theo thứ tự: `lane = interactive` trước, rồi `priority` cao hơn, rồi job có `affinity_key` worker đang cache, rồi job cũ nhất. Job chỉ được giao khi máy đáp ứng `requirements` (`meetsRequirements`) và còn slot đúng loại (`JOB_TYPE_SPECS[type].slot`).
 - Thứ tự máy (`farm_nodes.priority_order`, số nhỏ trước; admin kéo thả ở trang Worker, hay `POST /v1/admin/nodes/reorder {ids}`): máy B xin việc thì bỏ qua một job nếu còn máy A xếp trước B đang bật, online (heartbeat trong `NODE_OFFLINE_AFTER_SECONDS`), trong lịch (không `paused`), nhận loại job đó (`kinds` báo − `blocked_kinds`), đủ `requirements` và còn slot đúng loại. Slot trống của A là `free_slots` ở heartbeat gần nhất trừ các job (còn `leased`) đã giao cho A sau heartbeat đó; mỗi job B nhường giữ một slot của A trong lần claim ấy, nên B chỉ nhường số job A nhận nổi. Job chờ quá `NODE_PRIORITY_GRACE_SECONDS` (mặc định 10 s, tính từ mốc muộn nhất trong `created_at`, `updated_at` — lần vào lại hàng — và `not_before`) thì máy nào cũng nhận, để A chậm hay kẹt không giữ việc lại. Job ghim máy (`requirements.node_id`) không nhường. Thứ tự này chỉ là của hub: không đổi gì ở API worker; `GET /v1/owner/nodes` trả máy theo thứ tự này.
+- Chủ job nâng một job đang chờ bằng `POST /v1/owner/jobs/:id/raise {lane?, priority}` (`priority` −100..100, thiếu
+  `lane` thì giữ lane cũ): chỉ job `queued` của chính nó, job ở trạng thái khác nhận 409 `job_not_queued`; trả `JobView`.
+  Ví dụ ag-go nâng job `scan.prep` đang chờ trong lô chạy bù lên `interactive` khi Studio cần footage đó ngay.
 - Lease dài `LEASE_SECONDS` (120 s). Worker gửi progress mỗi 30 s để gia hạn và nhận vé mới.
 - Lease cũ (bị reaper lấy lại) nộp progress/complete/fail thì nhận 409 `lease_lost`; worker phải dừng job ngay.
 - `correlation_id` là duy nhất theo chủ job: gửi lại trả về job cũ (`created: false`), nên chủ job gửi lại thoải mái sau lỗi mạng.
@@ -50,6 +53,7 @@ Worker gửi danh sách thao tác, chủ job trả kết quả theo đúng thứ
 |---|---|---|---|---|
 | `scan.extract` | `ag-go` | batch | cpu | `ScanExtractPayload` → `extract.json` (`ExtractManifest`) |
 | `scan.ai` | `ag-go` | batch | gpu | `ScanAiPayload` (≤ 30 đoạn) → `ai-<chunk>.json` (`AiManifest`) |
+| `scan.prep` | `ag-go` | batch | cpu | `ScanPrepPayload` → `prep.json` (`ScanPrepManifest`) + `frames/NNN.jpg`, `sheets/NN.jpg`, `audio.wav` |
 | `studio.tts` | `studio` | interactive | gpu | `StudioTtsPayload` → `tts.json` (`TtsManifest`) + `tts/<line_id>.wav` |
 | `studio.render_preview` | `studio` | interactive | cpu | `StudioRenderPayload` → `render.json` (`RenderManifest`) + video |
 | `studio.render_final` | `studio` | interactive | cpu | `StudioRenderPayload` → `render.json` (`RenderManifest`) + video, thumbnail |
@@ -58,6 +62,21 @@ Worker gửi danh sách thao tác, chủ job trả kết quả theo đúng thứ
 | `studio.reference_fetch` | `studio` | interactive | cpu | `StudioReferenceFetchPayload` → video ở `output`, không manifest; `result.summary` là `StudioReferenceFetchResult` |
 
 `studio.tts` và `studio.transcribe` cần máy khai `gpu` và `python` (worker dò `import torch` bằng `python_bin` của nó).
+
+### `scan.prep`: đầu vào cho Studio chuẩn bị sẵn ở ag-go
+
+Mỗi footage chuẩn bị một lần ở ag-go, Studio chỉ tải kết quả về (không tải video, không cắt cảnh nữa).
+
+- Payload: `asset_id`, `source` (tên input; ag-go ký GET của bản sạch nhỏ nhất), `params` (`scene_threshold` 0,3,
+  `min_shot_s` 1, `max_shot_s` 20, `frame_width` 480, `sheet_cols` 4, `sheet_shots` 16, `audio` true).
+- Cảnh theo đúng luật của Studio: `select='gt(scene\,T)',showinfo` trên cả video (không giới hạn thời gian dò, timeout
+  theo thời lượng), mốc cắt làm tròn lưới 0,1 s, rồi `buildShots` (gộp cảnh < `min_shot_s` vào cảnh trước, cảnh đầu
+  gộp vào cảnh sau; chia đều cảnh > `max_shot_s`; `in`/`out` làm tròn 3 chữ số).
+- Đầu ra: `frames/NNN.jpg` (pad3, từ 1; khung tại `round(((in+out)/2)*1000)/1000`, `scale=<frame_width>:-2`),
+  `sheets/NN.jpg` (pad2, từ 1; `sheet_shots` cảnh mỗi tờ theo thứ tự, ffmpeg `tile=<cols>x<ceil(n/cols)>`),
+  `audio.wav` (16 kHz mono pcm_s16le; chỉ khi có tiếng và `params.audio`), `prep.json` (`ScanPrepManifest`,
+  schema `ag.scan.prep/v1`). ag-go gửi tiếp `studio.transcribe` với `audio: 'artifact:audio.wav'` (owner `ag-go` được
+  phép cả hai loại).
 
 ### `studio.reference_fetch`: video YouTube mẫu tải qua máy farm
 

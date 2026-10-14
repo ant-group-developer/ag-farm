@@ -14,6 +14,7 @@ import {
   JobControlRequestSchema,
   ListJobsQuerySchema,
   OWNER_API,
+  RaiseJobRequestSchema,
   SubmitJobRequestSchema,
 } from '@ag-farm/protocol';
 import { OwnerKeyGuard } from '../../auth/owner-key.guard';
@@ -76,6 +77,17 @@ export class OwnerController {
   @HttpCode(200)
   async ackJob(@Req() req: Request, @Param('id') jobId: string) {
     return this.svc.ack(req.ownerContext!.owner, jobId);
+  }
+
+  /** Đổi lane / độ ưu tiên của job còn `queued` (ví dụ nâng job đang chờ trong lô chạy bù khi có người cần ngay). */
+  @Post('v1/owner/jobs/:id/raise')
+  @HttpCode(200)
+  async raiseJob(
+    @Req() req: Request,
+    @Param('id') jobId: string,
+    @Body(new ZodValidationPipe(RaiseJobRequestSchema)) body: any,
+  ) {
+    return this.svc.raise(req.ownerContext!.owner, jobId, body);
   }
 
   @Post('v1/owner/jobs/:id/cancel')

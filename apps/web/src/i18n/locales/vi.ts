@@ -63,6 +63,7 @@ export const vi = {
     scan: {
       extract: 'Quét: tách khung hình',
       ai: 'Quét: AI mô tả',
+      prep: 'Quét: chuẩn bị cho Studio',
     },
     studio: {
       tts: 'Studio: đọc lời dẫn (TTS)',

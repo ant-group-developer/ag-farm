@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const JOB_TYPES = [
   'scan.extract',
   'scan.ai',
+  'scan.prep',
   'studio.tts',
   'studio.render_preview',
   'studio.render_final',
