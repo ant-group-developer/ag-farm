@@ -107,6 +107,24 @@ describe('NodesPage', () => {
     expect(container.querySelector('.ant-badge-count')?.textContent).toContain('2');
   });
 
+  it('tải lại có dữ liệu mới thì cập nhật ô tại chỗ, không dựng lại bảng (không nháy)', async () => {
+    listNodes.mockResolvedValue({ items: [node('a', 1), node('b', 2)], total: 2, page: 1, pageSize: 200 });
+    const { container } = renderPage();
+    await waitFor(() => expect(screen.getAllByText('a').length).toBeGreaterThan(0));
+    const rowBefore = container.querySelector('tr[data-row-key="id-a"]');
+    expect(rowBefore).not.toBeNull();
+
+    listNodes.mockResolvedValue({
+      items: [node('a', 1, { agent_version: '2.0' }), node('b', 2)],
+      total: 2,
+      page: 1,
+      pageSize: 200,
+    });
+    fireEvent.click(screen.getByRole('button', { name: /tải lại|làm mới/i }));
+    await waitFor(() => expect(screen.getAllByText('2.0').length).toBeGreaterThan(0));
+    expect(container.querySelector('tr[data-row-key="id-a"]')).toBe(rowBefore);
+  });
+
   it('sắp theo cột khác thì không kéo thả và phân trang như cũ', async () => {
     listNodes.mockResolvedValue({ items: [node('a', 1), node('b', 2)], total: 2, page: 1, pageSize: 20 });
     const { container } = renderPage('?sortBy=name');

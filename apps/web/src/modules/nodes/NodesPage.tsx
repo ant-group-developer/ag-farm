@@ -20,7 +20,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { DragSortTable, type ProColumns } from '@ant-design/pro-components';
+import type { ProColumns } from '@ant-design/pro-components';
 import type { TablePaginationConfig } from 'antd/es/table';
 import { parseAsInteger, parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs';
 import { useState, type ReactNode } from 'react';
@@ -68,6 +68,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { EnrollModal } from './EnrollModal';
+import { DragHandle, SortableTable } from './SortableTable';
 import { NODE_ORDER_PAGE_SIZE, canDragSort, isOrderView, renumber, slotsAreLive } from './node-order';
 import { isOutdated, latestFor, missingTools, visibleUpdate, type MissingTool } from './node-update';
 import { formatGb, isMetricKey, machineKey, sortByMetric, type MetricKey, type MetricSortOrder } from './machine-health';
@@ -366,7 +367,14 @@ export function NodesPage() {
       width: 90,
       render: (_: unknown, r: NodeView) =>
         draggable ? (
-          <Text strong>{r.priority_order}</Text>
+          <Flex align="center" gap={6}>
+            <DragHandle>
+              <Tooltip title={t('nodes.orderDragHint')}>
+                <GripVertical size={16} style={{ cursor: 'grab', color: 'rgba(0, 0, 0, 0.45)' }} />
+              </Tooltip>
+            </DragHandle>
+            <Text strong>{r.priority_order}</Text>
+          </Flex>
         ) : (
           <Tooltip title={orderView ? undefined : t('nodes.orderDragOff')}>
             <Text type={orderView ? undefined : 'secondary'}>{r.priority_order}</Text>
@@ -699,7 +707,7 @@ export function NodesPage() {
 
       <HealthSummaryBar nodes={nodes} />
 
-      <DragSortTable<NodeView>
+      <SortableTable<NodeView>
         rowKey="id"
         onChange={(_pagination, _filters, sorter) => {
           const s = Array.isArray(sorter) ? sorter[0] : sorter;
@@ -716,13 +724,8 @@ export function NodesPage() {
         options={false}
         toolBarRender={false}
         ghost
-        dragSortKey={draggable ? 'priority_order' : undefined}
-        dragSortHandlerRender={() => (
-          <Tooltip title={t('nodes.orderDragHint')}>
-            <GripVertical size={16} style={{ cursor: 'grab', color: 'rgba(0, 0, 0, 0.45)' }} />
-          </Tooltip>
-        )}
-        onDragSortEnd={(_from, _to, ordered) => reorderMut.mutate(ordered)}
+        sortDisabled={!draggable}
+        onSortEnd={(ordered) => reorderMut.mutate(ordered)}
       />
 
       {/* Create modal */}
