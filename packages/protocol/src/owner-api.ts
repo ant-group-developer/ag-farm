@@ -94,6 +94,18 @@ export const JobControlRequestSchema = z
   .refine((v) => (v.ids ? 1 : 0) + (v.group_key ? 1 : 0) === 1, { message: 'Give exactly one of ids or group_key' });
 export type JobControlRequest = z.infer<typeof JobControlRequestSchema>;
 
+/**
+ * `POST /v1/owner/jobs/:id/raise`: đổi lane và độ ưu tiên của một job còn `queued` của chính chủ job, ví dụ ag-go nâng
+ * job chuẩn bị đang chờ trong lô chạy bù lên khi Studio cần nó ngay. Job ở trạng thái khác → 409 `job_not_queued`.
+ * Lần claim kế tiếp xếp theo lane (`interactive` trước) rồi `priority` (cao trước). Trả `JobView`.
+ */
+export const RaiseJobRequestSchema = z.strictObject({
+  /** Thiếu thì giữ lane đang có. */
+  lane: LaneSchema.optional(),
+  priority: z.int().min(-100).max(100),
+});
+export type RaiseJobRequest = z.infer<typeof RaiseJobRequestSchema>;
+
 export const JobControlResponseSchema = z.strictObject({
   /** Số job đã đổi trạng thái. */
   affected: z.int().nonnegative(),

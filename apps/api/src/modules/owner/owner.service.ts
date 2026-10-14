@@ -14,6 +14,7 @@ import {
   ListJobsQuery,
   ListOwnerNodesResponse,
   ListJobsResponse,
+  RaiseJobRequest,
   SubmitJobRequest,
   SubmitJobResponse,
   mergeRequirements,
@@ -25,6 +26,8 @@ import { FarmOwnerEntity } from '../../database/entities/farm-owner.entity';
 import { controlJobs, type JobControlAction } from '../../common/job-control';
 import { toJobView } from '../../common/job-view';
 import { toOwnerNodeView } from './owner.views';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Encode cursor: base64(json({updated_at, id})) */
 function encodeCursor(updatedAt: Date, id: string): string {
@@ -212,6 +215,27 @@ export class OwnerService {
     });
     job.status = 'cancelled';
     job.finishedAt = now;
+    return toJobView(job);
+  }
+
+  /**
+   * Đổi lane / độ ưu tiên của một job còn `queued` của chính chủ job này. Đổi trong một câu UPDATE có điều kiện
+   * `status = 'queued'`, nên job vừa bị claim không bị đổi (409). Claim xếp theo lane rồi priority nên lần claim kế
+   * tiếp đã thấy thứ tự mới.
+   */
+  async raise(owner: FarmOwnerEntity, jobId: string, req: RaiseJobRequest): Promise<JobView> {
+    if (!UUID_RE.test(jobId)) throw new NotFoundException('Job not found');
+    const result = await this.jobRepo
+      .createQueryBuilder()
+      .update(FarmJobEntity)
+      .set({ priority: req.priority, ...(req.lane ? { lane: req.lane } : {}), updatedAt: () => 'now()' })
+      .where('id = :id AND owner = :owner AND status = :status', { id: jobId, owner: owner.id, status: 'queued' })
+      .execute();
+    const job = await this.jobRepo.findOne({ where: { id: jobId, owner: owner.id } });
+    if (!job) throw new NotFoundException('Job not found');
+    if (!result.affected) {
+      throw new ConflictException({ code: 'job_not_queued', error: 'job_not_queued', message: `Job is ${job.status}, only a queued job can be raised` });
+    }
     return toJobView(job);
   }
 

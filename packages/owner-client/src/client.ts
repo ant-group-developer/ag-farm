@@ -9,6 +9,8 @@ import {
   ListJobsResponse,
   ListJobsResponseSchema,
   ListOwnerNodesResponseSchema,
+  RaiseJobRequestSchema,
+  type RaiseJobRequest,
   type ListOwnerNodesResponse,
   RelativePathSchema,
   SubmitJobRequest,
@@ -128,6 +130,16 @@ export class FarmOwnerClient {
     const raw = await this.req<unknown>(
       'POST',
       `/v1/owner/jobs/${encodeURIComponent(jobId)}/cancel`,
+    );
+    return JobViewSchema.parse(raw);
+  }
+
+  /** Đổi lane / độ ưu tiên của một job còn `queued` (job đã chạy hay đã xong: 409 `job_not_queued`). */
+  async raiseJob(jobId: string, req: RaiseJobRequest): Promise<JobView> {
+    const raw = await this.req<unknown>(
+      'POST',
+      `/v1/owner/jobs/${encodeURIComponent(jobId)}/raise`,
+      RaiseJobRequestSchema.parse(req),
     );
     return JobViewSchema.parse(raw);
   }
