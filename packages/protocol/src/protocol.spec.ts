@@ -178,6 +178,18 @@ describe('requirements', () => {
     expect(RequirementsSchema.parse({ ytdlp: true })).toEqual({ ytdlp: true });
   });
 
+  it('a studio render level is optional, and a job asking for one only goes to a machine at that level or above', () => {
+    const level2 = { ...gpuBox, engines: { ...gpuBox.engines, studio_render: 2 } };
+    expect(CapabilitiesSchema.safeParse(level2).success).toBe(true);
+    expect(meetsRequirements(level2, { studio_render_min: 2 })).toBe(true);
+    expect(meetsRequirements(level2, { studio_render_min: 3 })).toBe(false);
+    // a machine that does not say is level 0
+    expect(meetsRequirements(gpuBox, { studio_render_min: 1 })).toBe(false);
+    expect(meetsRequirements(gpuBox, {})).toBe(true);
+    expect(RequirementsSchema.safeParse({ studio_render_min: 0 }).success).toBe(false);
+    expect(mergeRequirements('studio.render_preview', { studio_render_min: 1 })).toEqual({ studio_render_min: 1 });
+  });
+
   it('treats a model without tag as :latest', () => {
     const box = { ...gpuBox, engines: { ...gpuBox.engines, ollama_models: ['qwen2.5vl:latest'] } };
     expect(meetsRequirements(box, { ollama_models: ['qwen2.5vl'] })).toBe(true);
