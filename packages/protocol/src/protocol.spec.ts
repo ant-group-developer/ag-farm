@@ -41,6 +41,11 @@ import {
   JobResultSchema,
   TranscribeManifestSchema,
   TRANSCRIBE_MANIFEST_SCHEMA,
+  StudioBeatsPayloadSchema,
+  BeatsManifestSchema,
+  BEATS_MANIFEST_SCHEMA,
+  BEATS_MANIFEST_PATH,
+  BEATS_MAX_PER_TRACK,
   JOB_TYPE_SPECS,
   ROLE_KINDS,
   RenderManifestSchema,
@@ -237,8 +242,16 @@ describe('requirements', () => {
 
   it('a render node takes every studio job type', () => {
     expect([...ROLE_KINDS.render].sort()).toEqual(
-      ['studio.export_premiere', 'studio.reference_fetch', 'studio.render_final', 'studio.render_preview', 'studio.transcribe', 'studio.tts'],
+      ['studio.beats', 'studio.export_premiere', 'studio.reference_fetch', 'studio.render_final', 'studio.render_preview', 'studio.transcribe', 'studio.tts'],
     );
+  });
+
+  it('studio.beats is a studio job on a CPU slot of a machine with Python, no GPU', () => {
+    expect(JOB_TYPE_SPECS['studio.beats']).toMatchObject({ owner: 'studio', lane: 'interactive', slot: 'cpu' });
+    expect(mergeRequirements('studio.beats', {})).toEqual({ python: true });
+    expect(meetsRequirements(cpuBox, mergeRequirements('studio.beats', {}))).toBe(false);
+    const withPython = { ...cpuBox, engines: { ...cpuBox.engines, python: '3.11.9' } };
+    expect(meetsRequirements(withPython, mergeRequirements('studio.beats', {}))).toBe(true);
   });
 
   it('studio.reference_fetch is a studio job on a CPU slot of a machine with yt-dlp', () => {
@@ -418,6 +431,41 @@ describe('payloads', () => {
       expect(
         TranscribeManifestSchema.safeParse({ ...m, sources: [{ ...m.sources[1]!, alignment: 'line' }] }).success,
       ).toBe(false);
+    });
+  });
+
+  describe('studio.beats', () => {
+    const base = { production_id: 'p1', tracks: [{ track_id: 'music', audio: 'library:studio/projects/p1/music/abc.m4a' }] };
+
+    it('fills one piece per track and four beats a bar', () => {
+      expect(StudioBeatsPayloadSchema.parse(base)).toEqual({ ...base, tracks: [{ ...base.tracks[0], parts: [] }], beats_per_bar: 4 });
+      expect(JOB_TYPE_SPECS['studio.beats'].payload.safeParse(base).success).toBe(true);
+    });
+
+    it('takes where each joined song starts, and nothing else', () => {
+      const joined = { ...base, tracks: [{ ...base.tracks[0], parts: [184.2, 371.9] }] };
+      expect(StudioBeatsPayloadSchema.parse(joined).tracks[0]!.parts).toEqual([184.2, 371.9]);
+      expect(StudioBeatsPayloadSchema.safeParse({ ...base, tracks: [{ ...base.tracks[0], parts: [0] }] }).success).toBe(false);
+      expect(StudioBeatsPayloadSchema.safeParse({ ...base, tracks: [{ ...base.tracks[0], track_id: '../x' }] }).success).toBe(false);
+      expect(StudioBeatsPayloadSchema.safeParse({ ...base, tracks: [] }).success).toBe(false);
+      expect(StudioBeatsPayloadSchema.safeParse({ ...base, beats_per_bar: 1 }).success).toBe(false);
+      expect(StudioBeatsPayloadSchema.safeParse({ ...base, url: 'https://x' }).success).toBe(false);
+    });
+
+    it('its manifest gives the tempo, every beat and the first beat of each bar', () => {
+      const m = {
+        schema: BEATS_MANIFEST_SCHEMA, production_id: 'p1', engine: { name: 'librosa', version: '0.11.0' },
+        tracks: [{
+          track_id: 'music', duration_s: 4.2, bpm: 120, beats_per_bar: 4,
+          beats: [0.02, 0.52, 1.02, 1.52, 2.02, 2.52, 3.02, 3.52, 4.02], downbeats: [0.02, 2.02, 4.02],
+          sections: [{ start: 0, end: 4.2, bpm: 120 }],
+        }],
+      };
+      expect(BeatsManifestSchema.parse(m)).toEqual(m);
+      expect(BEATS_MANIFEST_PATH).toBe('beats.json');
+      expect(BeatsManifestSchema.safeParse({ ...m, tracks: [{ ...m.tracks[0], bpm: null, beats: [], downbeats: [] }] }).success).toBe(true);
+      expect(BeatsManifestSchema.safeParse({ ...m, tracks: [{ ...m.tracks[0], beats: Array(BEATS_MAX_PER_TRACK + 1).fill(1) }] }).success).toBe(false);
+      expect(BeatsManifestSchema.safeParse({ ...m, tracks: [{ ...m.tracks[0], sections: [] }] }).success).toBe(false);
     });
   });
 

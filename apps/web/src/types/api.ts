@@ -9,7 +9,8 @@ export type JobType =
   | 'studio.render_final'
   | 'studio.export_premiere'
   | 'studio.transcribe'
-  | 'studio.reference_fetch';
+  | 'studio.reference_fetch'
+  | 'studio.beats';
 
 export const JOB_TYPES: JobType[] = [
   'scan.extract',
@@ -21,6 +22,7 @@ export const JOB_TYPES: JobType[] = [
   'studio.export_premiere',
   'studio.transcribe',
   'studio.reference_fetch',
+  'studio.beats',
 ];
 
 export type JobStatus = 'queued' | 'leased' | 'paused' | 'completed' | 'failed' | 'cancelled';
