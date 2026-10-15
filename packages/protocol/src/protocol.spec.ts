@@ -45,6 +45,7 @@ import {
   ROLE_KINDS,
   RenderManifestSchema,
   RENDER_MANIFEST_SCHEMA,
+  RENDER_INSPECT_PATH,
   thumbnailOutputPath,
   SubmitJobRequestSchema,
   TicketError,
@@ -646,6 +647,37 @@ describe('payloads', () => {
     });
     expect(manifest.thumbnails).toHaveLength(1);
     expect(manifest.thumbnails[0]!.output).toBe('renders/1/final.thumb-1.jpg');
+  });
+
+  it('RenderManifestSchema: inspect is optional and names its files', () => {
+    const base = {
+      schema: RENDER_MANIFEST_SCHEMA,
+      production_id: 'p1',
+      revision: 1,
+      output: 'renders/1/final.mp4',
+      width: 1920,
+      height: 1080,
+      duration_s: 30,
+      size_bytes: 50_000_000,
+      watermarked: false,
+      sources: [],
+    };
+    expect(RenderManifestSchema.parse(base).inspect).toBeUndefined();
+    const m = RenderManifestSchema.parse({ ...base, inspect: { output: RENDER_INSPECT_PATH, sheets: ['sheet-01.jpg'] } });
+    expect(m.inspect).toEqual({ output: 'inspect.json', sheets: ['sheet-01.jpg'] });
+    expect(RenderManifestSchema.safeParse({ ...base, inspect: { output: '../inspect.json' } }).success).toBe(false);
+  });
+
+  it('StudioRenderPayloadSchema: inspect is optional', () => {
+    const base = {
+      production_id: 'p1',
+      revision: 1,
+      composition: 'stage:comp.json',
+      canvas: { width: 1920, height: 1080 },
+      output: 'renders/1/preview.mp4',
+    };
+    expect(StudioRenderPayloadSchema.parse(base).inspect).toBeUndefined();
+    expect(StudioRenderPayloadSchema.parse({ ...base, inspect: true }).inspect).toBe(true);
   });
 
   it('thumbnailOutputPath: replaces .mp4 with .thumb-N.jpg', () => {

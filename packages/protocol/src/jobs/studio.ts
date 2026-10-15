@@ -100,11 +100,19 @@ export const StudioRenderPayloadSchema = z.strictObject({
       text: z.string().min(1).max(40),
     }),
   ).max(3).default([]),
+  /**
+   * `true`: sau khi upload, worker tự kiểm bản render (đứng hình, màn đen, im lặng, độ to từng đoạn) và dựng tờ ghép
+   * khung hình, ghi `inspect.json` + `sheet-NN.jpg` cạnh `render.json` (manifest `inspect`). Worker cũ không biết trường
+   * này nên từ chối payload: Studio gửi kèm `requirements.studio_render_min` ≥ 2.
+   */
+  inspect: z.boolean().optional(),
 });
 export type StudioRenderPayload = z.infer<typeof StudioRenderPayloadSchema>;
 
 export const RENDER_MANIFEST_SCHEMA = 'ag.studio.render/v1';
 export const RENDER_MANIFEST_PATH = 'render.json';
+/** Kết quả tự kiểm của bản render (`inspect: true`), cạnh `render.json`. */
+export const RENDER_INSPECT_PATH = 'inspect.json';
 
 export const RenderManifestSchema = z.strictObject({
   schema: z.literal(RENDER_MANIFEST_SCHEMA),
@@ -134,8 +142,19 @@ export const RenderManifestSchema = z.strictObject({
       height: z.int().positive(),
     }),
   ).default([]),
+  /**
+   * Kết quả tự kiểm khi payload có `inspect: true`: `inspect.json` (schema `harness.render-inspect/v1` của Studio) và các
+   * tờ ghép khung hình `sheet-NN.jpg` (một khung mỗi 10 giây, lưới 5×4, mỗi khung rộng 320 px). Không có: không được
+   * yêu cầu, hoặc lượt kiểm lỗi (lý do trong `warnings`, `inspect_failed`).
+   */
+  inspect: z
+    .strictObject({
+      output: RelativePathSchema,
+      sheets: z.array(RelativePathSchema).max(200).default([]),
+    })
+    .optional(),
 });
-export type RenderManifest = z.infer<typeof RenderManifestSchema>;
+export type RenderManifest =z.infer<typeof RenderManifestSchema>;
 
 /**
  * Tạo đường dẫn output cho thumbnail thứ `n` (1-based) của video `output`.
