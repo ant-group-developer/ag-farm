@@ -9,6 +9,7 @@ import {
   StudioExportPremierePayloadSchema,
   StudioTranscribePayloadSchema,
   StudioReferenceFetchPayloadSchema,
+  StudioBeatsPayloadSchema,
 } from './studio';
 
 export type SlotKind = 'cpu' | 'gpu';
@@ -87,6 +88,14 @@ export const JOB_TYPE_SPECS: Record<JobType, JobTypeSpec> = {
     slot: 'cpu',
     payload: StudioReferenceFetchPayloadSchema,
     baseRequirements: { ytdlp: true },
+  },
+  'studio.beats': {
+    owner: 'studio',
+    lane: 'interactive',
+    slot: 'cpu',
+    payload: StudioBeatsPayloadSchema,
+    // librosa trong Python của máy; không cần GPU
+    baseRequirements: { python: true },
   },
 };
 

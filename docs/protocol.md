@@ -60,8 +60,21 @@ Worker gửi danh sách thao tác, chủ job trả kết quả theo đúng thứ
 | `studio.export_premiere` | `studio` | interactive | cpu | `StudioExportPremierePayload` → `premiere.json` (`PremiereManifest`) + zip |
 | `studio.transcribe` | `studio` | interactive | gpu | `StudioTranscribePayload` (WAV 16 kHz mono mỗi nguồn, `stage:`) → `transcribe.json` (`TranscribeManifest`) |
 | `studio.reference_fetch` | `studio` | interactive | cpu | `StudioReferenceFetchPayload` → video ở `output`, không manifest; `result.summary` là `StudioReferenceFetchResult` |
+| `studio.beats` | `studio` | interactive | cpu | `StudioBeatsPayload` (file nhạc, `library:`) → `beats.json` (`BeatsManifest`) |
 
-`studio.tts` và `studio.transcribe` cần máy khai `gpu` và `python` (worker dò `import torch` bằng `python_bin` của nó).
+`studio.tts` và `studio.transcribe` cần máy khai `gpu` và `python` (worker dò `import torch` bằng `python_bin` của nó);
+`studio.beats` chỉ cần `python` (librosa), không cần GPU.
+
+### `studio.beats`: nhịp của nhạc nền
+
+Studio gửi khi một nhạc nền được nhập, để cắt cảnh đúng phách hoặc đầu ô nhịp (`shots[].snap` của kế hoạch dựng).
+
+- Payload: `production_id`, `tracks` (1–20: `track_id`, `audio` là tên input của file nhạc, `parts` là giây bắt đầu của từng
+  bài sau bài đầu khi track ghép từ nhiều bài; mỗi bài phân tích riêng vì nhịp khác nhau), `beats_per_bar` (2–12, mặc định 4).
+- Worker chạy `engines/python/beats.py` (librosa `beat_track`; đầu ô nhịp là pha của mỗi `beats_per_bar` phách có năng
+  lượng dải trầm và độ mạnh nốt cao nhất).
+- Manifest `beats.json`: mỗi track `duration_s`, `bpm` (`null` khi không nghe ra phách), `beats_per_bar`, `beats` và
+  `downbeats` (giây, tăng dần, ≤ 60 000), `sections` (`start`, `end`, `bpm` từng bài).
 
 ### `scan.prep`: đầu vào cho Studio chuẩn bị sẵn ở ag-go
 

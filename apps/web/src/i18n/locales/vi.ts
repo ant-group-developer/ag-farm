@@ -72,6 +72,7 @@ export const vi = {
       export_premiere: 'Studio: xuất Premiere',
       transcribe: 'Studio: nhận dạng lời nói',
       reference_fetch: 'Studio: tải video mẫu',
+      beats: 'Studio: phân tích nhịp nhạc',
     },
   },
   lane: {

@@ -186,6 +186,11 @@ export interface CapabilitiesOptions {
    * không có thì không dò. Không tìm thấy thì không gửi trường này (hub cũ không biết nó).
    */
   ytdlpBin?: string;
+  /**
+   * Mức tính năng composition Studio worker dựng được (`engines.studio_render`); chỉ worker render khai. Không có thì
+   * không gửi trường này (hub cũ không biết nó).
+   */
+  studioRender?: number;
 }
 
 export async function detectCapabilities(options: CapabilitiesOptions = {}): Promise<Capabilities> {
@@ -214,6 +219,7 @@ export async function detectCapabilities(options: CapabilitiesOptions = {}): Pro
       ollama_models: ollamaModels,
       python,
       ...(ytdlp ? { ytdlp } : {}),
+      ...(options.studioRender !== undefined ? { studio_render: options.studioRender } : {}),
     },
   };
 }
