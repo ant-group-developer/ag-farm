@@ -74,6 +74,7 @@ export const en: LocaleMessages = {
       export_premiere: 'Studio: Premiere export',
       transcribe: 'Studio: speech transcription',
       reference_fetch: 'Studio: reference video download',
+      beats: 'Studio: music beat analysis',
     },
   },
   lane: {

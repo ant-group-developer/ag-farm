@@ -181,6 +181,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
         ffmpeg: capabilities.engines.ffmpeg,
         python: capabilities.engines.python,
         ytdlp: capabilities.engines.ytdlp,
+        studio_render: capabilities.engines.studio_render,
       });
     } catch (err) {
       log.error('Failed to detect capabilities', { err: String(err) });

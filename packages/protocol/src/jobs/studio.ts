@@ -100,11 +100,19 @@ export const StudioRenderPayloadSchema = z.strictObject({
       text: z.string().min(1).max(40),
     }),
   ).max(3).default([]),
+  /**
+   * `true`: sau khi upload, worker tự kiểm bản render (đứng hình, màn đen, im lặng, độ to từng đoạn) và dựng tờ ghép
+   * khung hình, ghi `inspect.json` + `sheet-NN.jpg` cạnh `render.json` (manifest `inspect`). Worker cũ không biết trường
+   * này nên từ chối payload: Studio gửi kèm `requirements.studio_render_min` ≥ 2.
+   */
+  inspect: z.boolean().optional(),
 });
 export type StudioRenderPayload = z.infer<typeof StudioRenderPayloadSchema>;
 
 export const RENDER_MANIFEST_SCHEMA = 'ag.studio.render/v1';
 export const RENDER_MANIFEST_PATH = 'render.json';
+/** Kết quả tự kiểm của bản render (`inspect: true`), cạnh `render.json`. */
+export const RENDER_INSPECT_PATH = 'inspect.json';
 
 export const RenderManifestSchema = z.strictObject({
   schema: z.literal(RENDER_MANIFEST_SCHEMA),
@@ -134,8 +142,19 @@ export const RenderManifestSchema = z.strictObject({
       height: z.int().positive(),
     }),
   ).default([]),
+  /**
+   * Kết quả tự kiểm khi payload có `inspect: true`: `inspect.json` (schema `harness.render-inspect/v1` của Studio) và các
+   * tờ ghép khung hình `sheet-NN.jpg` (một khung mỗi 10 giây, lưới 5×4, mỗi khung rộng 320 px). Không có: không được
+   * yêu cầu, hoặc lượt kiểm lỗi (lý do trong `warnings`, `inspect_failed`).
+   */
+  inspect: z
+    .strictObject({
+      output: RelativePathSchema,
+      sheets: z.array(RelativePathSchema).max(200).default([]),
+    })
+    .optional(),
 });
-export type RenderManifest = z.infer<typeof RenderManifestSchema>;
+export type RenderManifest =z.infer<typeof RenderManifestSchema>;
 
 /**
  * Tạo đường dẫn output cho thumbnail thứ `n` (1-based) của video `output`.
@@ -357,3 +376,68 @@ export type ReferenceFetchErrorCode = z.infer<typeof ReferenceFetchErrorCodeSche
 
 /** Mã đáng thử lại (`error.retryable: true`, hub giao lại khi còn lượt); các mã khác thử lại cũng hỏng như thế. */
 export const REFERENCE_FETCH_RETRYABLE_CODES: readonly ReferenceFetchErrorCode[] = ['network', 'timeout'];
+
+// ---------------------------------------------------------------------------------------------
+// studio.beats: nhịp của nhạc nền (librosa), để Studio cắt cảnh đúng phách hoặc đầu ô nhịp. Studio gửi khi nhạc được nhập
+// (một file, hoặc nhiều bài ghép thành một track). Máy chỉ cần Python có librosa, không cần GPU. Output `beats.json`.
+// ---------------------------------------------------------------------------------------------
+
+/** Trần số phách của một track (3 giờ ở 300 BPM là 54 000). */
+export const BEATS_MAX_PER_TRACK = 60_000;
+
+export const StudioBeatsPayloadSchema = z.strictObject({
+  production_id: z.string().min(1).max(100),
+  tracks: z
+    .array(
+      z.strictObject({
+        /** Id của Studio cho track, trả lại nguyên trong manifest. */
+        track_id: z
+          .string()
+          .min(1)
+          .max(100)
+          .regex(/^[A-Za-z0-9_-]+$/),
+        /** File nhạc, ví dụ `library:studio/projects/<id>/music/<sha>.m4a`. */
+        audio: InputNameSchema,
+        /**
+         * Track ghép từ nhiều bài: giây bắt đầu của từng bài sau bài đầu, tăng dần. Mỗi bài được phân tích riêng (nhịp
+         * khác nhau), rồi ghép lại. Rỗng = một bài.
+         */
+        parts: z.array(z.number().positive()).max(19).default([]),
+      }),
+    )
+    .min(1)
+    .max(20),
+  /** Số phách mỗi ô nhịp (nhạc nền phần lớn là 4/4). */
+  beats_per_bar: z.int().min(2).max(12).default(4),
+});
+export type StudioBeatsPayload = z.infer<typeof StudioBeatsPayloadSchema>;
+
+export const BEATS_MANIFEST_SCHEMA = 'ag.studio.beats/v1';
+export const BEATS_MANIFEST_PATH = 'beats.json';
+
+const BeatTimesSchema = z.array(z.number().min(0)).max(BEATS_MAX_PER_TRACK);
+
+export const BeatsManifestSchema = z.strictObject({
+  schema: z.literal(BEATS_MANIFEST_SCHEMA),
+  production_id: z.string(),
+  engine: z.strictObject({ name: z.string(), version: z.string().nullable() }),
+  tracks: z.array(
+    z.strictObject({
+      track_id: z.string(),
+      duration_s: z.number().positive(),
+      /** Nhịp chính (BPM) của cả track; `null` khi không nghe ra phách (nhạc nền không có nhịp rõ). */
+      bpm: z.number().positive().nullable(),
+      beats_per_bar: z.int().min(2).max(12),
+      /** Giây của từng phách, tăng dần. */
+      beats: BeatTimesSchema,
+      /** Giây của phách đầu mỗi ô nhịp (một phần của `beats`). */
+      downbeats: BeatTimesSchema,
+      /** Từng bài của track (một phần tử khi chỉ có một bài). */
+      sections: z
+        .array(z.strictObject({ start: z.number().min(0), end: z.number().positive(), bpm: z.number().positive().nullable() }))
+        .min(1)
+        .max(20),
+    }),
+  ),
+});
+export type BeatsManifest = z.infer<typeof BeatsManifestSchema>;

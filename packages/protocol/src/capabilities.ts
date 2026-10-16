@@ -24,6 +24,11 @@ export const CapabilitiesSchema = z.strictObject({
      * khi có trường này từ chối heartbeat có nó (`strictObject`): lên hub trước rồi mới lên worker.
      */
     ytdlp: z.string().max(100).nullable().optional(),
+    /**
+     * Mức tính năng composition Studio mà máy render dựng được (`RENDER_FEATURE_LEVEL` của `@ag-studio/render`, tăng
+     * mỗi khi composition có trường mới). Không gửi = 0. Hub build trước khi có trường này từ chối nó: lên hub trước.
+     */
+    studio_render: z.int().nonnegative().optional(),
   }),
 });
 export type Capabilities = z.infer<typeof CapabilitiesSchema>;
@@ -50,6 +55,11 @@ export const RequirementsSchema = z.strictObject({
    * khi có trường này từ chối requirements có nó (`strictObject`).
    */
   node_id: z.uuid().optional(),
+  /**
+   * Máy khai `engines.studio_render` ít nhất bằng số này: composition dùng trường mới thì máy render bản cũ (bộ kiểm
+   * strict của nó từ chối) không nhận job. Hub build trước khi có trường này từ chối requirements có nó.
+   */
+  studio_render_min: z.int().positive().optional(),
 });
 export type Requirements = z.infer<typeof RequirementsSchema>;
 
@@ -65,6 +75,9 @@ export function meetsRequirements(capabilities: Capabilities, requirements: Requ
   if (requirements.nvenc && !gpus.some((gpu) => gpu.nvenc)) return false;
   if (requirements.python && !capabilities.engines.python) return false;
   if (requirements.ytdlp && !capabilities.engines.ytdlp) return false;
+  if (requirements.studio_render_min !== undefined && (capabilities.engines.studio_render ?? 0) < requirements.studio_render_min) {
+    return false;
+  }
   if (requirements.ollama_models?.length) {
     const available = new Set(capabilities.engines.ollama_models.map(normalizeModelName));
     if (!requirements.ollama_models.every((model) => available.has(normalizeModelName(model)))) {

@@ -63,5 +63,11 @@ describe('detectCapabilities', () => {
     const caps = await detectCapabilities({ ffmpegPath: 'no-such-ffmpeg-xyz', ollamaUrl: 'http://127.0.0.1:1', ytdlpBin: 'no-such-yt-dlp-xyz' });
     expect('ytdlp' in caps.engines).toBe(false);
     expect(caps.engines.ffmpeg).toBeNull();
+    expect('studio_render' in caps.engines).toBe(false);
+  }, 30_000);
+
+  it('sends engines.studio_render when the worker says its level', async () => {
+    const caps = await detectCapabilities({ ffmpegPath: 'no-such-ffmpeg-xyz', ollamaUrl: 'http://127.0.0.1:1', studioRender: 1 });
+    expect(caps.engines.studio_render).toBe(1);
   }, 30_000);
 });

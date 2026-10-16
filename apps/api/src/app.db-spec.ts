@@ -30,6 +30,7 @@ import { NodeSelfUpdate2000000000000 } from './database/migrations/2000000000000
 import { MachineMetrics2100000000000 } from './database/migrations/2100000000000-machine-metrics';
 import { StudioReferenceFetch2200000000000 } from './database/migrations/2200000000000-studio-reference-fetch';
 import { AgGoPrep2300000000000 } from './database/migrations/2300000000000-ag-go-prep';
+import { StudioBeats2400000000000 } from './database/migrations/2400000000000-studio-beats';
 import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
 import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
@@ -88,6 +89,7 @@ const MIGRATIONS = [
   MachineMetrics2100000000000,
   StudioReferenceFetch2200000000000,
   AgGoPrep2300000000000,
+  StudioBeats2400000000000,
 ];
 
 /** Fake AccountMeClient → luôn trả ADMIN */

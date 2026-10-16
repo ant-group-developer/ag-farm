@@ -10,6 +10,7 @@ export const JOB_TYPES = [
   'studio.export_premiere',
   'studio.transcribe',
   'studio.reference_fetch',
+  'studio.beats',
 ] as const;
 export const JobTypeSchema = z.enum(JOB_TYPES);
 export type JobType = z.infer<typeof JobTypeSchema>;
