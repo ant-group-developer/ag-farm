@@ -37,8 +37,11 @@ export const SignOpSchema = z.discriminatedUnion('op', [
 ]);
 export type SignOp = z.infer<typeof SignOpSchema>;
 
+/** Số thao tác tối đa trong một request ký; worker chia danh sách dài hơn thành nhiều request (`SignClient.sign`). */
+export const SIGN_MAX_OPS = 100;
+
 export const SignRequestSchema = z.strictObject({
-  ops: z.array(SignOpSchema).min(1).max(100),
+  ops: z.array(SignOpSchema).min(1).max(SIGN_MAX_OPS),
 });
 export type SignRequest = z.infer<typeof SignRequestSchema>;
 
