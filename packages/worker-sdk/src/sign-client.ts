@@ -4,6 +4,7 @@
  */
 import {
   AUTH_SCHEMES,
+  SIGN_MAX_OPS,
   SignRequestSchema,
   SignResponseSchema,
   unwrapApiResponse,
@@ -31,8 +32,19 @@ export class SignClient {
     private readonly getTicket: () => string,
   ) {}
 
-  /** Gửi danh sách thao tác ký và trả về kết quả theo đúng thứ tự. */
+  /**
+   * Gửi danh sách thao tác ký và trả về kết quả theo đúng thứ tự. Một request chỉ được `SIGN_MAX_OPS` thao tác, nên
+   * danh sách dài hơn (một video dựng từ hơn 100 file nguồn) đi thành nhiều request nối tiếp, kết quả ghép lại.
+   */
   async sign(ops: SignOp[]): Promise<SignResult[]> {
+    const results: SignResult[] = [];
+    for (let i = 0; i < ops.length; i += SIGN_MAX_OPS) {
+      results.push(...(await this.signBatch(ops.slice(i, i + SIGN_MAX_OPS))));
+    }
+    return results;
+  }
+
+  private async signBatch(ops: SignOp[]): Promise<SignResult[]> {
     const req: SignRequest = SignRequestSchema.parse({ ops });
     const res = await fetch(this.signUrl, {
       method: 'POST',

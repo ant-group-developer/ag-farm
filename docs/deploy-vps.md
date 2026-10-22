@@ -5,7 +5,7 @@ ag-farm = hub (api) + web quản lý. Hub chỉ giữ hàng đợi job, không c
 | | dev | prod |
 |---|---|---|
 | VPS | VPS dev (cùng máy ag-go dev) | VPS riêng cho farm |
-| Thư mục | `/www/wwwroot/dev/ag-farm` | `/www/wwwroot/prod/ag-farm` |
+| Thư mục | `/www/wwwroot/dev/ag-farm` | `/www/code/ag-harness-agent/ag-farm` |
 | API (hub) | `https://api-farm-dev.ant-group.net` | `https://api-farm.ant-group.net` |
 | Web | `https://farm-dev.ant-group.net` | `https://farm.ant-group.net` |
 | Deploy | tự chạy khi push `main` (`deploy.dev.yml`) | bấm tay `deploy.prod.yml` trên `main` |
@@ -25,7 +25,7 @@ Mỗi môi trường có cặp khoá vé, khoá owner và tập máy worker riê
    Nếu Postgres chỉ nghe ở `127.0.0.1`, thêm địa chỉ bridge của docker (thường là `172.17.0.1`) vào `listen_addresses`, và thêm dòng cho dải `172.16.0.0/12` vào `pg_hba.conf`.
 4. **Mã nguồn:**
    ```bash
-   sudo git clone git@github.com:ant-group-developer/ag-farm.git /www/wwwroot/<dev|prod>/ag-farm
+   sudo git clone git@github.com:ant-group-developer/ag-farm.git <thư mục ở bảng trên>
    ```
    VPS cần deploy key (chỉ đọc) của repo ag-farm.
 5. **`.env`:** sao chép `.env.example` thành `.env` rồi điền:
@@ -40,7 +40,7 @@ Mỗi môi trường có cặp khoá vé, khoá owner và tập máy worker riê
 6. **Auth0:** thêm domain web farm vào Allowed Callback URLs, Allowed Logout URLs và Allowed Web Origins của app web farm.
 7. **Gói cài worker:** thư mục `releases/` (`FARM_RELEASES_DIR_HOST`) không nằm trong git; api ghi vào đó khi phát hành, nên cho user `node` của container (uid 1000) quyền ghi:
    ```bash
-   sudo mkdir -p /www/wwwroot/<dev|prod>/ag-farm/releases && sudo chown -R 1000:1000 /www/wwwroot/<dev|prod>/ag-farm/releases
+   sudo mkdir -p <thư mục>/releases && sudo chown -R 1000:1000 <thư mục>/releases
    ```
    Lần đầu (hub chưa có gói nào) và mỗi lần có bản mới: phát hành từ máy build như mục 5.
 8. **nginx (site trong aaPanel), có SSL Let's Encrypt:**

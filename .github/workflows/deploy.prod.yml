@@ -21,7 +21,7 @@ jobs:
       VPS_HOST: ${{ secrets.VPS_HOST_PROD }}
       VPS_USER: ${{ secrets.VPS_USER_PROD }}
       VPS_PORT: ${{ secrets.VPS_PORT_PROD || '22' }}
-      APP_PATH: ${{ secrets.FARM_APP_PATH_PROD || '/www/wwwroot/prod/ag-farm' }}
+      APP_PATH: ${{ secrets.FARM_APP_PATH_PROD || '/www/code/ag-harness-agent/ag-farm' }}
       COMMIT: ${{ github.sha }}
     steps:
       - name: Start SSH agent

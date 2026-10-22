@@ -15,6 +15,14 @@ fi
 log 'Build image'
 docker compose build api web
 
+# Gắn thêm tag latest cho bản vừa build: `docker compose up` gõ tay không có TAG
+# sẽ lấy :latest, nếu không gắn thì đó là image cũ và api/web bị quay về bản trước.
+TAG=${TAG:-latest}
+if [[ "$TAG" != latest ]]; then
+  docker tag "ag-farm-api:$TAG" ag-farm-api:latest
+  docker tag "ag-farm-web:$TAG" ag-farm-web:latest
+fi
+
 if [[ "${SKIP_MIGRATION:-0}" != 1 ]]; then
   log 'Chay migration'
   docker compose run --rm --no-deps api \
