@@ -73,6 +73,9 @@ export class Cache {
     fetcher: (dest: string) => Promise<void>,
   ): Promise<string> {
     const lockPath = join(this.cacheDir, 'locks', `${this.keyToFilename(cacheKey)}.lock`);
+    // Dọn cache lúc worker đang chạy có thể xoá luôn `locks/` (và cả thư mục cache): tạo lại mỗi lần, không thì mọi lần
+    // tải lỗi ENOENT tới khi khởi động lại (prod 23/10: 11 job scan trên AG-193, AG-198).
+    mkdirSync(join(this.cacheDir, 'locks'), { recursive: true });
 
     // Lock file chống multi-process
     let lockAcquired = false;
