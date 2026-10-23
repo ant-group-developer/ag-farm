@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import * as os from 'node:os';
 import {
   SelfUpdater,
+  UPDATE_DRAIN_MINUTES_DEFAULT,
   fetchLatestVersion,
   readUpdateOutcome,
   updateRole,
@@ -27,6 +28,8 @@ function setup(over: { version?: string; latest?: string | null; auto?: boolean;
     changes: 0,
     startError: null as Error | null,
     latestCalls: 0,
+    released: [] as string[],
+    order: [] as string[],
   };
   const deps: SelfUpdaterDeps = {
     me: async () => ({ auto_update: state.auto, update_requested_at: state.requestedAt }),
@@ -37,10 +40,15 @@ function setup(over: { version?: string; latest?: string | null; auto?: boolean;
     startTask: async (name) => {
       if (state.startError) throw state.startError;
       state.started.push(name);
+      state.order.push('start');
     },
     writeRequest: (req) => state.requests.push(req),
     now: () => now,
     random: () => 0.5,
+    releaseJobs: async (reason) => {
+      state.released.push(reason);
+      state.order.push(`release:${reason}`);
+    },
   };
   const u = new SelfUpdater({
     packageName: 'ag-render-worker',
@@ -80,15 +88,32 @@ describe('SelfUpdater', () => {
     expect(state.changes).toBe(2); // draining, installing: each sends a heartbeat at once
   });
 
-  it('updates anyway when the jobs outlast update_drain_minutes', async () => {
+  it('updates anyway when the jobs outlast update_drain_minutes, handing them back to the hub first', async () => {
     const { u, state, advance } = setup();
     await u.tick(1);
     advance(29 * MIN);
     await u.tick(1);
     expect(state.started).toEqual([]);
+    expect(state.released).toEqual([]);
     advance(MIN);
     await u.tick(1);
     expect(state.started).toEqual(['ag-farm-updater']);
+    // released before the updater stops the worker: the hub gives the job to another machine at once, instead of
+    // waiting for its lease to run out (prod 22/10: a 4K final lost its lease to AG-186 updating mid-render)
+    expect(state.order).toEqual(['release:Machine is updating to 0.9.1', 'start']);
+  });
+
+  it('jobs that end within the drain are not handed back', async () => {
+    const { u, state, advance } = setup();
+    await u.tick(1);
+    advance(MIN);
+    await u.tick(0);
+    expect(state.started).toEqual(['ag-farm-updater']);
+    expect(state.released).toEqual([]);
+  });
+
+  it('waits up to 4 hours by default: a 4K final runs 40-60 minutes', () => {
+    expect(UPDATE_DRAIN_MINUTES_DEFAULT).toBe(240);
   });
 
   it('same or older version on the hub: nothing happens', async () => {

@@ -131,7 +131,8 @@ Máy cài bằng `install.ps1` có `updater_task`/`updater_dir` trong config.yam
 1. mỗi `update_check_minutes` (mặc định 15, lệch ±20 %) đọc `/dist/latest.json` (`ReleaseManifest`) và so bản của gói
    mình (`compareVersions`); mỗi phút hỏi `GET /v1/worker/me`: `auto_update` (tuỳ chọn, mặc định bật) và
    `update_requested_at` (admin bấm "Cập nhật ngay": kiểm ngay, cập nhật cả khi `auto_update` tắt, bỏ nếu cũ hơn 1 giờ);
-2. có bản mới hơn và được phép: ngừng claim, chờ job đang chạy xong (tối đa `update_drain_minutes`, mặc định 30);
+2. có bản mới hơn và được phép: ngừng claim, chờ job đang chạy xong (tối đa `update_drain_minutes`, mặc định 240); quá hạn
+   mà job còn chạy thì `fail` nó với `worker_updating` (retryable) để hub giao máy khác ngay, rồi mới cập nhật;
 3. ghi `<updater_dir>/request-<role>.json` rồi `schtasks /Run /TN ag-farm-updater`. Task dừng worker, cài như lệnh cập
    nhật (giữ `app.prev`, chạy setup, ghi config), bản mới không heartbeat đúng phiên bản trong 3 phút thì trả `app.prev`
    và `config.yaml.bak`. Kết quả ở `<updater_dir>/result-<role>.json`; worker đọc lúc khởi động. Task cũng chạy 03:00

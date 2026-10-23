@@ -214,6 +214,8 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
   let claimEnabled = true;
 
   const activeJobs = new Map<string, AbortController>();
+  /** Per running job: hands it back to the hub (`fail` retryable) and stops it, when the worker must update. */
+  const releasers = new Map<string, (reason: string) => Promise<void>>();
 
   // Graceful shutdown
   const shutdown = () => {
@@ -393,6 +395,9 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
       writeRequest: (req) => writeUpdateRequest(dir, role, req),
       now: () => Date.now(),
       random: () => Math.random(),
+      releaseJobs: async (reason) => {
+        await Promise.all([...releasers.values()].map((release) => release(reason)));
+      },
       ...options.selfUpdateDeps,
     };
     const u = new SelfUpdater({
@@ -527,6 +532,21 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
       trailingTimer = null;
     };
 
+    // The worker must update while this job still runs: give it back to the hub now (another machine takes it at
+    // once), then stop it; the abort below then reports nothing more.
+    releasers.set(job.id, async (reason) => {
+      if (abortCtrl.signal.aborted) return;
+      stopTimers();
+      try {
+        await hub.fail(job.id, { lease_token: leaseToken, error: { code: 'worker_updating', message: reason, retryable: true } });
+        jobLog.warn('Job handed back to the hub', { reason });
+      } catch (err) {
+        jobLog.warn('Could not hand the job back; its lease will run out', { err: String(err) });
+      } finally {
+        abortCtrl.abort();
+      }
+    });
+
     const shouldYield = (): boolean => job.lane !== 'interactive' && allocator.interactivePressure();
 
     const yieldToInteractive = async (): Promise<void> => {
@@ -553,6 +573,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     if (!payloadResult.success) {
       stopTimers();
       activeJobs.delete(job.id);
+      releasers.delete(job.id);
       releaseAll();
       try {
         await hub.fail(job.id, {
@@ -624,6 +645,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     }
 
     activeJobs.delete(job.id);
+    releasers.delete(job.id);
     releaseAll();
     try { rmSync(workDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }

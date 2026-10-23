@@ -339,6 +339,21 @@ describe('Cache - LRU eviction', () => {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   }, 15_000);
+
+  it('a cache cleaned while the worker runs (locks/ deleted too) still downloads (prod 23/10: ENOENT … locks\\….lock)', async () => {
+    const tmpDir = makeTmpDir();
+    try {
+      const { Cache } = await import('./cache');
+      const { readFileSync: read } = await import('node:fs');
+      const cacheDir = join(tmpDir, 'cache');
+      const cache = new Cache(cacheDir, 1);
+      rmSync(cacheDir, { recursive: true, force: true });
+      const path = await cache.getOrDownload('key-after-clean', 3, async (dest) => { writeFileSync(dest, 'abc'); });
+      expect(read(path, 'utf8')).toBe('abc');
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('runWorker - never claims a job it has no slot for', () => {
@@ -472,6 +487,86 @@ describe('runWorker - kinds', () => {
 });
 
 describe('runWorker - self-update', () => {
+  it('updating with a job still running past the drain: the job is failed as retryable first, then the updater starts', async () => {
+    const tmpDir = makeTmpDir();
+    const events: string[] = [];
+    let failBody: { lease_token?: string; error?: { code: string; message: string; retryable: boolean } } | null = null;
+    let claimCount = 0;
+    let handlerAborted = false;
+    const stopCtrl = new AbortController();
+
+    const { server, url } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const path = req.url ?? '';
+        res.setHeader('Content-Type', 'application/json');
+        if (path.includes('heartbeat')) {
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path.includes('claim')) {
+          claimCount++;
+          res.writeHead(200); res.end(JSON.stringify({ job: claimCount === 1 ? makeJob(`${url}/sign`) : null }));
+        } else if (path.includes('progress')) {
+          res.writeHead(200); res.end(JSON.stringify({ lease_expires_at: new Date(Date.now() + 120_000).toISOString(), ticket: 'ticket-2' }));
+        } else if (path.includes('fail')) {
+          failBody = JSON.parse(Buffer.concat(chunks).toString()) as typeof failBody;
+          events.push('fail');
+          res.writeHead(200); res.end('{}');
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+
+    try {
+      const config = {
+        ...makeConfig(tmpDir, url),
+        updater_task: 'ag-farm-updater',
+        updater_dir: join(tmpDir, 'updater'),
+        update_drain_minutes: 0,
+      };
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      const done = runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.9.0',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        stopSignal: stopCtrl.signal,
+        handlers: {
+          'scan.extract': async (ctx) => {
+            await new Promise<void>((resolve) => ctx.signal.addEventListener('abort', () => resolve(), { once: true }));
+            handlerAborted = true;
+            throw new Error('aborted');
+          },
+        },
+        selfUpdate: { package: 'ag-scan-worker' },
+        selfUpdateTickMs: 50,
+        selfUpdateFirstCheckMs: 300,
+        selfUpdateDeps: {
+          me: async () => ({ auto_update: true, update_requested_at: null }),
+          latest: async () => '0.9.1',
+          startTask: async () => { events.push('start'); },
+        },
+      });
+      const deadline = Date.now() + 5_000;
+      while (!events.includes('start') && Date.now() < deadline) await sleep(50);
+      await sleep(200);
+      stopCtrl.abort();
+      await done;
+
+      expect(events).toEqual(['fail', 'start']);
+      expect(failBody).toMatchObject({
+        lease_token: 'lease-abc-0000000000000000',
+        error: { code: 'worker_updating', message: 'Machine is updating to 0.9.1', retryable: true },
+      });
+      expect(handlerAborted).toBe(true);
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 10_000);
+
   it('a newer release: stops claiming, reports draining then installing, starts the updater task', async () => {
     const tmpDir = makeTmpDir();
     const updates: unknown[] = [];
