@@ -10,6 +10,7 @@ export * from './kinds';
 export * from './logger';
 export * from './machine';
 export * from './metrics';
+export * from './node-logs';
 export * from './self-update';
 export * from './sign-client';
 export * from './transfer';

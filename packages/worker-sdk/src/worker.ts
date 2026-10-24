@@ -4,6 +4,7 @@
  */
 import { copyFileSync, linkSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import {
   JOB_TYPE_SPECS,
   HEARTBEAT_INTERVAL_SECONDS,
@@ -38,6 +39,7 @@ import {
 import type { SelfUpdaterDeps } from './self-update';
 import { SlotAllocator, loadMachineConfig } from './machine';
 import { MachineSampler } from './metrics';
+import { collectLogs, defaultLogDirs } from './node-logs';
 import type { MetricsProbes } from './metrics';
 import type { SlotHandle } from './machine';
 import { SignClient } from './sign-client';
@@ -149,6 +151,12 @@ export interface RunWorkerOptions {
   metricsProbes?: Partial<MetricsProbes>;
   /** Chu kỳ đo máy (ms, mặc định 15 s). Dùng trong tests. */
   metricsIntervalMs?: number;
+  /**
+   * "Lấy log": thư mục log máy này gửi khi admin xin (mặc định suy từ `--config`, xem `defaultLogDirs`; rỗng thì không
+   * hỏi hub) và chu kỳ hỏi hub (ms, mặc định 60 s).
+   */
+  logDirs?: string[];
+  logPollMs?: number;
 }
 
 // ---- Runner ----
@@ -289,6 +297,32 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
           log.warn('Update check failed', { err: String(err) });
         }
         await sleep(tickMs);
+      }
+    })();
+  }
+
+  // "Lấy log": hỏi hub mỗi phút; admin xin thì gom log (lọc theo giờ) và gửi gzip. Hub cũ (404) thì thôi hỏi một giờ.
+  const logDirs = options.logDirs ?? defaultLogDirs();
+  if (logDirs.length > 0) {
+    const logPollMs = options.logPollMs ?? 60_000;
+    void (async () => {
+      let pausedUntil = 0;
+      while (running) {
+        await sleep(logPollMs);
+        if (!running || Date.now() < pausedUntil) continue;
+        try {
+          const req = await hub.logRequest();
+          if (req === undefined) {
+            pausedUntil = Date.now() + 60 * 60_000;
+            continue;
+          }
+          if (!req) continue;
+          const text = await collectLogs({ dirs: logDirs, since: req.since, until: req.until });
+          await hub.uploadLogs(req.id, gzipSync(text));
+          log.info('Logs sent to the hub', { request: req.id, bytes: Buffer.byteLength(text) });
+        } catch (err) {
+          log.warn('Could not send logs to the hub', { err: String(err) });
+        }
       }
     })();
   }

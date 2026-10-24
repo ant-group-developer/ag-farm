@@ -11,6 +11,9 @@ const patchNode = vi.fn();
 const requestNodeUpdate = vi.fn();
 const getLatestReleases = vi.fn();
 const getMachineMetrics = vi.fn();
+const listNodeLogs = vi.fn();
+const requestNodeLogs = vi.fn();
+const downloadNodeLog = vi.fn();
 vi.mock('../api/admin', () => ({
   listNodes: (...args: unknown[]) => listNodes(...args),
   createNode: vi.fn(),
@@ -21,6 +24,9 @@ vi.mock('../api/admin', () => ({
   requestNodeUpdate: (...args: unknown[]) => requestNodeUpdate(...args),
   getLatestReleases: (...args: unknown[]) => getLatestReleases(...args),
   getMachineMetrics: (...args: unknown[]) => getMachineMetrics(...args),
+  listNodeLogs: (...args: unknown[]) => listNodeLogs(...args),
+  requestNodeLogs: (...args: unknown[]) => requestNodeLogs(...args),
+  downloadNodeLog: (...args: unknown[]) => downloadNodeLog(...args),
 }));
 
 const { NodesPage } = await import('../modules/nodes/NodesPage');
@@ -339,5 +345,23 @@ describe('NodesPage', () => {
     expect(screen.getAllByText('PC1-scan').length).toBeGreaterThan(1);
     fireEvent.click(screen.getByText('7 ngày'));
     await waitFor(() => expect(getMachineMetrics).toHaveBeenCalledWith('PC1', '7d'));
+  }, 30_000);
+
+  it('drawer máy: Lấy log của từng worker, liệt kê các lần xin và tải log đã có', async () => {
+    const now = new Date().toISOString();
+    getMachineMetrics.mockResolvedValue({ machine: 'PC1', range: '1h', bucket_seconds: 60, from: now, to: now, points: [] });
+    listNodes.mockResolvedValue({ items: [node('PC1-render', 1, { machine: 'PC1' })], total: 1, page: 1, pageSize: 200 });
+    listNodeLogs.mockResolvedValue({ items: [{ id: 'log-1', node_id: 'id-PC1-render', status: 'uploaded', since: null, until: null, requested_at: now, uploaded_at: now, size_bytes: 12 * 1024, error: null }] });
+    requestNodeLogs.mockResolvedValue({});
+    downloadNodeLog.mockResolvedValue(undefined);
+    renderPage();
+    fireEvent.click((await screen.findAllByText('PC1'))[0]!);
+    expect(await screen.findByText('Log của worker')).toBeTruthy();
+    expect(await screen.findByText('12 KB')).toBeTruthy();
+    expect(screen.getByText('Đã có')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Lấy log/ }));
+    await waitFor(() => expect(requestNodeLogs).toHaveBeenCalledWith('id-PC1-render', { since: null, until: null }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tải log' }));
+    await waitFor(() => expect(downloadNodeLog).toHaveBeenCalledWith('id-PC1-render', 'log-1'));
   }, 30_000);
 });

@@ -4,6 +4,8 @@ import {
   Get,
   HttpCode,
   Param,
+  ParseUUIDPipe,
+  PayloadTooLargeException,
   Post,
   Req,
   UseGuards,
@@ -15,17 +17,56 @@ import {
   FailRequestSchema,
   HeartbeatRequestSchema,
   ProgressRequestSchema,
+  NODE_LOG_MAX_UPLOAD_BYTES,
   WORKER_API,
 } from '@ag-farm/protocol';
 import { NodeTokenGuard } from '../../auth/node-token.guard';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { WorkerService } from './worker.service';
+import { NodeLogsService } from '../machines/node-logs.service';
+
+/** The raw request body (the JSON parser leaves `application/gzip` alone), refused past `limit` bytes. */
+function readRawBody(req: Request, limit: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new PayloadTooLargeException(`Logs larger than ${limit} bytes`));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
 
 /** Tất cả route worker đều yêu cầu Node token */
 @UseGuards(NodeTokenGuard)
 @Controller()
 export class WorkerController {
-  constructor(private readonly svc: WorkerService) {}
+  constructor(
+    private readonly svc: WorkerService,
+    private readonly logs: NodeLogsService,
+  ) {}
+
+  /** "Lấy log": lần admin xin log còn chờ của máy này (worker hỏi mỗi phút), hoặc null. */
+  @Get('v1/worker/logs/request')
+  async logRequest(@Req() req: Request) {
+    return { request: await this.logs.pending(req.nodeContext!.node.id) };
+  }
+
+  /** Log của máy (body `application/gzip`) cho một lần xin của chính nó. */
+  @Post('v1/worker/logs/:id')
+  @HttpCode(200)
+  async uploadLogs(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
+    const gz = await readRawBody(req, NODE_LOG_MAX_UPLOAD_BYTES);
+    await this.logs.store(req.nodeContext!.node.id, id, gz);
+    return {};
+  }
 
   /** Script cài máy worker chờ tới khi node vừa cài gửi heartbeat. */
   @Get('v1/worker/me')

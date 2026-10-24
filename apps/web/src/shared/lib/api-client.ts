@@ -80,6 +80,19 @@ export async function apiClient<T>(
   }
 }
 
+/** A file the hub sends (`Content-Disposition` names it), saved by the browser. */
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const response = await axiosInstance.request<Blob>({ url: path, method: 'GET', responseType: 'blob' });
+  const disposition = String(response.headers['content-disposition'] ?? '');
+  const name = /filename="([^"]+)"/.exec(disposition)?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(response.data);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 /** Convenience wrappers */
 export const api = {
   get: <T>(path: string) => apiClient<T>(path),

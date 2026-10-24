@@ -805,3 +805,106 @@ describe('errorToJobError', () => {
     });
   });
 });
+
+describe('runWorker - "Lấy log"', () => {
+  it('sends its logs, gzipped, when the hub has a request, and keeps running on a hub without the feature', async () => {
+    const tmpDir = makeTmpDir();
+    const logs = join(tmpDir, 'logs');
+    mkdirSync(logs, { recursive: true });
+    writeFileSync(join(logs, 'worker.log'), `${JSON.stringify({ level: 'warn', time: '2026-10-23T04:41:00.000Z', msg: 'Lease lost' })}\n`);
+    const stopCtrl = new AbortController();
+    let asked = 0;
+    let uploaded: { url: string; type: string | undefined; text: string } | null = null;
+    const { gunzipSync } = await import('node:zlib');
+    const { server, url } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const path = req.url ?? '';
+        res.setHeader('Content-Type', 'application/json');
+        if (path.includes('heartbeat')) {
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path === '/v1/worker/logs/request') {
+          asked++;
+          const request = asked === 1 ? { id: '123e4567-e89b-42d3-a456-0000000000aa', since: '2026-10-23T04:00:00.000Z', until: null } : null;
+          res.writeHead(200); res.end(JSON.stringify({ request }));
+        } else if (path.startsWith('/v1/worker/logs/')) {
+          uploaded = { url: path, type: req.headers['content-type'], text: gunzipSync(Buffer.concat(chunks)).toString('utf8') };
+          stopCtrl.abort();
+          res.writeHead(200); res.end('{}');
+        } else if (path.includes('claim')) {
+          res.writeHead(200); res.end(JSON.stringify({ job: null }));
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+    try {
+      const config = makeConfig(tmpDir, url);
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.9.0',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        stopSignal: stopCtrl.signal,
+        handlers: { 'scan.extract': async () => ({ manifest: null, summary: {} }) },
+        logDirs: [logs],
+        logPollMs: 50,
+      });
+      expect(uploaded).toMatchObject({ url: '/v1/worker/logs/123e4567-e89b-42d3-a456-0000000000aa', type: 'application/gzip' });
+      expect(uploaded!.text).toContain('Lease lost');
+      expect(uploaded!.text).toContain('lines from 2026-10-23T04:00:00.000Z');
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it('an older hub (404 on the log request) is asked again only an hour later, and the worker goes on', async () => {
+    const tmpDir = makeTmpDir();
+    const stopCtrl = new AbortController();
+    let asked = 0;
+    let heartbeats = 0;
+    const { server, url } = await startServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        const path = req.url ?? '';
+        res.setHeader('Content-Type', 'application/json');
+        if (path.includes('heartbeat')) {
+          heartbeats++;
+          if (heartbeats >= 6) stopCtrl.abort();
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path === '/v1/worker/logs/request') {
+          asked++;
+          res.writeHead(404); res.end();
+        } else if (path.includes('claim')) {
+          res.writeHead(200); res.end(JSON.stringify({ job: null }));
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+    try {
+      const config = makeConfig(tmpDir, url);
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.9.0',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        stopSignal: stopCtrl.signal,
+        handlers: { 'scan.extract': async () => ({ manifest: null, summary: {} }) },
+        logDirs: [join(tmpDir, 'logs')],
+        logPollMs: 20,
+      });
+      expect(asked).toBe(1);
+      expect(heartbeats).toBeGreaterThanOrEqual(6);
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 10_000);
+});
