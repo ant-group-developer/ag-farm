@@ -13,6 +13,8 @@ import {
   FailRequestSchema,
   HeartbeatRequestSchema,
   HeartbeatResponseSchema,
+  NODE_LOG_API,
+  NodeLogRequestResponseSchema,
   ProgressRequestSchema,
   ProgressResponseSchema,
   WORKER_API,
@@ -27,6 +29,7 @@ import type {
   FailRequest,
   HeartbeatRequest,
   HeartbeatResponse,
+  NodeLogRequest,
   ProgressRequest,
   ProgressResponse,
   WorkerMeResponse,
@@ -111,6 +114,30 @@ export class HubClient {
   }
 
   // ---- private ----
+
+  /** "Lấy log": lần admin xin log còn chờ của máy này; `undefined` khi hub chưa có tính năng này (404). */
+  async logRequest(): Promise<NodeLogRequest | null | undefined> {
+    const path = NODE_LOG_API.request;
+    const res = await fetch(`${this.hubUrl.replace(/\/$/, '')}${path}`, {
+      headers: { Authorization: `${AUTH_SCHEMES.node} ${this.token}` },
+      signal: AbortSignal.timeout(HUB_REQUEST_TIMEOUT_MS),
+    });
+    if (res.status === 404) return undefined;
+    await this.checkStatus(res, path);
+    return NodeLogRequestResponseSchema.parse(unwrapApiResponse(await res.json())).request;
+  }
+
+  /** Log của máy (gzip) cho lần xin `id`. */
+  async uploadLogs(id: string, gz: Buffer): Promise<void> {
+    const path = NODE_LOG_API.upload(id);
+    const res = await fetch(`${this.hubUrl.replace(/\/$/, '')}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/gzip', Authorization: `${AUTH_SCHEMES.node} ${this.token}` },
+      body: gz,
+      signal: AbortSignal.timeout(5 * 60_000),
+    });
+    await this.checkStatus(res, path);
+  }
 
   private async post(path: string, body: unknown): Promise<Response> {
     const url = `${this.hubUrl.replace(/\/$/, '')}${path}`;
