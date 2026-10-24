@@ -56,6 +56,20 @@ export interface FreeSlots {
   gpu: number;
 }
 
+/** One "Lấy log" request of a worker (`GET /v1/admin/nodes/:id/logs`). */
+export interface NodeLogView {
+  id: string;
+  node_id: string;
+  status: 'requested' | 'uploaded' | 'failed';
+  since: string | null;
+  until: string | null;
+  requested_at: string;
+  uploaded_at: string | null;
+  /** Size of the logs, uncompressed. */
+  size_bytes: number | null;
+  error: string | null;
+}
+
 export interface NodeView {
   id: string;
   name: string;

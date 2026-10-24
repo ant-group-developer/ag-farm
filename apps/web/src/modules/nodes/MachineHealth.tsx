@@ -22,6 +22,7 @@ import {
   type Level,
 } from './machine-health';
 import { MetricChart, type MetricSeries } from './MetricChart';
+import { NodeLogs } from './NodeLogs';
 
 const { Text } = Typography;
 
@@ -415,6 +416,13 @@ export function MachineDrawer({
           )}
         </div>
       )}
+
+      <Typography.Title level={5} style={{ marginTop: 24 }}>
+        {t('nodes.logs.title')}
+      </Typography.Title>
+      {nodes.map((n) => (
+        <NodeLogs key={n.id} node={n} />
+      ))}
     </Drawer>
   );
 }

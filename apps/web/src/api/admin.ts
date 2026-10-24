@@ -1,6 +1,7 @@
-import { api } from '../shared/lib/api-client';
+import { api, downloadFile } from '../shared/lib/api-client';
 import type {
   AdminListJobsQuery,
+  NodeLogView,
   AdminListNodesQuery,
   AdminListOwnersQuery,
   CreateEnrollmentRequest,
@@ -59,6 +60,21 @@ export function reorderNodes(ids: string[]): Promise<{ items: NodeView[] }> {
 /** "Update now": the worker updates at its next check (within a minute), once its running jobs are done. */
 export function requestNodeUpdate(id: string): Promise<NodeView> {
   return api.post<NodeView>(`/v1/admin/nodes/${id}/update-now`);
+}
+
+/** "Lấy log": the worker sends its logs (within the range, if any) at its next check with the hub. */
+export function requestNodeLogs(id: string, range: { since: string | null; until: string | null }): Promise<NodeLogView> {
+  return api.post<NodeLogView>(`/v1/admin/nodes/${id}/logs`, range);
+}
+
+/** The worker's last log requests, newest first. */
+export function listNodeLogs(id: string): Promise<{ items: NodeLogView[] }> {
+  return api.get<{ items: NodeLogView[] }>(`/v1/admin/nodes/${id}/logs`);
+}
+
+/** Saves the logs a worker sent, as text. */
+export function downloadNodeLog(id: string, logId: string): Promise<void> {
+  return downloadFile(`/v1/admin/nodes/${id}/logs/${logId}/file`, `${logId}.log`);
 }
 
 /** The newest release of each worker package (the hub's latest.json). */
