@@ -192,3 +192,105 @@ describe('uploadOutput - multipart', () => {
     }
   }, 30_000);
 });
+
+describe('uploadOutput - a part that fails now and then', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = join(os.tmpdir(), `test-up-retry-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+  });
+  afterEach(() => rmSync(tmpDir, { recursive: true, force: true }));
+
+  /** A fake bucket whose part `n` answers `fails[n]` (a status per try) before 200, and the sign server in front of it. */
+  async function stores(fails: Record<number, number[]>) {
+    const tries = new Map<number, number>();
+    const state = { partUrlCalls: 0, aborted: false, completed: null as unknown };
+    const { server: s3, url: s3Url } = await startServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        const q = new URL(req.url!, 'http://h').searchParams;
+        const n = Number(q.get('partNumber'));
+        const t = tries.get(n) ?? 0;
+        tries.set(n, t + 1);
+        const status = fails[n]?.[t];
+        if (status) { res.writeHead(status); res.end(); return; }
+        res.writeHead(200, { ETag: `"etag-${n}-${q.get('v')}"` });
+        res.end();
+      });
+    });
+    const { server: signSrv, url: signUrl } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString()) as { ops: Array<Record<string, unknown>> };
+        const results = body.ops.map((op) => {
+          if (op['op'] === 'mp_create') return { op: 'mp_create', output: op['output'], upload_id: 'u1' };
+          if (op['op'] === 'mp_part_urls') {
+            state.partUrlCalls++;
+            const v = state.partUrlCalls;
+            return {
+              op: 'mp_part_urls', output: op['output'], upload_id: 'u1', expires_at: new Date(Date.now() + 3600000).toISOString(),
+              urls: (op['parts'] as number[]).map((n) => ({ part_number: n, url: `${s3Url}/part?partNumber=${n}&v=${v}` })),
+            };
+          }
+          if (op['op'] === 'mp_complete') { state.completed = op['parts']; return { op: 'mp_complete', output: op['output'] }; }
+          if (op['op'] === 'mp_abort') { state.aborted = true; return { op: 'mp_abort', output: op['output'] }; }
+          return { op: op['op'] };
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ results }));
+      });
+    });
+    const big = join(tmpDir, 'render.mp4');
+    writeFileSync(big, Buffer.alloc(65 * 1024 * 1024, 7));
+    return {
+      tries, state, big, signClient: new SignClient(signUrl, () => 't'),
+      close: async () => { await closeServer(s3); await closeServer(signSrv); },
+    };
+  }
+
+  it('a part answered 502 is sent again (prod 21-22/10: one 502 failed a whole render)', async () => {
+    const s = await stores({ 2: [502, 503] });
+    try {
+      await uploadOutput(s.signClient, s.big, 'out/render.mp4', 'video/mp4', { retryBackoffMs: 1 });
+      expect(s.tries.get(2)).toBe(3);
+      expect(s.state.completed).toEqual(expect.arrayContaining([{ part_number: 2, etag: 'etag-2-1' }]));
+      expect(s.state.aborted).toBe(false);
+    } finally {
+      await s.close();
+    }
+  }, 30_000);
+
+  it('an expired part URL (403) is signed again for that part', async () => {
+    const s = await stores({ 1: [403] });
+    try {
+      await uploadOutput(s.signClient, s.big, 'out/render.mp4', 'video/mp4', { retryBackoffMs: 1 });
+      expect(s.state.partUrlCalls).toBe(2);
+      expect(s.state.completed).toEqual(expect.arrayContaining([{ part_number: 1, etag: 'etag-1-2' }]));
+    } finally {
+      await s.close();
+    }
+  }, 30_000);
+
+  it('a part that keeps failing fails the upload after a few tries, and the upload is aborted', async () => {
+    const s = await stores({ 1: [502, 502, 502, 502, 502, 502, 502] });
+    try {
+      await expect(uploadOutput(s.signClient, s.big, 'out/render.mp4', 'video/mp4', { retryBackoffMs: 1 }))
+        .rejects.toThrow('Part 1 PUT failed: HTTP 502 (6 tries)');
+      expect(s.tries.get(1)).toBe(6);
+      expect(s.state.aborted).toBe(true);
+    } finally {
+      await s.close();
+    }
+  }, 30_000);
+
+  it('a 4xx other than an expired URL is not tried again', async () => {
+    const s = await stores({ 1: [400, 400] });
+    try {
+      await expect(uploadOutput(s.signClient, s.big, 'out/render.mp4', 'video/mp4', { retryBackoffMs: 1 })).rejects.toThrow('Part 1 PUT failed: HTTP 400');
+      expect(s.tries.get(1)).toBe(1);
+    } finally {
+      await s.close();
+    }
+  }, 30_000);
+});

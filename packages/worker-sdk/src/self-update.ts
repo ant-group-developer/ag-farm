@@ -5,7 +5,8 @@
  *    `<hub>/dist/latest.json`; mỗi phút hỏi `GET /v1/worker/me` xem admin có cho tự cập nhật (`auto_update`) hay vừa
  *    bấm "Cập nhật ngay" (`update_requested_at`, khi đó kiểm ngay).
  * 2. Có bản mới hơn của gói mình và được phép: ngừng nhận việc (`draining`), chờ việc đang chạy xong, tối đa
- *    `update_drain_minutes` (mặc định 30).
+ *    `update_drain_minutes` (mặc định 240: một bản cuối 4K chạy 40–60 phút, 30 phút cũ cắt ngang nó). Quá hạn mà việc
+ *    còn chạy thì trả việc về hub (`fail` retryable, `worker_updating`) để máy khác nhận ngay, rồi mới cập nhật.
  * 3. Ghi `<updater_dir>/request-<role>.json` rồi chạy task `updater_task` (`ag-farm-updater`, SYSTEM): task dừng
  *    worker, cài bản mới (giữ `app.prev`), chạy setup, ghi config, bật lại; bản mới không heartbeat trong 3 phút thì
  *    quay về `app.prev`. Task ghi kết quả vào `<updater_dir>/result-<role>.json`; worker đọc nó lúc khởi động và báo
@@ -21,7 +22,7 @@ import type { WorkerMeResponse, WorkerUpdateStatus } from '@ag-farm/protocol';
 import type { Logger } from './logger';
 
 export const UPDATE_CHECK_MINUTES_DEFAULT = 15;
-export const UPDATE_DRAIN_MINUTES_DEFAULT = 30;
+export const UPDATE_DRAIN_MINUTES_DEFAULT = 240;
 /** "Cập nhật ngay" cũ hơn chừng này thì bỏ (vd. bấm lúc máy tắt, bật lại sau một tuần). */
 const UPDATE_REQUEST_TTL_MS = 60 * 60_000;
 const HUB_TIMEOUT_MS = 30_000;
@@ -112,6 +113,11 @@ export interface SelfUpdaterDeps {
   writeRequest(req: UpdateRequest): void;
   now(): number;
   random(): number;
+  /**
+   * Trả các việc còn chạy về hub (`fail` retryable) và dừng chúng, trước khi updater dừng worker: hub giao việc cho máy
+   * khác ngay thay vì chờ lease hết hạn (prod 22/10: AG-186 tự cập nhật giữa một bản cuối 4K, job hết lease).
+   */
+  releaseJobs?(reason: string): Promise<void>;
 }
 
 export interface SelfUpdaterOptions {
@@ -188,8 +194,15 @@ export class SelfUpdater {
 
     if (this.phase === 'draining' && this.target) {
       if (runningJobs > 0 && now < this.deadline) return;
-      if (runningJobs > 0) log.warn('Update: drain time is over, updating with jobs still running', { runningJobs });
       const target = this.target;
+      if (runningJobs > 0) {
+        log.warn('Update: drain time is over, handing the running jobs back to the hub', { runningJobs });
+        try {
+          await deps.releaseJobs?.(`Machine is updating to ${target.version}`);
+        } catch (err) {
+          log.warn('Update: could not hand every job back; their leases will run out', { err: errText(err) });
+        }
+      }
       try {
         deps.writeRequest({
           package: this.o.packageName,
