@@ -13,3 +13,4 @@ export * from './release';
 export * from './sign';
 export * from './ticket';
 export * from './worker-api';
+export * from './node-logs';

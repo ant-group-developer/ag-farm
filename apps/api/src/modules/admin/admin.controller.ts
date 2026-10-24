@@ -7,9 +7,12 @@ import {
   Param,
   Patch,
   Post,
+  ParseUUIDPipe,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { AdminGuard } from '../../auth/admin.guard';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import {
@@ -27,10 +30,11 @@ import {
 import { AdminService } from './admin.service';
 import type { AdminJobControlDto } from './admin.dto';
 import type { JobSelector } from '../../common/job-control';
-import { CreateEnrollmentRequestSchema } from '@ag-farm/protocol';
+import { CreateEnrollmentRequestSchema, CreateNodeLogRequestSchema } from '@ag-farm/protocol';
 import { EnrollService } from '../enroll/enroll.service';
 import { MachineMetricsQuerySchema } from '../machines/machine-metrics';
 import { MachineMetricsService } from '../machines/machine-metrics.service';
+import { NodeLogsService } from '../machines/node-logs.service';
 
 function toSelector(body: AdminJobControlDto): JobSelector {
   return {
@@ -49,6 +53,7 @@ export class AdminController {
     private readonly svc: AdminService,
     private readonly enroll: EnrollService,
     private readonly machineMetrics: MachineMetricsService,
+    private readonly nodeLogs: NodeLogsService,
   ) {}
 
   // ---- Mã cài đặt máy worker ----
@@ -85,6 +90,34 @@ export class AdminController {
   @HttpCode(200)
   async requestNodeUpdate(@Param('id') id: string) {
     return this.svc.requestUpdate(id);
+  }
+
+  /** "Lấy log": máy gửi log của nó (trong khoảng `since`–`until` nếu có) ở lần hỏi hub kế tiếp (trong khoảng một phút). */
+  @Post('nodes/:id/logs')
+  @HttpCode(201)
+  async requestNodeLogs(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(CreateNodeLogRequestSchema)) body: any,
+  ) {
+    return this.nodeLogs.request(id, body);
+  }
+
+  @Get('nodes/:id/logs')
+  async listNodeLogs(@Param('id', ParseUUIDPipe) id: string) {
+    return this.nodeLogs.list(id);
+  }
+
+  /** Log máy đã gửi, dạng text để lưu về. */
+  @Get('nodes/:id/logs/:logId/file')
+  async nodeLogFile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('logId', ParseUUIDPipe) logId: string,
+    @Res() res: Response,
+  ) {
+    const { filename, text } = await this.nodeLogs.file(id, logId);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(text);
   }
 
   @Patch('nodes/:id')

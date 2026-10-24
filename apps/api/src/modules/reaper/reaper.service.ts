@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FarmJobEntity } from '../../database/entities/farm-job.entity';
 import { MachineMetricsService } from '../machines/machine-metrics.service';
+import { NODE_LOG_KEEP_DAYS, NodeLogsService } from '../machines/node-logs.service';
 
 /** Dọn lịch sử số đo máy mỗi 10 phút (lần đầu sau 1 phút). */
 const METRICS_PRUNE_INTERVAL_MS = 10 * 60_000;
@@ -31,6 +32,7 @@ export class ReaperService implements OnModuleInit, OnModuleDestroy {
     private readonly jobRepo: Repository<FarmJobEntity>,
     private readonly config: ConfigService,
     private readonly machineMetrics: MachineMetricsService,
+    private readonly nodeLogs: NodeLogsService,
   ) {}
 
   onModuleInit(): void {
@@ -62,6 +64,9 @@ export class ReaperService implements OnModuleInit, OnModuleDestroy {
     const before = new Date(now.getTime() - this.machineMetrics.keepDays() * 24 * 60 * 60_000);
     const deleted = await this.machineMetrics.prune(before);
     if (deleted > 0) this.logger.log(`Pruned ${deleted} machine metric rows older than ${before.toISOString()}`);
+    const logsBefore = new Date(now.getTime() - NODE_LOG_KEEP_DAYS * 24 * 60 * 60_000);
+    const logs = await this.nodeLogs.prune(logsBefore);
+    if (logs > 0) this.logger.log(`Pruned ${logs} node logs older than ${logsBefore.toISOString()}`);
     return deleted;
   }
 
