@@ -436,6 +436,96 @@ describe('runWorker - never claims a job it has no slot for', () => {
   }, 15_000);
 });
 
+describe('runWorker - exclusive kinds', () => {
+  /** A hub with 3 jobs for a machine of 4 free CPU slots: how many ran at once, and the kinds claimed while one ran. */
+  async function run(over: { exclusiveKinds?: 'scan.extract'[]; exclusive_kinds?: 'scan.extract'[] }) {
+    const tmpDir = makeTmpDir();
+    const stopCtrl = new AbortController();
+    let handedOut = 0;
+    let done = 0;
+    let running = 0;
+    let maxRunning = 0;
+    const kindsWhileRunning: unknown[] = [];
+
+    const { server, url } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const path = req.url ?? '';
+        res.setHeader('Content-Type', 'application/json');
+        const body = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>) : {};
+        if (path.includes('heartbeat')) {
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path.includes('claim')) {
+          if (running > 0) kindsWhileRunning.push(body['kinds']);
+          if (handedOut < 3 && (body['kinds'] as string[]).includes('scan.extract')) {
+            handedOut++;
+            res.writeHead(200);
+            res.end(JSON.stringify({ job: { ...makeJob(`${url}/sign`), id: `123e4567-e89b-42d3-a456-00000000020${handedOut}` } }));
+          } else {
+            res.writeHead(200); res.end(JSON.stringify({ job: null }));
+          }
+        } else if (path.includes('progress')) {
+          res.writeHead(200);
+          res.end(JSON.stringify({ lease_expires_at: new Date(Date.now() + 120_000).toISOString(), ticket: 't' }));
+        } else if (path.includes('complete') || path.includes('fail')) {
+          done++;
+          if (done >= 3) stopCtrl.abort();
+          res.writeHead(200); res.end('{}');
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+
+    try {
+      const config = {
+        ...makeConfig(tmpDir, url),
+        kinds: ['scan.extract' as const, 'scan.ai' as const],
+        ...(over.exclusive_kinds ? { exclusive_kinds: over.exclusive_kinds } : {}),
+      };
+      writeFileSync(config.machine_file, 'cpu_slots: 4\ngpu_slots: 1\nreserve_interactive:\n  cpu: 0\n  gpu: 0');
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.0.1',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        progressIntervalMs: 50,
+        stopSignal: stopCtrl.signal,
+        ...(over.exclusiveKinds ? { exclusiveKinds: over.exclusiveKinds } : {}),
+        handlers: {
+          'scan.extract': async () => {
+            running++;
+            maxRunning = Math.max(maxRunning, running);
+            await sleep(300);
+            running--;
+            return { manifest: 'extract.json', summary: {} };
+          },
+          'scan.ai': async () => ({ manifest: null, summary: {} }),
+        },
+      });
+      return { maxRunning, kindsWhileRunning };
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  it('runs one job of the group at a time and meanwhile claims only the other kinds', async () => {
+    const r = await run({ exclusiveKinds: ['scan.extract'] });
+    expect(r.maxRunning).toBe(1);
+    expect(r.kindsWhileRunning.length).toBeGreaterThan(0);
+    for (const k of r.kindsWhileRunning) expect(k).toEqual(['scan.ai']);
+  }, 15_000);
+
+  it('exclusive_kinds: [] in config turns it off', async () => {
+    const r = await run({ exclusiveKinds: ['scan.extract'], exclusive_kinds: [] });
+    expect(r.maxRunning).toBeGreaterThan(1);
+  }, 15_000);
+});
+
 describe('runWorker - kinds', () => {
   it('without kinds in config, reports and claims every handled kind the machine can run', async () => {
     const tmpDir = makeTmpDir();

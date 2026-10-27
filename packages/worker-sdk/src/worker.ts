@@ -157,6 +157,11 @@ export interface RunWorkerOptions {
    */
   logDirs?: string[];
   logPollMs?: number;
+  /**
+   * Loại job chạy một cái một lúc (cả nhóm), vd mọi bản render: đang chạy một cái thì vòng claim không xin loại nào của
+   * nhóm. Config `exclusive_kinds` ghi đè.
+   */
+  exclusiveKinds?: JobType[];
 }
 
 // ---- Runner ----
@@ -202,6 +207,10 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
   const kinds = workerKinds(handlers, capabilities, config.kinds);
   const reportedKinds = kinds.length > 0 ? kinds : (config.kinds ?? []);
   log.info('Job kinds', { kinds, from: config.kinds ? 'config' : 'handlers+capabilities' });
+  // Nhóm chạy một cái một lúc: id các job của nhóm đang giữ (từ lúc claim tới khi job xong).
+  const exclusive = new Set<JobType>(config.exclusive_kinds ?? options.exclusiveKinds ?? []);
+  const exclusiveRunning = new Set<string>();
+  if (exclusive.size > 0) log.info('One at a time', { kinds: [...exclusive] });
 
   // Đo máy ở nền (config `metrics: false` thì tắt). Heartbeat chỉ đọc bản đo mới nhất, không chờ đo.
   const sampler =
@@ -351,6 +360,9 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     // `free_slots`, nên job nhận về luôn chiếm được slot. Trước đây batch được xin với cả slot dự trữ
     // của GPU/CPU khác loại: job CPU nhận về không có slot, bị bỏ rơi tới khi lease hết hạn.
     if (kinds.length === 0) { await sleep(5_000); continue; }
+    // Đang chạy một job của nhóm một-lúc-một-cái: không xin loại nào của nhóm, hub giao cho máy khác.
+    const claimKinds = exclusiveRunning.size > 0 ? kinds.filter((k) => !exclusive.has(k)) : kinds;
+    if (claimKinds.length === 0) { await sleep(1_000); continue; }
 
     let claimed: Awaited<ReturnType<typeof hub.claim>> | null = null;
     let claimFailed = false;
@@ -363,7 +375,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
         continue;
       }
       try {
-        claimed = await hub.claim({ kinds, free_slots: free, lanes: [lane] });
+        claimed = await hub.claim({ kinds: claimKinds, free_slots: free, lanes: [lane] });
       } catch (err) {
         log.warn('Claim failed', { err: String(err) });
         claimFailed = true;
@@ -392,6 +404,8 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     }
 
     const spec = JOB_TYPE_SPECS[job.type];
+    // giữ chỗ của nhóm ngay khi nhận, cả lúc còn chờ slot: vòng sau không xin thêm
+    if (exclusive.has(job.type)) exclusiveRunning.add(job.id);
     const slotLane: 'batch' | 'interactive' = job.lane === 'interactive' ? 'interactive' : 'batch';
     // Cờ interactive bật ngay từ lúc nhận job, kể cả khi còn phải chờ slot: worker batch cùng máy thấy
     // cờ thì ngừng nhận việc và nhường slot.
@@ -400,11 +414,12 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     const slot = allocator.acquire(spec.slot, { lane: slotLane }) ?? (await waitForSlot(job, spec.slot, slotLane));
     if (!slot) {
       if (interactiveFlag) allocator.clearFlag(interactiveFlag);
+      exclusiveRunning.delete(job.id);
       continue;
     }
 
     // Chạy job trong background
-    void runJob(job, handler, slot, progressMs, interactiveFlag);
+    void runJob(job, handler, slot, progressMs, interactiveFlag).finally(() => exclusiveRunning.delete(job.id));
   }
 
   allocator.setWanted(false);

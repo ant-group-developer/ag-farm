@@ -40,6 +40,12 @@ export const WorkerConfigSchema = z
      * (`workerKinds`). Khai: danh sách ép, giao với các handler của worker.
      */
     kinds: z.array(JobTypeSchema).min(1).optional(),
+    /**
+     * Loại job chạy một cái một lúc trên node này (tuỳ chọn; ghi đè `exclusiveKinds` worker truyền, `[]` = tắt): đang
+     * chạy một job thuộc nhóm này thì không xin thêm job nào của nhóm, để hub giao cho máy khác thay vì dồn 3 bản
+     * render lên một máy còn slot CPU.
+     */
+    exclusive_kinds: z.array(JobTypeSchema).optional(),
     /** Thư mục làm việc tạm cho mỗi job. */
     work_dir: z.string().min(1),
     cache: z.object({
