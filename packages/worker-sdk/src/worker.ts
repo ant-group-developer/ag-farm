@@ -4,6 +4,7 @@
  */
 import { copyFileSync, linkSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import {
   JOB_TYPE_SPECS,
   HEARTBEAT_INTERVAL_SECONDS,
@@ -38,6 +39,7 @@ import {
 import type { SelfUpdaterDeps } from './self-update';
 import { SlotAllocator, loadMachineConfig } from './machine';
 import { MachineSampler } from './metrics';
+import { collectLogs, defaultLogDirs } from './node-logs';
 import type { MetricsProbes } from './metrics';
 import type { SlotHandle } from './machine';
 import { SignClient } from './sign-client';
@@ -149,6 +151,17 @@ export interface RunWorkerOptions {
   metricsProbes?: Partial<MetricsProbes>;
   /** Chu kỳ đo máy (ms, mặc định 15 s). Dùng trong tests. */
   metricsIntervalMs?: number;
+  /**
+   * "Lấy log": thư mục log máy này gửi khi admin xin (mặc định suy từ `--config`, xem `defaultLogDirs`; rỗng thì không
+   * hỏi hub) và chu kỳ hỏi hub (ms, mặc định 60 s).
+   */
+  logDirs?: string[];
+  logPollMs?: number;
+  /**
+   * Loại job chạy một cái một lúc (cả nhóm), vd mọi bản render: đang chạy một cái thì vòng claim không xin loại nào của
+   * nhóm. Config `exclusive_kinds` ghi đè.
+   */
+  exclusiveKinds?: JobType[];
 }
 
 // ---- Runner ----
@@ -194,6 +207,10 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
   const kinds = workerKinds(handlers, capabilities, config.kinds);
   const reportedKinds = kinds.length > 0 ? kinds : (config.kinds ?? []);
   log.info('Job kinds', { kinds, from: config.kinds ? 'config' : 'handlers+capabilities' });
+  // Nhóm chạy một cái một lúc: id các job của nhóm đang giữ (từ lúc claim tới khi job xong).
+  const exclusive = new Set<JobType>(config.exclusive_kinds ?? options.exclusiveKinds ?? []);
+  const exclusiveRunning = new Set<string>();
+  if (exclusive.size > 0) log.info('One at a time', { kinds: [...exclusive] });
 
   // Đo máy ở nền (config `metrics: false` thì tắt). Heartbeat chỉ đọc bản đo mới nhất, không chờ đo.
   const sampler =
@@ -214,6 +231,8 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
   let claimEnabled = true;
 
   const activeJobs = new Map<string, AbortController>();
+  /** Per running job: hands it back to the hub (`fail` retryable) and stops it, when the worker must update. */
+  const releasers = new Map<string, (reason: string) => Promise<void>>();
 
   // Graceful shutdown
   const shutdown = () => {
@@ -291,6 +310,32 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     })();
   }
 
+  // "Lấy log": hỏi hub mỗi phút; admin xin thì gom log (lọc theo giờ) và gửi gzip. Hub cũ (404) thì thôi hỏi một giờ.
+  const logDirs = options.logDirs ?? defaultLogDirs();
+  if (logDirs.length > 0) {
+    const logPollMs = options.logPollMs ?? 60_000;
+    void (async () => {
+      let pausedUntil = 0;
+      while (running) {
+        await sleep(logPollMs);
+        if (!running || Date.now() < pausedUntil) continue;
+        try {
+          const req = await hub.logRequest();
+          if (req === undefined) {
+            pausedUntil = Date.now() + 60 * 60_000;
+            continue;
+          }
+          if (!req) continue;
+          const text = await collectLogs({ dirs: logDirs, since: req.since, until: req.until });
+          await hub.uploadLogs(req.id, gzipSync(text));
+          log.info('Logs sent to the hub', { request: req.id, bytes: Buffer.byteLength(text) });
+        } catch (err) {
+          log.warn('Could not send logs to the hub', { err: String(err) });
+        }
+      }
+    })();
+  }
+
   // Claim loop
   while (running || activeJobs.size > 0) {
     if (!running) {
@@ -315,6 +360,9 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     // `free_slots`, nên job nhận về luôn chiếm được slot. Trước đây batch được xin với cả slot dự trữ
     // của GPU/CPU khác loại: job CPU nhận về không có slot, bị bỏ rơi tới khi lease hết hạn.
     if (kinds.length === 0) { await sleep(5_000); continue; }
+    // Đang chạy một job của nhóm một-lúc-một-cái: không xin loại nào của nhóm, hub giao cho máy khác.
+    const claimKinds = exclusiveRunning.size > 0 ? kinds.filter((k) => !exclusive.has(k)) : kinds;
+    if (claimKinds.length === 0) { await sleep(1_000); continue; }
 
     let claimed: Awaited<ReturnType<typeof hub.claim>> | null = null;
     let claimFailed = false;
@@ -327,7 +375,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
         continue;
       }
       try {
-        claimed = await hub.claim({ kinds, free_slots: free, lanes: [lane] });
+        claimed = await hub.claim({ kinds: claimKinds, free_slots: free, lanes: [lane] });
       } catch (err) {
         log.warn('Claim failed', { err: String(err) });
         claimFailed = true;
@@ -356,6 +404,8 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     }
 
     const spec = JOB_TYPE_SPECS[job.type];
+    // giữ chỗ của nhóm ngay khi nhận, cả lúc còn chờ slot: vòng sau không xin thêm
+    if (exclusive.has(job.type)) exclusiveRunning.add(job.id);
     const slotLane: 'batch' | 'interactive' = job.lane === 'interactive' ? 'interactive' : 'batch';
     // Cờ interactive bật ngay từ lúc nhận job, kể cả khi còn phải chờ slot: worker batch cùng máy thấy
     // cờ thì ngừng nhận việc và nhường slot.
@@ -364,11 +414,12 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     const slot = allocator.acquire(spec.slot, { lane: slotLane }) ?? (await waitForSlot(job, spec.slot, slotLane));
     if (!slot) {
       if (interactiveFlag) allocator.clearFlag(interactiveFlag);
+      exclusiveRunning.delete(job.id);
       continue;
     }
 
     // Chạy job trong background
-    void runJob(job, handler, slot, progressMs, interactiveFlag);
+    void runJob(job, handler, slot, progressMs, interactiveFlag).finally(() => exclusiveRunning.delete(job.id));
   }
 
   allocator.setWanted(false);
@@ -393,6 +444,9 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
       writeRequest: (req) => writeUpdateRequest(dir, role, req),
       now: () => Date.now(),
       random: () => Math.random(),
+      releaseJobs: async (reason) => {
+        await Promise.all([...releasers.values()].map((release) => release(reason)));
+      },
       ...options.selfUpdateDeps,
     };
     const u = new SelfUpdater({
@@ -527,6 +581,21 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
       trailingTimer = null;
     };
 
+    // The worker must update while this job still runs: give it back to the hub now (another machine takes it at
+    // once), then stop it; the abort below then reports nothing more.
+    releasers.set(job.id, async (reason) => {
+      if (abortCtrl.signal.aborted) return;
+      stopTimers();
+      try {
+        await hub.fail(job.id, { lease_token: leaseToken, error: { code: 'worker_updating', message: reason, retryable: true } });
+        jobLog.warn('Job handed back to the hub', { reason });
+      } catch (err) {
+        jobLog.warn('Could not hand the job back; its lease will run out', { err: String(err) });
+      } finally {
+        abortCtrl.abort();
+      }
+    });
+
     const shouldYield = (): boolean => job.lane !== 'interactive' && allocator.interactivePressure();
 
     const yieldToInteractive = async (): Promise<void> => {
@@ -553,6 +622,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     if (!payloadResult.success) {
       stopTimers();
       activeJobs.delete(job.id);
+      releasers.delete(job.id);
       releaseAll();
       try {
         await hub.fail(job.id, {
@@ -624,6 +694,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     }
 
     activeJobs.delete(job.id);
+    releasers.delete(job.id);
     releaseAll();
     try { rmSync(workDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }

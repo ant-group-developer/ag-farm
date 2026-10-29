@@ -43,3 +43,12 @@ export async function changeLanguage(language: AppLanguage): Promise<void> {
 export function formatDateTime(value: string | Date): string {
   return new Date(value).toLocaleString(currentLanguage() === 'vi' ? 'vi-VN' : 'en-US');
 }
+
+/** Giờ trong ngày (kèm ngày nếu không phải hôm nay) theo ngôn ngữ đang dùng: cột ngắn của bảng. */
+export function formatTimeShort(value: string | Date, now: Date = new Date()): string {
+  const date = new Date(value);
+  const locale = currentLanguage() === 'vi' ? 'vi-VN' : 'en-US';
+  const time = date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  if (date.toDateString() === now.toDateString()) return time;
+  return `${date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit' })} ${time}`;
+}

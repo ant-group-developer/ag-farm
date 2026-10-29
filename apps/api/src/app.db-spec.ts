@@ -10,6 +10,7 @@ import { Test } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Capabilities, signTicket, verifyTicket } from '@ag-farm/protocol';
 import { createHash, generateKeyPairSync as genKeyPair, randomBytes, randomUUID } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import supertest from 'supertest';
 const request = supertest;
 import { DataSource } from 'typeorm';
@@ -31,6 +32,8 @@ import { MachineMetrics2100000000000 } from './database/migrations/2100000000000
 import { StudioReferenceFetch2200000000000 } from './database/migrations/2200000000000-studio-reference-fetch';
 import { AgGoPrep2300000000000 } from './database/migrations/2300000000000-ag-go-prep';
 import { StudioBeats2400000000000 } from './database/migrations/2400000000000-studio-beats';
+import { NodeLogs2500000000000 } from './database/migrations/2500000000000-node-logs';
+import { OwnerWebUrl2600000000000 } from './database/migrations/2600000000000-owner-web-url';
 import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
 import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
@@ -90,6 +93,8 @@ const MIGRATIONS = [
   StudioReferenceFetch2200000000000,
   AgGoPrep2300000000000,
   StudioBeats2400000000000,
+  NodeLogs2500000000000,
+  OwnerWebUrl2600000000000,
 ];
 
 /** Fake AccountMeClient → luôn trả ADMIN */
@@ -253,6 +258,7 @@ describe('ag-farm DB integration', () => {
     const runner = ds.createQueryRunner();
     try {
       // down
+      await runner.query(`DROP TABLE IF EXISTS farm_node_logs`);
       await runner.query(`DROP TABLE IF EXISTS farm_jobs`);
       await runner.query(`DROP TABLE IF EXISTS farm_nodes`);
       await runner.query(`DROP TABLE IF EXISTS farm_owners`);
@@ -2381,5 +2387,91 @@ describe('machine metrics', () => {
     } finally {
       await runner.release();
     }
+  });
+});
+
+describe('node logs (trang Máy: "Lấy log")', () => {
+  let app: INestApplication;
+  let ds: DataSource;
+
+  beforeAll(async () => {
+    app = await buildAdminApp();
+    ds = getDs(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await ds.query('TRUNCATE TABLE farm_jobs, farm_nodes, farm_owners, farm_enrollments, farm_node_logs RESTART IDENTITY CASCADE');
+  });
+
+  async function node(name: string): Promise<{ id: string; token: string }> {
+    const token = randomBytes(24).toString('base64url');
+    const repo = ds.getRepository(FarmNodeEntity);
+    const saved = await repo.save(
+      repo.create({ name, machine: name, kinds: ['studio.render_final'], tokenHash: createHash('sha256').update(token).digest('hex'), status: 'active' }),
+    );
+    return { id: saved.id, token };
+  }
+
+  const http = () => request(app.getHttpServer());
+  const pendingFor = (token: string) => http().get('/v1/worker/logs/request').set('Authorization', `Node ${token}`);
+
+  it('admin asks, the worker sees the request, sends its logs gzipped, admin downloads them as text', async () => {
+    const a = await node('AG-186-render');
+    const b = await node('AG-189-render');
+    expect((await pendingFor(a.token)).body.data).toEqual({ request: null });
+
+    const asked = await http().post(`/v1/admin/nodes/${a.id}/logs`).send({ since: '2026-10-23T03:00:00.000Z', until: '2026-10-23T06:00:00.000Z' });
+    expect(asked.status).toBe(201);
+    expect(asked.body.data).toMatchObject({ node_id: a.id, status: 'requested', since: '2026-10-23T03:00:00.000Z' });
+    // asking again while it waits is the same request
+    expect((await http().post(`/v1/admin/nodes/${a.id}/logs`).send({})).body.data.id).toBe(asked.body.data.id);
+
+    const pending = (await pendingFor(a.token)).body.data.request;
+    expect(pending).toEqual({ id: asked.body.data.id, since: '2026-10-23T03:00:00.000Z', until: '2026-10-23T06:00:00.000Z' });
+    // another machine neither sees it nor may answer it
+    expect((await pendingFor(b.token)).body.data).toEqual({ request: null });
+    const text = '===== worker.log =====\n{"level":"warn","msg":"Lease lost"}\n';
+    const gz = gzipSync(Buffer.from(text));
+    expect((await http().post(`/v1/worker/logs/${pending.id}`).set('Authorization', `Node ${b.token}`).set('Content-Type', 'application/gzip').send(gz)).status).toBe(404);
+    // not gzip: refused
+    expect((await http().post(`/v1/worker/logs/${pending.id}`).set('Authorization', `Node ${a.token}`).set('Content-Type', 'application/gzip').send(Buffer.from('plain'))).status).toBe(400);
+
+    const sent = await http().post(`/v1/worker/logs/${pending.id}`).set('Authorization', `Node ${a.token}`).set('Content-Type', 'application/gzip').send(gz);
+    expect(sent.status).toBe(200);
+    expect((await pendingFor(a.token)).body.data).toEqual({ request: null });
+    // once sent, a second upload is refused
+    expect((await http().post(`/v1/worker/logs/${pending.id}`).set('Authorization', `Node ${a.token}`).set('Content-Type', 'application/gzip').send(gz)).status).toBe(409);
+
+    const list = (await http().get(`/v1/admin/nodes/${a.id}/logs`)).body.data.items;
+    expect(list).toEqual([expect.objectContaining({ id: pending.id, status: 'uploaded', size_bytes: Buffer.byteLength(text), error: null })]);
+    const file = await http().get(`/v1/admin/nodes/${a.id}/logs/${pending.id}/file`).buffer(true).parse((res, cb) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+    expect(file.status).toBe(200);
+    expect(file.headers['content-type']).toContain('text/plain');
+    expect(file.headers['content-disposition']).toMatch(/attachment; filename="AG-186-render-\d{4}-\d\d-\d\d-\d\d-\d\d\.log"/);
+    expect((file.body as Buffer).toString('utf8')).toBe(text);
+  });
+
+  it('a request the worker never answers fails after a day; a bad range or an unknown node is refused; old logs are pruned', async () => {
+    const a = await node('AG-198-render');
+    expect((await http().post(`/v1/admin/nodes/${a.id}/logs`).send({ since: '2026-10-23T06:00:00Z', until: '2026-10-23T03:00:00Z' })).status).toBe(400);
+    expect((await http().post(`/v1/admin/nodes/${randomUUID()}/logs`).send({})).status).toBe(404);
+    const asked = (await http().post(`/v1/admin/nodes/${a.id}/logs`).send({})).body.data;
+    await ds.query(`UPDATE farm_node_logs SET requested_at = now() - interval '25 hours' WHERE id = $1`, [asked.id]);
+    expect((await pendingFor(a.token)).body.data).toEqual({ request: null });
+    const [row] = (await http().get(`/v1/admin/nodes/${a.id}/logs`)).body.data.items;
+    expect(row).toMatchObject({ id: asked.id, status: 'failed', error: expect.stringContaining('24 hours') });
+    expect((await http().get(`/v1/admin/nodes/${a.id}/logs/${asked.id}/file`)).status).toBe(409);
+
+    await ds.query(`UPDATE farm_node_logs SET requested_at = now() - interval '15 days' WHERE id = $1`, [asked.id]);
+    await app.get(ReaperService).pruneMetrics();
+    expect(await ds.query(`SELECT 1 FROM farm_node_logs`)).toHaveLength(0);
   });
 });

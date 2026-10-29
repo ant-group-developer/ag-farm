@@ -180,12 +180,16 @@ async function readFilePart(filePath: string, offset: number, length: number): P
 export interface UploadOutputOptions {
   signal?: AbortSignal;
   onProgress?: (uploaded: number, total: number) => void;
+  /** Chờ trước lần thử lại đầu (gấp đôi mỗi lần); mặc định 500 ms. Test đặt nhỏ. */
+  retryBackoffMs?: number;
 }
 
 /**
  * Upload file output:
  * - Nhỏ hơn MULTIPART_THRESHOLD_BYTES → PUT đơn lẻ
  * - Lớn hơn → multipart (mp_create, part URLs theo lô ≤100, PUT từng phần, mp_complete)
+ * - Mỗi phần lỗi tạm (mạng, 429, 5xx) thì gửi lại, tối đa MAX_RETRIES lần nữa; URL phần hết hạn (403) thì ký lại
+ *   URL của phần đó rồi gửi lại (prod 21–22/10: một lần 502 ở phần 241 làm hỏng cả bản render 4K)
  * - mp_abort khi lỗi
  */
 export async function uploadOutput(
@@ -246,24 +250,53 @@ export async function uploadOutput(
       }
     }
 
+    const backoff = options.retryBackoffMs ?? INITIAL_BACKOFF_MS;
+    /** Gửi một phần, thử lại khi lỗi tạm, ký lại URL khi hết hạn; trả ETag. */
+    const putPart = async (partNum: number, partData: Buffer): Promise<string> => {
+      let resigned = false;
+      for (let attempt = 0; ; attempt++) {
+        const partUrl = urlMap.get(partNum);
+        if (!partUrl) throw new Error(`No URL for part ${partNum}`);
+        let status: number;
+        let etag = '';
+        try {
+          const res = await fetch(partUrl, {
+            method: 'PUT',
+            headers: { 'Content-Length': String(partData.length) },
+            body: partData,
+          });
+          status = res.status;
+          etag = res.headers.get('etag') ?? res.headers.get('ETag') ?? '';
+          await res.arrayBuffer().catch(() => undefined);
+        } catch (err) {
+          if (attempt >= MAX_RETRIES) throw new Error(`Part ${partNum} PUT failed: ${String(err)} (${attempt + 1} tries)`);
+          await sleep(backoff * Math.pow(2, attempt));
+          continue;
+        }
+        if (status >= 200 && status < 300) return etag;
+        if (status === 403 && !resigned) {
+          // URL hết hạn (upload dài): ký lại URL của phần này
+          resigned = true;
+          const again = await signClient.sign([{ op: 'mp_part_urls', output: outputPath, upload_id: uploadId, parts: [partNum] }]);
+          const r = again[0];
+          const fresh = r && r.op === 'mp_part_urls' ? r.urls.find((u) => u.part_number === partNum)?.url : undefined;
+          if (!fresh) throw new Error(`Part ${partNum} PUT failed: HTTP ${status}`);
+          urlMap.set(partNum, fresh);
+          continue;
+        }
+        if (!isTransientError(status)) throw new Error(`Part ${partNum} PUT failed: HTTP ${status}`);
+        if (attempt >= MAX_RETRIES) throw new Error(`Part ${partNum} PUT failed: HTTP ${status} (${attempt + 1} tries)`);
+        await sleep(backoff * Math.pow(2, attempt));
+      }
+    };
+
     // Upload từng phần
     let uploaded = 0;
     for (let partNum = 1; partNum <= numParts; partNum++) {
       const offset = (partNum - 1) * MULTIPART_PART_SIZE_BYTES;
       const length = Math.min(MULTIPART_PART_SIZE_BYTES, totalSize - offset);
       const partData = await readFilePart(localPath, offset, length);
-      const partUrl = urlMap.get(partNum);
-      if (!partUrl) throw new Error(`No URL for part ${partNum}`);
-
-      const res = await fetch(partUrl, {
-        method: 'PUT',
-        headers: { 'Content-Length': String(partData.length) },
-        body: partData,
-      });
-      if (!res.ok) {
-        throw new Error(`Part ${partNum} PUT failed: HTTP ${res.status}`);
-      }
-      const etag = res.headers.get('etag') ?? res.headers.get('ETag') ?? '';
+      const etag = await putPart(partNum, partData);
       etags.push({ part_number: partNum, etag: etag.replace(/"/g, '') });
 
       uploaded += partData.length;

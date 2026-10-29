@@ -131,7 +131,8 @@ Máy cài bằng `install.ps1` có `updater_task`/`updater_dir` trong config.yam
 1. mỗi `update_check_minutes` (mặc định 15, lệch ±20 %) đọc `/dist/latest.json` (`ReleaseManifest`) và so bản của gói
    mình (`compareVersions`); mỗi phút hỏi `GET /v1/worker/me`: `auto_update` (tuỳ chọn, mặc định bật) và
    `update_requested_at` (admin bấm "Cập nhật ngay": kiểm ngay, cập nhật cả khi `auto_update` tắt, bỏ nếu cũ hơn 1 giờ);
-2. có bản mới hơn và được phép: ngừng claim, chờ job đang chạy xong (tối đa `update_drain_minutes`, mặc định 30);
+2. có bản mới hơn và được phép: ngừng claim, chờ job đang chạy xong (tối đa `update_drain_minutes`, mặc định 240); quá hạn
+   mà job còn chạy thì `fail` nó với `worker_updating` (retryable) để hub giao máy khác ngay, rồi mới cập nhật;
 3. ghi `<updater_dir>/request-<role>.json` rồi `schtasks /Run /TN ag-farm-updater`. Task dừng worker, cài như lệnh cập
    nhật (giữ `app.prev`, chạy setup, ghi config), bản mới không heartbeat đúng phiên bản trong 3 phút thì trả `app.prev`
    và `config.yaml.bak`. Kết quả ở `<updater_dir>/result-<role>.json`; worker đọc lúc khởi động. Task cũng chạy 03:00
@@ -180,3 +181,19 @@ Admin: `GET /v1/admin/nodes` trả thêm `metrics`, `metrics_at`; `GET /v1/admin
 bình trong ô (ổ trống: thấp nhất; nhiệt độ GPU: cao nhất), ô không có số đo thì `null`.
 
 Kết quả job (`JobResult`) chỉ gồm đường dẫn manifest và vài con số; dữ liệu đầy đủ nằm trong manifest ở bucket của chủ job.
+
+### Lấy log của máy worker
+
+Trang Máy (drawer của một máy) có nút **Lấy log** cho từng worker, chọn khoảng giờ hoặc để trống:
+
+1. Admin `POST /v1/admin/nodes/:id/logs` `{ since?, until? }` (ISO, cả hai trống: phần cuối mỗi file): một dòng
+   `farm_node_logs` trạng thái `requested`. Đang có lần xin chờ thì trả lần đó.
+2. Worker (worker-sdk) hỏi `GET /v1/worker/logs/request` mỗi phút → `{ request: { id, since, until } | null }`. Hub cũ trả 404:
+   worker thôi hỏi một giờ.
+3. Worker gom `*.log` trong `<roleDir>\logs`, `<InstallDir>\logs`, `<InstallDir>\updater` (suy từ `--config` của run.cmd):
+   có khoảng giờ thì giữ dòng trong khoảng (giờ lấy từ `"time"` của log JSON hoặc `[yyyy-MM-dd HH:mm:ss]` đầu dòng theo giờ
+   máy; dòng không ghi giờ theo dòng trước), bỏ file sửa lần cuối trước `since`; không có thì 2 MB cuối mỗi file; quá 64 MB
+   thì giữ phần cuối. Gửi `POST /v1/worker/logs/:id`, body `application/gzip` (≤ 30 MB): `uploaded`.
+4. Admin `GET /v1/admin/nodes/:id/logs` (10 lần gần nhất) và `GET /v1/admin/nodes/:id/logs/:logId/file` (text, tải về).
+
+Không gửi trong 24 giờ thì `failed`. Reaper xoá log cũ hơn 14 ngày.

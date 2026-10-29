@@ -82,6 +82,7 @@ describe('admin views', () => {
       id: 'studio',
       sign_url: 'http://api/farm/sign',
       allowed_types: ['studio.tts'],
+      web_url: null,
       created_at: at.toISOString(),
       updated_at: at.toISOString(),
     });

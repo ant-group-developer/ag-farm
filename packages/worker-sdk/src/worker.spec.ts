@@ -339,6 +339,21 @@ describe('Cache - LRU eviction', () => {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   }, 15_000);
+
+  it('a cache cleaned while the worker runs (locks/ deleted too) still downloads (prod 23/10: ENOENT … locks\\….lock)', async () => {
+    const tmpDir = makeTmpDir();
+    try {
+      const { Cache } = await import('./cache');
+      const { readFileSync: read } = await import('node:fs');
+      const cacheDir = join(tmpDir, 'cache');
+      const cache = new Cache(cacheDir, 1);
+      rmSync(cacheDir, { recursive: true, force: true });
+      const path = await cache.getOrDownload('key-after-clean', 3, async (dest) => { writeFileSync(dest, 'abc'); });
+      expect(read(path, 'utf8')).toBe('abc');
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('runWorker - never claims a job it has no slot for', () => {
@@ -421,6 +436,96 @@ describe('runWorker - never claims a job it has no slot for', () => {
   }, 15_000);
 });
 
+describe('runWorker - exclusive kinds', () => {
+  /** A hub with 3 jobs for a machine of 4 free CPU slots: how many ran at once, and the kinds claimed while one ran. */
+  async function run(over: { exclusiveKinds?: 'scan.extract'[]; exclusive_kinds?: 'scan.extract'[] }) {
+    const tmpDir = makeTmpDir();
+    const stopCtrl = new AbortController();
+    let handedOut = 0;
+    let done = 0;
+    let running = 0;
+    let maxRunning = 0;
+    const kindsWhileRunning: unknown[] = [];
+
+    const { server, url } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const path = req.url ?? '';
+        res.setHeader('Content-Type', 'application/json');
+        const body = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>) : {};
+        if (path.includes('heartbeat')) {
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path.includes('claim')) {
+          if (running > 0) kindsWhileRunning.push(body['kinds']);
+          if (handedOut < 3 && (body['kinds'] as string[]).includes('scan.extract')) {
+            handedOut++;
+            res.writeHead(200);
+            res.end(JSON.stringify({ job: { ...makeJob(`${url}/sign`), id: `123e4567-e89b-42d3-a456-00000000020${handedOut}` } }));
+          } else {
+            res.writeHead(200); res.end(JSON.stringify({ job: null }));
+          }
+        } else if (path.includes('progress')) {
+          res.writeHead(200);
+          res.end(JSON.stringify({ lease_expires_at: new Date(Date.now() + 120_000).toISOString(), ticket: 't' }));
+        } else if (path.includes('complete') || path.includes('fail')) {
+          done++;
+          if (done >= 3) stopCtrl.abort();
+          res.writeHead(200); res.end('{}');
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+
+    try {
+      const config = {
+        ...makeConfig(tmpDir, url),
+        kinds: ['scan.extract' as const, 'scan.ai' as const],
+        ...(over.exclusive_kinds ? { exclusive_kinds: over.exclusive_kinds } : {}),
+      };
+      writeFileSync(config.machine_file, 'cpu_slots: 4\ngpu_slots: 1\nreserve_interactive:\n  cpu: 0\n  gpu: 0');
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.0.1',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        progressIntervalMs: 50,
+        stopSignal: stopCtrl.signal,
+        ...(over.exclusiveKinds ? { exclusiveKinds: over.exclusiveKinds } : {}),
+        handlers: {
+          'scan.extract': async () => {
+            running++;
+            maxRunning = Math.max(maxRunning, running);
+            await sleep(300);
+            running--;
+            return { manifest: 'extract.json', summary: {} };
+          },
+          'scan.ai': async () => ({ manifest: null, summary: {} }),
+        },
+      });
+      return { maxRunning, kindsWhileRunning };
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  it('runs one job of the group at a time and meanwhile claims only the other kinds', async () => {
+    const r = await run({ exclusiveKinds: ['scan.extract'] });
+    expect(r.maxRunning).toBe(1);
+    expect(r.kindsWhileRunning.length).toBeGreaterThan(0);
+    for (const k of r.kindsWhileRunning) expect(k).toEqual(['scan.ai']);
+  }, 15_000);
+
+  it('exclusive_kinds: [] in config turns it off', async () => {
+    const r = await run({ exclusiveKinds: ['scan.extract'], exclusive_kinds: [] });
+    expect(r.maxRunning).toBeGreaterThan(1);
+  }, 15_000);
+});
+
 describe('runWorker - kinds', () => {
   it('without kinds in config, reports and claims every handled kind the machine can run', async () => {
     const tmpDir = makeTmpDir();
@@ -472,6 +577,86 @@ describe('runWorker - kinds', () => {
 });
 
 describe('runWorker - self-update', () => {
+  it('updating with a job still running past the drain: the job is failed as retryable first, then the updater starts', async () => {
+    const tmpDir = makeTmpDir();
+    const events: string[] = [];
+    let failBody: { lease_token?: string; error?: { code: string; message: string; retryable: boolean } } | null = null;
+    let claimCount = 0;
+    let handlerAborted = false;
+    const stopCtrl = new AbortController();
+
+    const { server, url } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const path = req.url ?? '';
+        res.setHeader('Content-Type', 'application/json');
+        if (path.includes('heartbeat')) {
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path.includes('claim')) {
+          claimCount++;
+          res.writeHead(200); res.end(JSON.stringify({ job: claimCount === 1 ? makeJob(`${url}/sign`) : null }));
+        } else if (path.includes('progress')) {
+          res.writeHead(200); res.end(JSON.stringify({ lease_expires_at: new Date(Date.now() + 120_000).toISOString(), ticket: 'ticket-2' }));
+        } else if (path.includes('fail')) {
+          failBody = JSON.parse(Buffer.concat(chunks).toString()) as typeof failBody;
+          events.push('fail');
+          res.writeHead(200); res.end('{}');
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+
+    try {
+      const config = {
+        ...makeConfig(tmpDir, url),
+        updater_task: 'ag-farm-updater',
+        updater_dir: join(tmpDir, 'updater'),
+        update_drain_minutes: 0,
+      };
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      const done = runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.9.0',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        stopSignal: stopCtrl.signal,
+        handlers: {
+          'scan.extract': async (ctx) => {
+            await new Promise<void>((resolve) => ctx.signal.addEventListener('abort', () => resolve(), { once: true }));
+            handlerAborted = true;
+            throw new Error('aborted');
+          },
+        },
+        selfUpdate: { package: 'ag-scan-worker' },
+        selfUpdateTickMs: 50,
+        selfUpdateFirstCheckMs: 300,
+        selfUpdateDeps: {
+          me: async () => ({ auto_update: true, update_requested_at: null }),
+          latest: async () => '0.9.1',
+          startTask: async () => { events.push('start'); },
+        },
+      });
+      const deadline = Date.now() + 5_000;
+      while (!events.includes('start') && Date.now() < deadline) await sleep(50);
+      await sleep(200);
+      stopCtrl.abort();
+      await done;
+
+      expect(events).toEqual(['fail', 'start']);
+      expect(failBody).toMatchObject({
+        lease_token: 'lease-abc-0000000000000000',
+        error: { code: 'worker_updating', message: 'Machine is updating to 0.9.1', retryable: true },
+      });
+      expect(handlerAborted).toBe(true);
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 10_000);
+
   it('a newer release: stops claiming, reports draining then installing, starts the updater task', async () => {
     const tmpDir = makeTmpDir();
     const updates: unknown[] = [];
@@ -709,4 +894,107 @@ describe('errorToJobError', () => {
       code: 'x'.repeat(80), message: 'y'.repeat(2000),
     });
   });
+});
+
+describe('runWorker - "Lấy log"', () => {
+  it('sends its logs, gzipped, when the hub has a request, and keeps running on a hub without the feature', async () => {
+    const tmpDir = makeTmpDir();
+    const logs = join(tmpDir, 'logs');
+    mkdirSync(logs, { recursive: true });
+    writeFileSync(join(logs, 'worker.log'), `${JSON.stringify({ level: 'warn', time: '2026-10-23T04:41:00.000Z', msg: 'Lease lost' })}\n`);
+    const stopCtrl = new AbortController();
+    let asked = 0;
+    let uploaded: { url: string; type: string | undefined; text: string } | null = null;
+    const { gunzipSync } = await import('node:zlib');
+    const { server, url } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const path = req.url ?? '';
+        res.setHeader('Content-Type', 'application/json');
+        if (path.includes('heartbeat')) {
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path === '/v1/worker/logs/request') {
+          asked++;
+          const request = asked === 1 ? { id: '123e4567-e89b-42d3-a456-0000000000aa', since: '2026-10-23T04:00:00.000Z', until: null } : null;
+          res.writeHead(200); res.end(JSON.stringify({ request }));
+        } else if (path.startsWith('/v1/worker/logs/')) {
+          uploaded = { url: path, type: req.headers['content-type'], text: gunzipSync(Buffer.concat(chunks)).toString('utf8') };
+          stopCtrl.abort();
+          res.writeHead(200); res.end('{}');
+        } else if (path.includes('claim')) {
+          res.writeHead(200); res.end(JSON.stringify({ job: null }));
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+    try {
+      const config = makeConfig(tmpDir, url);
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.9.0',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        stopSignal: stopCtrl.signal,
+        handlers: { 'scan.extract': async () => ({ manifest: null, summary: {} }) },
+        logDirs: [logs],
+        logPollMs: 50,
+      });
+      expect(uploaded).toMatchObject({ url: '/v1/worker/logs/123e4567-e89b-42d3-a456-0000000000aa', type: 'application/gzip' });
+      expect(uploaded!.text).toContain('Lease lost');
+      expect(uploaded!.text).toContain('lines from 2026-10-23T04:00:00.000Z');
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it('an older hub (404 on the log request) is asked again only an hour later, and the worker goes on', async () => {
+    const tmpDir = makeTmpDir();
+    const stopCtrl = new AbortController();
+    let asked = 0;
+    let heartbeats = 0;
+    const { server, url } = await startServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        const path = req.url ?? '';
+        res.setHeader('Content-Type', 'application/json');
+        if (path.includes('heartbeat')) {
+          heartbeats++;
+          if (heartbeats >= 6) stopCtrl.abort();
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path === '/v1/worker/logs/request') {
+          asked++;
+          res.writeHead(404); res.end();
+        } else if (path.includes('claim')) {
+          res.writeHead(200); res.end(JSON.stringify({ job: null }));
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+    try {
+      const config = makeConfig(tmpDir, url);
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.9.0',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        stopSignal: stopCtrl.signal,
+        handlers: { 'scan.extract': async () => ({ manifest: null, summary: {} }) },
+        logDirs: [join(tmpDir, 'logs')],
+        logPollMs: 20,
+      });
+      expect(asked).toBe(1);
+      expect(heartbeats).toBeGreaterThanOrEqual(6);
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 10_000);
 });

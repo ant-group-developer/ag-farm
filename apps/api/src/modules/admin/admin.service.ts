@@ -486,6 +486,7 @@ export class AdminService {
       keyHash,
       signUrl: dto.sign_url,
       allowedTypes: dto.allowed_types,
+      webUrl: dto.web_url ?? null,
     });
     const saved = await this.ownerRepo.save(owner);
     return { owner: toOwnerView(saved), key };
@@ -496,6 +497,7 @@ export class AdminService {
     if (!owner) throw new NotFoundException('Owner not found');
     if (dto.sign_url !== undefined) owner.signUrl = dto.sign_url;
     if (dto.allowed_types !== undefined) owner.allowedTypes = dto.allowed_types;
+    if (dto.web_url !== undefined) owner.webUrl = dto.web_url;
     return toOwnerView(await this.ownerRepo.save(owner));
   }
 

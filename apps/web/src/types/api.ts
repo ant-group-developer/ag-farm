@@ -56,6 +56,20 @@ export interface FreeSlots {
   gpu: number;
 }
 
+/** One "Lấy log" request of a worker (`GET /v1/admin/nodes/:id/logs`). */
+export interface NodeLogView {
+  id: string;
+  node_id: string;
+  status: 'requested' | 'uploaded' | 'failed';
+  since: string | null;
+  until: string | null;
+  requested_at: string;
+  uploaded_at: string | null;
+  /** Size of the logs, uncompressed. */
+  size_bytes: number | null;
+  error: string | null;
+}
+
 export interface NodeView {
   id: string;
   name: string;
@@ -314,6 +328,8 @@ export interface OwnerView {
   id: string;
   sign_url: string;
   allowed_types: JobType[];
+  /** Domain web của ứng dụng, vd. `https://studio.example.com`; web admin ghép đường dẫn trang video / dự án. */
+  web_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -336,11 +352,13 @@ export interface CreateOwnerRequest {
   id: string;
   sign_url: string;
   allowed_types: JobType[];
+  web_url?: string | null;
 }
 
 export interface PatchOwnerRequest {
   sign_url?: string;
   allowed_types?: JobType[];
+  web_url?: string | null;
 }
 
 // ---- Cài máy worker bằng mã (xem ag-farm/packages/protocol/src/enroll.ts) ----

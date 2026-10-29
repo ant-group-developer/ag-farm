@@ -18,6 +18,10 @@ export class FarmOwnerEntity {
   @Column({ name: 'allowed_types', type: 'text', array: true })
   allowedTypes!: string[];
 
+  /** Domain web của ứng dụng, ví dụ `https://studio.example.com`; web admin ghép đường dẫn trang video / dự án */
+  @Column({ name: 'web_url', type: 'text', nullable: true })
+  webUrl!: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 
