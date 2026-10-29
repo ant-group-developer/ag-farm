@@ -38,14 +38,16 @@ import { PageHeader } from '../../shared/components/PageHeader';
 import { SortDropdown } from '../../shared/components/SortDropdown';
 import { TableRefreshButton } from '../../shared/components/TableRefreshButton';
 import { jobTypeLabel, jobTypeOptions, laneLabel, stageLabel } from '../../shared/lib/job-labels';
+import { jobSubject, jobSubjectUrl } from '../../shared/lib/job-subject';
+import { formatDuration, jobTiming } from '../../shared/lib/job-timing';
 import { statusColor, statusLabel } from '../../shared/lib/status';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import { SELECTION_COLUMN_WIDTH, columnsWidth } from '../../shared/lib/table-width';
 import type { JobSortBy, JobStatus, JobType, JobView, Lane, SortOrder } from '../../types/api';
 import { TERMINAL_JOB_STATUSES } from '../../types/api';
-import { formatDateTime } from '../../i18n/language';
+import { formatDateTime, formatTimeShort } from '../../i18n/language';
 import { useTranslation } from 'react-i18next';
-import { Ban, ChevronDown, Eye, Pause, Play, RotateCcw } from 'lucide-react';
+import { Ban, ChevronDown, ExternalLink, Eye, Pause, Play, RotateCcw } from 'lucide-react';
 
 const { Text } = Typography;
 
@@ -105,6 +107,7 @@ export function JobsPage() {
     staleTime: 5 * 60_000,
   });
   const ownerOptions = (ownersQuery.data?.items ?? []).map((o) => ({ value: o.id, label: o.id }));
+  const webUrls = new Map((ownersQuery.data?.items ?? []).map((o) => [o.id, o.web_url]));
 
   const sortFields: readonly { value: JobSortBy; label: string }[] = [
     { value: 'createdAt', label: t('common.createdAt') },
@@ -247,6 +250,13 @@ export function JobsPage() {
       ),
     },
     {
+      title: <Tooltip title={t('jobs.subjectHelp')}>{t('jobs.subject')}</Tooltip>,
+      key: 'subject',
+      width: 220,
+      ellipsis: true,
+      render: (_: unknown, r: JobView) => <JobSubjectLink job={r} webUrl={webUrls.get(r.owner)} />,
+    },
+    {
       title: <Tooltip title={t('jobs.laneHelp')}>{t('jobs.lane')}</Tooltip>,
       dataIndex: 'lane',
       key: 'lane',
@@ -313,6 +323,12 @@ export function JobsPage() {
           </Tooltip>
         );
       },
+    },
+    {
+      title: <Tooltip title={t('jobs.durationHelp')}>{t('jobs.duration')}</Tooltip>,
+      key: 'duration',
+      width: 200,
+      render: (_: unknown, r: JobView) => <JobDurationCell job={r} />,
     },
     {
       title: t('common.createdAt'),
@@ -576,7 +592,7 @@ export function JobsPage() {
         {selectedJobQuery.isLoading && <Typography.Text>{t('common.loading')}</Typography.Text>}
         {selectedJobQuery.data && (
           <Space direction="vertical" style={{ width: '100%' }}>
-            <JobDetailSection job={selectedJobQuery.data} />
+            <JobDetailSection job={selectedJobQuery.data} webUrl={webUrls.get(selectedJobQuery.data.owner)} />
           </Space>
         )}
       </Drawer>
@@ -584,13 +600,66 @@ export function JobsPage() {
   );
 }
 
-function JobDetailSection({ job }: { job: JobView }) {
+/** Video / dự án của job; bấm mở ở ứng dụng khi có link. */
+function JobSubjectLink({ job, webUrl }: { job: JobView; webUrl: string | null | undefined }) {
+  const subject = jobSubject(job);
+  if (!subject) return <Text type="secondary">-</Text>;
+  const url = jobSubjectUrl(job.owner, subject, webUrl);
+  return (
+    <Tooltip title={subject.detail}>
+      {url ? (
+        <Typography.Link href={url} target="_blank" rel="noopener noreferrer" ellipsis>
+          {subject.label} <ExternalLink size={12} style={{ verticalAlign: -1 }} />
+        </Typography.Link>
+      ) : (
+        <Text>{subject.label}</Text>
+      )}
+    </Tooltip>
+  );
+}
+
+/** Thời gian chạy, và từ giờ nào đến giờ nào. */
+function JobDurationCell({ job }: { job: JobView }) {
+  const { t } = useTranslation();
+  const timing = jobTiming(job);
+  if (timing.durationMs == null || !timing.start) return <Text type="secondary">-</Text>;
+  const end = timing.end ? formatTimeShort(timing.end) : t('jobs.runningNow');
+  const fullEnd = timing.end ? formatDateTime(timing.end) : t('jobs.runningNow');
+  return (
+    <Tooltip title={t('jobs.durationRange', { start: formatDateTime(timing.start), end: fullEnd })}>
+      <div style={{ lineHeight: 1.3 }}>
+        <Text strong type={timing.running ? 'warning' : undefined}>
+          {formatDuration(timing.durationMs)}
+        </Text>
+        <br />
+        <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+          {t('jobs.durationRange', { start: formatTimeShort(timing.start), end })}
+        </Text>
+      </div>
+    </Tooltip>
+  );
+}
+
+function JobDetailSection({ job, webUrl }: { job: JobView; webUrl: string | null | undefined }) {
   const { t } = useTranslation();
   const date = (v: string | null | undefined) => (v ? formatDateTime(v) : '-');
+  const timing = jobTiming(job);
+  const subject = jobSubject(job);
   const rows = [
     [t('common.id'), job.id],
     [t('jobs.owner'), job.owner],
     [t('jobs.type'), `${jobTypeLabel(job.type)} (${job.type})`],
+    [
+      t('jobs.subject'),
+      <>
+        <JobSubjectLink job={job} webUrl={webUrl} />
+        {subject && subject.detail !== subject.label && (
+          <div>
+            <Text type="secondary">{subject.detail}</Text>
+          </div>
+        )}
+      </>,
+    ],
     [t('jobs.lane'), `${laneLabel(job.lane)} (${job.lane})`],
     [t('jobs.status'), statusLabel(job.status)],
     [t('jobs.priority'), String(job.priority)],
@@ -604,8 +673,16 @@ function JobDetailSection({ job }: { job: JobView }) {
     [t('jobs.notBefore'), date(job.not_before)],
     [t('jobs.leaseExpiresAt'), date(job.lease_expires_at)],
     [t('common.createdAt'), date(job.created_at)],
-    [t('jobs.updatedAt'), date(job.updated_at)],
+    [t('jobs.waitTime'), timing.waitMs != null ? formatDuration(timing.waitMs) : '-'],
+    [t('jobs.startedAt'), date(timing.start)],
     [t('jobs.finishedAt'), date(job.finished_at)],
+    [
+      t('jobs.duration'),
+      timing.durationMs != null
+        ? `${formatDuration(timing.durationMs)}${timing.running ? ` (${t('jobs.runningNow')})` : ''}`
+        : '-',
+    ],
+    [t('jobs.updatedAt'), date(job.updated_at)],
     [t('jobs.ackedAt'), date(job.acked_at)],
   ];
 

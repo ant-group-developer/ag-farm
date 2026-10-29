@@ -40,16 +40,26 @@ export const ReorderNodesSchema = z.strictObject({
 });
 export type ReorderNodesDto = z.infer<typeof ReorderNodesSchema>;
 
+/** Domain web của ứng dụng (http/https); web admin ghép đường dẫn vào sau. */
+const WebUrlSchema = z
+  .string()
+  .url()
+  .max(500)
+  .refine((v) => /^https?:\/\//.test(v), { message: 'web_url must be http(s)' });
+
 export const CreateOwnerSchema = z.strictObject({
   id: z.string().min(1).max(40).regex(/^[a-z][a-z0-9-]*$/),
   sign_url: z.string().url(),
   allowed_types: z.array(JobTypeSchema).min(1),
+  web_url: WebUrlSchema.nullable().optional(),
 });
 export type CreateOwnerDto = z.infer<typeof CreateOwnerSchema>;
 
 export const PatchOwnerSchema = z.strictObject({
   sign_url: z.string().url().optional(),
   allowed_types: z.array(JobTypeSchema).min(1).optional(),
+  /** `null` xoá domain. */
+  web_url: WebUrlSchema.nullable().optional(),
 });
 export type PatchOwnerDto = z.infer<typeof PatchOwnerSchema>;
 
