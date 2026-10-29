@@ -30,6 +30,22 @@ import { Pencil, Plus } from 'lucide-react';
 
 const { Text } = Typography;
 
+/** Domain web của ứng dụng (http/https); để trống là không có link. */
+function validWebUrl(value: string | null | undefined): boolean {
+  if (!value) return true;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+/** Ô nhập trống thành `null` (xoá domain). */
+function webUrlOrNull(value: string | null | undefined): string | null {
+  return value?.trim() ? value.trim() : null;
+}
+
 export function OwnersPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -112,6 +128,21 @@ export function OwnersPage() {
       ),
     },
     {
+      title: <Tooltip title={t('owners.webUrlHelp')}>{t('owners.webUrl')}</Tooltip>,
+      dataIndex: 'web_url',
+      key: 'web_url',
+      width: 280,
+      ellipsis: true,
+      render: (v: string | null) =>
+        v ? (
+          <Tooltip title={v}>
+            <Text>{v}</Text>
+          </Tooltip>
+        ) : (
+          <Text type="secondary">-</Text>
+        ),
+    },
+    {
       title: t('owners.allowedTypes'),
       key: 'allowed_types',
       width: 360,
@@ -155,6 +186,7 @@ export function OwnersPage() {
               editForm.setFieldsValue({
                 sign_url: r.sign_url,
                 allowed_types: r.allowed_types,
+                web_url: r.web_url,
               });
             }}
           />
@@ -232,7 +264,7 @@ export function OwnersPage() {
         okText={t('common.create')}
         cancelText={t('common.cancel')}
       >
-        <Form form={form} layout="vertical" onFinish={(values) => createMut.mutate(values)}>
+        <Form form={form} layout="vertical" onFinish={(values) => createMut.mutate({ ...values, web_url: webUrlOrNull(values.web_url) })}>
           <Form.Item
             name="id"
             label={t('owners.idLabel')}
@@ -248,6 +280,14 @@ export function OwnersPage() {
           </Form.Item>
           <Form.Item name="allowed_types" label={t('owners.allowedTypes')} rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}>
             <Select mode="multiple" options={jobTypeOptions()} placeholder={t('common.pickJobTypes')} />
+          </Form.Item>
+          <Form.Item
+            name="web_url"
+            label={t('owners.webUrl')}
+            tooltip={t('owners.webUrlHelp')}
+            rules={[{ validator: (_, v) => (validWebUrl(v) ? Promise.resolve() : Promise.reject(new Error(t('owners.webUrlInvalid')))) }]}
+          >
+            <Input placeholder="https://studio.example.com" allowClear />
           </Form.Item>
         </Form>
       </Modal>
@@ -267,7 +307,7 @@ export function OwnersPage() {
           layout="vertical"
           onFinish={(values) => {
             if (!editOwner) return;
-            patchMut.mutate({ id: editOwner.id, body: values });
+            patchMut.mutate({ id: editOwner.id, body: { ...values, web_url: webUrlOrNull(values.web_url) } });
           }}
         >
           <Form.Item name="sign_url" label={t('owners.signUrl')} tooltip={t('owners.signUrlHelp')} rules={[{ required: true, type: 'url', message: t('owners.signUrlInvalid') }]}>
@@ -275,6 +315,14 @@ export function OwnersPage() {
           </Form.Item>
           <Form.Item name="allowed_types" label={t('owners.allowedTypes')} rules={[{ required: true, type: 'array', min: 1, message: t('common.pickAtLeastOneType') }]}>
             <Select mode="multiple" options={jobTypeOptions()} />
+          </Form.Item>
+          <Form.Item
+            name="web_url"
+            label={t('owners.webUrl')}
+            tooltip={t('owners.webUrlHelp')}
+            rules={[{ validator: (_, v) => (validWebUrl(v) ? Promise.resolve() : Promise.reject(new Error(t('owners.webUrlInvalid')))) }]}
+          >
+            <Input placeholder="https://studio.example.com" allowClear />
           </Form.Item>
         </Form>
       </Modal>

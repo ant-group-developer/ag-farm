@@ -328,6 +328,8 @@ export interface OwnerView {
   id: string;
   sign_url: string;
   allowed_types: JobType[];
+  /** Domain web của ứng dụng, vd. `https://studio.example.com`; web admin ghép đường dẫn trang video / dự án. */
+  web_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -350,11 +352,13 @@ export interface CreateOwnerRequest {
   id: string;
   sign_url: string;
   allowed_types: JobType[];
+  web_url?: string | null;
 }
 
 export interface PatchOwnerRequest {
   sign_url?: string;
   allowed_types?: JobType[];
+  web_url?: string | null;
 }
 
 // ---- Cài máy worker bằng mã (xem ag-farm/packages/protocol/src/enroll.ts) ----
