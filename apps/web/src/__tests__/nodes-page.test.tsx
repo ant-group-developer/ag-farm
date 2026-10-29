@@ -38,6 +38,7 @@ function node(name: string, priority_order: number, over: Partial<NodeView> = {}
     machine: 'PC',
     kinds: ['scan.extract'],
     blocked_kinds: [],
+    pool: null,
     status: 'active',
     priority_order,
     os: 'windows',

@@ -89,7 +89,7 @@ export function earlierNodeFor(
   const slot: SlotKind = spec.slot;
   return (
     earlier.find(
-      (e) => e.free[slot] >= 1 && e.kinds.includes(job.type) && nodeMeetsRequirements(e.node.id, e.node.capabilities!, reqs),
+      (e) => e.free[slot] >= 1 && e.kinds.includes(job.type) && nodeMeetsRequirements(e.node.id, e.node.capabilities!, reqs, e.node.pool),
     ) ?? null
   );
 }

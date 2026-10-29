@@ -188,7 +188,7 @@ export class WorkerService {
 
         // Kiểm requirements
         const reqs = candidate.requirements as Requirements;
-        if (!nodeMeetsRequirements(freshNode.id, caps, reqs)) continue;
+        if (!nodeMeetsRequirements(freshNode.id, caps, reqs, freshNode.pool)) continue;
 
         // Thứ tự máy: còn máy xếp trước rảnh, nhận được job này thì để nó nhận. Job chờ quá grace thì
         // máy nào cũng nhận (máy xếp trước chậm hay kẹt không giữ việc lại). Job ghim máy không nhường.

@@ -306,6 +306,11 @@ export const vi = {
     kindsHelp:
       'Worker tự báo các loại job nó chạy được mỗi lần kết nối và nhận hết, kể cả loại mới. Tắt một loại ở đây thì worker này không được giao loại đó nữa.',
     kindNotReported: 'Đã tắt, và worker không còn báo loại này.',
+    pool: 'Pool (máy riêng của chi nhánh)',
+    poolHelp:
+      'Máy có pool chỉ nhận job đòi đúng pool đó (AG Studio gửi theo nhóm), và job của pool chỉ chạy trên máy cùng pool. Để trống: máy chung. Máy scan cho ag-go nên để trống.',
+    poolPlaceholder: 'Máy chung',
+    poolInvalid: 'Chữ thường, số, - và _ (tối đa 40)',
     order: 'Thứ tự',
     orderHelp: 'Thứ tự nhận việc: worker xếp trên còn slot trống thì nhận job trước worker xếp dưới. Kéo biểu tượng ⋮⋮ để đổi.',
     orderDragHint: 'Kéo để đổi thứ tự nhận việc',

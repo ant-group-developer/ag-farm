@@ -125,6 +125,7 @@ export class AdminService {
     if (dto.schedule !== undefined) node.schedule = dto.schedule;
     if (dto.priority_order !== undefined) node.priorityOrder = dto.priority_order;
     if (dto.auto_update !== undefined) node.autoUpdate = dto.auto_update;
+    if (dto.pool !== undefined) node.pool = dto.pool;
     const saved = await this.nodeRepo.save(node);
     if (dto.priority_order !== undefined) await this.keepNewNodesLast();
     return toNodeView(saved, this.isOnline(saved));

@@ -249,7 +249,7 @@ export function NodesPage() {
   const [metricSort, setMetricSort] = useState<{ key: MetricKey; order: MetricSortOrder } | null>(null);
   const metricSorted = metricSort !== null;
   const [form] = Form.useForm<{ name: string; machine?: string; kinds: JobType[] }>();
-  const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[] }>();
+  const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[]; pool: string }>();
 
   // URL state via nuqs
   const [query, setQuery] = useQueryStates({
@@ -621,6 +621,7 @@ export function NodesPage() {
                 editForm.setFieldsValue({
                   name: r.name,
                   blocked_kinds: r.blocked_kinds ?? [],
+                  pool: r.pool ?? '',
                 });
               }}
             />
@@ -771,7 +772,7 @@ export function NodesPage() {
           onFinish={(values) => {
             if (!editNode) return;
             patchMut.mutate(
-              { id: editNode.id, body: values },
+              { id: editNode.id, body: { ...values, pool: values.pool?.trim() || null } },
               { onSuccess: () => setEditNode(null) },
             );
           }}
@@ -782,6 +783,14 @@ export function NodesPage() {
           {/* Worker ghi đè `kinds` ở mỗi heartbeat; admin chỉ tắt/bật từng loại (`blocked_kinds`). */}
           <Form.Item name="blocked_kinds" label={t('nodes.kinds')} tooltip={t('nodes.kindsHelp')}>
             <BlockedKindsField reported={editNode?.kinds ?? []} />
+          </Form.Item>
+          <Form.Item
+            name="pool"
+            label={t('nodes.pool')}
+            tooltip={t('nodes.poolHelp')}
+            rules={[{ pattern: /^$|^[a-z0-9][a-z0-9_-]{0,39}$/, message: t('nodes.poolInvalid') }]}
+          >
+            <Input placeholder={t('nodes.poolPlaceholder')} allowClear />
           </Form.Item>
         </Form>
       </Modal>

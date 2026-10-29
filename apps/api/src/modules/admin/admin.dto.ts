@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { JobStatusSchema, JobTypeSchema } from '@ag-farm/protocol';
+import { JobStatusSchema, JobTypeSchema, PoolNameSchema } from '@ag-farm/protocol';
 
 export const CreateNodeSchema = z.strictObject({
   name: z.string().min(1).max(200),
@@ -27,6 +27,8 @@ export const PatchNodeSchema = z.strictObject({
   auto_update: z.boolean().optional(),
   /** Số nhỏ trước. Muốn xếp lại cả danh sách thì dùng `POST nodes/reorder`. */
   priority_order: z.number().int().min(0).max(1_000_000).optional(),
+  /** Pool máy (chi nhánh); null hoặc "" = máy chung. Máy có pool chỉ nhận job của pool đó. */
+  pool: z.union([PoolNameSchema, z.literal('').transform(() => null), z.null()]).optional(),
 });
 export type PatchNodeDto = z.infer<typeof PatchNodeSchema>;
 

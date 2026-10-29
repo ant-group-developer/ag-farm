@@ -34,6 +34,7 @@ import { AgGoPrep2300000000000 } from './database/migrations/2300000000000-ag-go
 import { StudioBeats2400000000000 } from './database/migrations/2400000000000-studio-beats';
 import { NodeLogs2500000000000 } from './database/migrations/2500000000000-node-logs';
 import { OwnerWebUrl2600000000000 } from './database/migrations/2600000000000-owner-web-url';
+import { NodePool2700000000000 } from './database/migrations/2700000000000-node-pool';
 import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
 import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
@@ -95,6 +96,7 @@ const MIGRATIONS = [
   StudioBeats2400000000000,
   NodeLogs2500000000000,
   OwnerWebUrl2600000000000,
+  NodePool2700000000000,
 ];
 
 /** Fake AccountMeClient → luôn trả ADMIN */

@@ -220,6 +220,19 @@ describe('requirements', () => {
     expect(mergeRequirements('studio.render_final', { node_id: id })).toEqual({ node_id: id });
   });
 
+  it("a pool's jobs run only on its machines, and its machines take only its jobs", () => {
+    const id = randomUUID();
+    expect(nodeMeetsRequirements(id, gpuBox, { pool: 'hcm' }, 'hcm')).toBe(true);
+    expect(nodeMeetsRequirements(id, gpuBox, { pool: 'hcm' }, null)).toBe(false);
+    expect(nodeMeetsRequirements(id, gpuBox, { pool: 'hcm' }, 'hn')).toBe(false);
+    expect(nodeMeetsRequirements(id, gpuBox, {}, 'hcm')).toBe(false);
+    expect(nodeMeetsRequirements(id, gpuBox, {}, null)).toBe(true);
+    expect(nodeMeetsRequirements(id, cpuBox, { pool: 'hcm', gpu: true }, 'hcm')).toBe(false);
+    expect(RequirementsSchema.safeParse({ pool: 'hcm-1' }).success).toBe(true);
+    expect(RequirementsSchema.safeParse({ pool: 'Bad Pool' }).success).toBe(false);
+    expect(mergeRequirements('studio.render_final', { pool: 'hcm' })).toEqual({ pool: 'hcm' });
+  });
+
   it('an owner sees a node by name, kinds, GPUs and load', () => {
     const view = {
       id: randomUUID(), name: 'render-01', online: true, kinds: ['studio.render_final'],

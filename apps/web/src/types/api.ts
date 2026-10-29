@@ -77,6 +77,8 @@ export interface NodeView {
   kinds: JobType[];
   /** Job types the admin turned off on this node; the node takes every other kind it reports. */
   blocked_kinds: JobType[];
+  /** Pool máy (chi nhánh): chỉ nhận job của pool đó; null = máy chung. */
+  pool: string | null;
   status: 'active' | 'disabled';
   /** Thứ tự nhận việc, số nhỏ trước: máy xếp trước còn slot thì nhận job trước máy xếp sau. */
   priority_order: number;
@@ -346,6 +348,8 @@ export interface PatchNodeRequest {
   status?: 'active' | 'disabled';
   priority_order?: number;
   auto_update?: boolean;
+  /** Pool (a branch's own machines); null or "": the shared machines. */
+  pool?: string | null;
 }
 
 export interface CreateOwnerRequest {

@@ -24,6 +24,10 @@ export class FarmNodeEntity {
   @Column({ name: 'blocked_kinds', type: 'text', array: true, default: () => `'{}'` })
   blockedKinds!: string[];
 
+  /** Pool máy (chi nhánh): chỉ nhận job `requirements.pool` đúng pool này; null = máy chung. */
+  @Column({ type: 'text', nullable: true, default: null })
+  pool!: string | null;
+
   /** sha256 hex của token node */
   @Column({ name: 'token_hash', type: 'char', length: 64, unique: true })
   tokenHash!: string;

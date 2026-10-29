@@ -20,5 +20,7 @@ export function toOwnerNodeView(node: FarmNodeEntity, online: boolean, ownerType
     gpus: gpus.map((g) => ({ name: String(g.name ?? ''), vram_mb: Number(g.vram_mb ?? 0), nvenc: g.nvenc === true })),
     running_jobs: node.runningJobIds?.length ?? 0,
     last_seen_at: node.lastSeenAt ? node.lastSeenAt.toISOString() : null,
+    // only when set: owners built before `pool` read the node view strictly
+    ...(node.pool ? { pool: node.pool } : {}),
   };
 }
