@@ -224,14 +224,14 @@ export const en: LocaleMessages = {
     kindsHelp:
       'The worker reports the job types it can run each time it connects, and takes all of them, new ones included. Turn a type off here to stop this worker getting it.',
     kindNotReported: 'Turned off, and the worker no longer reports it.',
-    pool: "Pool (a branch's own machines)",
+    pool: "Pools (a branch's machines)",
     poolHelp:
-      'A worker in a pool only takes jobs asking for that pool (AG Studio sends them per team), and those jobs only run on workers of the pool. Blank: the shared machines. Leave scan workers for ag-go blank.',
+      "Each AG Studio team picks one pool; its jobs run only on workers in that pool. A worker can be in several pools so teams share it. A worker in any pool takes no shared jobs. Blank: the shared machines. Leave scan workers for ag-go blank.",
     poolPlaceholder: 'Shared machines (no pool)',
     poolWorkers: '{{count}} worker(s): {{names}}',
     poolCreate: 'Create pool “{{name}}”',
     poolNone: 'No pools yet: type a name to create one',
-    poolTag: "Pool: takes only the jobs of teams using it",
+    poolTag: "Pool: takes the jobs of teams using it",
     poolInvalid: 'Pool name: lower case letters, digits, - and _ (at most 40)',
     order: 'Order',
     orderHelp: 'The order workers get jobs in: a worker higher up with a free slot gets a job before the ones below it. Drag the ⋮⋮ handle to change it.',

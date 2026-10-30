@@ -12,7 +12,7 @@ describe('admin views', () => {
       machine: 'PC',
       kinds: ['studio.tts'],
       blockedKinds: [],
-      pool: null,
+      pools: [],
       tokenHash: 'a'.repeat(64),
       status: 'active',
       priorityOrder: 3,

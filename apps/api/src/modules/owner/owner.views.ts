@@ -21,6 +21,6 @@ export function toOwnerNodeView(node: FarmNodeEntity, online: boolean, ownerType
     running_jobs: node.runningJobIds?.length ?? 0,
     last_seen_at: node.lastSeenAt ? node.lastSeenAt.toISOString() : null,
     // only when set: owners built before `pool` read the node view strictly
-    ...(node.pool ? { pool: node.pool } : {}),
+    ...(node.pools?.length ? { pools: node.pools } : {}),
   };
 }

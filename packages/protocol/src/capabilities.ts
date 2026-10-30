@@ -40,8 +40,9 @@ export const SlotsSchema = z.strictObject({
 export type Slots = z.infer<typeof SlotsSchema>;
 
 /**
- * Tên pool máy (nhóm máy riêng của một chi nhánh): chữ thường, số, `-`, `_`, tối đa 40. Admin farm đặt cho từng máy;
- * máy có pool chỉ nhận job đòi đúng pool đó, job đòi pool chỉ chạy trên máy của pool đó.
+ * Tên pool máy (nhóm máy của một chi nhánh): chữ thường, số, `-`, `_`, tối đa 40. Admin farm gán cho từng máy, một máy
+ * thuộc được nhiều pool (nhiều nhóm dùng chung máy đó); máy có pool chỉ nhận job đòi một trong các pool của nó, job đòi
+ * pool chỉ chạy trên máy thuộc pool đó.
  */
 export const PoolNameSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,39}$/, 'lower case letters, digits, - and _ (at most 40)');
 
@@ -99,12 +100,13 @@ export function meetsRequirements(capabilities: Capabilities, requirements: Requ
 }
 
 /**
- * `meetsRequirements` cộng thêm việc ghim máy (job có `node_id` chỉ cho đúng máy đó) và pool: pool của job phải đúng
- * pool của máy, hai chiều (máy có pool không nhận job máy chung, máy chung không nhận job của pool). Hub dùng khi claim.
+ * `meetsRequirements` cộng thêm việc ghim máy (job có `node_id` chỉ cho đúng máy đó) và pool, chặt hai chiều: job có
+ * pool chỉ cho máy thuộc pool đó (`nodePools` có nó); máy thuộc pool nào đó không nhận job máy chung, máy chung (không
+ * pool) không nhận job của pool. Hub dùng khi claim.
  */
-export function nodeMeetsRequirements(nodeId: string, capabilities: Capabilities, requirements: Requirements, nodePool: string | null = null): boolean {
+export function nodeMeetsRequirements(nodeId: string, capabilities: Capabilities, requirements: Requirements, nodePools: readonly string[] = []): boolean {
   if (requirements.node_id && requirements.node_id !== nodeId) return false;
-  if ((requirements.pool ?? null) !== (nodePool ?? null)) return false;
+  if (requirements.pool ? !nodePools.includes(requirements.pool) : nodePools.length > 0) return false;
   return meetsRequirements(capabilities, requirements);
 }
 

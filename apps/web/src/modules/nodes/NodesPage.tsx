@@ -250,7 +250,7 @@ export function NodesPage() {
   const [metricSort, setMetricSort] = useState<{ key: MetricKey; order: MetricSortOrder } | null>(null);
   const metricSorted = metricSort !== null;
   const [form] = Form.useForm<{ name: string; machine?: string; kinds: JobType[] }>();
-  const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[]; pool: string | null }>();
+  const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[]; pools: string[] }>();
 
   // URL state via nuqs
   const [query, setQuery] = useQueryStates({
@@ -402,7 +402,9 @@ export function NodesPage() {
         <Flex vertical style={{ minWidth: 0 }}>
           <Flex gap={4} align="center" style={{ minWidth: 0 }}>
             <Text strong ellipsis={{ tooltip: r.name }}>{r.name}</Text>
-            {r.pool ? <Tooltip title={t('nodes.poolTag')}><Tag color="purple" style={{ marginInlineEnd: 0 }}>{r.pool}</Tag></Tooltip> : null}
+            {(r.pools ?? []).map((p) => (
+              <Tooltip key={p} title={t('nodes.poolTag')}><Tag color="purple" style={{ marginInlineEnd: 0 }}>{p}</Tag></Tooltip>
+            ))}
           </Flex>
           <Tooltip title={t('nodes.health.openChart', { machine: machineKey(r) })}>
             <Typography.Link
@@ -625,7 +627,7 @@ export function NodesPage() {
                 editForm.setFieldsValue({
                   name: r.name,
                   blocked_kinds: r.blocked_kinds ?? [],
-                  pool: r.pool ?? null,
+                  pools: r.pools ?? [],
                 });
               }}
             />
@@ -776,7 +778,7 @@ export function NodesPage() {
           onFinish={(values) => {
             if (!editNode) return;
             patchMut.mutate(
-              { id: editNode.id, body: { ...values, pool: values.pool || null } },
+              { id: editNode.id, body: { ...values, pools: values.pools ?? [] } },
               { onSuccess: () => { setEditNode(null); void qc.invalidateQueries({ queryKey: ['pools'] }); } },
             );
           }}
@@ -789,7 +791,7 @@ export function NodesPage() {
             <BlockedKindsField reported={editNode?.kinds ?? []} />
           </Form.Item>
           <Form.Item
-            name="pool"
+            name="pools"
             label={t('nodes.pool')}
             tooltip={t('nodes.poolHelp')}
           >

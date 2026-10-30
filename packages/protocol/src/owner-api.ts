@@ -125,8 +125,8 @@ export const OwnerNodeViewSchema = z.strictObject({
   gpus: z.array(z.strictObject({ name: z.string(), vram_mb: z.int().nonnegative(), nvenc: z.boolean() })),
   running_jobs: z.int().nonnegative(),
   last_seen_at: IsoDateTimeSchema.nullable(),
-  /** Pool của máy (`requirements.pool`); thiếu = máy chung. Hub chỉ gửi khi có, để chủ job build cũ vẫn đọc được. */
-  pool: PoolNameSchema.optional(),
+  /** Các pool máy thuộc (`requirements.pool`); thiếu = máy chung. Hub chỉ gửi khi có, để chủ job build cũ vẫn đọc được. */
+  pools: z.array(PoolNameSchema).max(20).optional(),
 });
 export type OwnerNodeView = z.infer<typeof OwnerNodeViewSchema>;
 
