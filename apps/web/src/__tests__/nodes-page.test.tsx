@@ -14,7 +14,9 @@ const getMachineMetrics = vi.fn();
 const listNodeLogs = vi.fn();
 const requestNodeLogs = vi.fn();
 const downloadNodeLog = vi.fn();
+const listPools = vi.fn();
 vi.mock('../api/admin', () => ({
+  listPools: (...args: unknown[]) => listPools(...args),
   listNodes: (...args: unknown[]) => listNodes(...args),
   createNode: vi.fn(),
   patchNode: (...args: unknown[]) => patchNode(...args),
@@ -92,6 +94,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   getLatestReleases.mockResolvedValue({ packages: {} });
+  listPools.mockResolvedValue({ items: [{ pool: 'hcm', nodes: [{ id: 'id-x', name: 'hcm-render', machine: 'PC-HCM', online: true }] }] });
 });
 
 describe('NodesPage', () => {
@@ -139,6 +142,27 @@ describe('NodesPage', () => {
     expect(listNodes).toHaveBeenLastCalledWith(expect.objectContaining({ sortBy: 'name', pageSize: 20 }));
     expect(container.querySelectorAll('svg.lucide-grip-vertical')).toHaveLength(0);
   });
+
+  it('pool: chọn trong các pool đang có (kèm worker), hoặc gõ tên để tạo pool mới; worker có pool hiện tag', async () => {
+    patchNode.mockResolvedValue({});
+    listNodes.mockResolvedValue({ items: [node('a', 1), node('b', 2, { pool: 'hcm' })], total: 2, page: 1, pageSize: 200 });
+    renderPage();
+    expect(await screen.findByText('hcm')).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Sửa' })[0]!);
+    const pool = await screen.findByRole('combobox', { name: /Pool/ });
+    fireEvent.mouseDown(pool);
+    fireEvent.click(await screen.findByText('hcm · 1 worker: hcm-render'));
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu' }));
+    await waitFor(() => expect(patchNode).toHaveBeenCalledWith('id-a', expect.objectContaining({ pool: 'hcm' })));
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Sửa' })[0]!);
+    const again = await screen.findByRole('combobox', { name: /Pool/ });
+    fireEvent.mouseDown(again);
+    fireEvent.change(again, { target: { value: 'Chi Nhanh HN' } });
+    fireEvent.click(await screen.findByText('Tạo pool mới “chi-nhanh-hn”'));
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu' }));
+    await waitFor(() => expect(patchNode).toHaveBeenLastCalledWith('id-a', expect.objectContaining({ pool: 'chi-nhanh-hn' })));
+  }, 30_000);
 
   it('mỗi loại job máy báo có một công tắc; tắt thì gửi blocked_kinds', async () => {
     patchNode.mockResolvedValue({});

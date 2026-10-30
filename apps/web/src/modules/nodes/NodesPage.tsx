@@ -41,6 +41,7 @@ import { jobTypeOptions } from '../../shared/lib/job-labels';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import { columnsWidth } from '../../shared/lib/table-width';
 import { BlockedKindsField, KindSwitches } from './KindSwitches';
+import { PoolSelect } from './PoolSelect';
 import type {
   JobType,
   NodeCapabilities,
@@ -249,7 +250,7 @@ export function NodesPage() {
   const [metricSort, setMetricSort] = useState<{ key: MetricKey; order: MetricSortOrder } | null>(null);
   const metricSorted = metricSort !== null;
   const [form] = Form.useForm<{ name: string; machine?: string; kinds: JobType[] }>();
-  const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[]; pool: string }>();
+  const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[]; pool: string | null }>();
 
   // URL state via nuqs
   const [query, setQuery] = useQueryStates({
@@ -399,7 +400,10 @@ export function NodesPage() {
       width: 200,
       render: (_: unknown, r: NodeView) => (
         <Flex vertical style={{ minWidth: 0 }}>
-          <Text strong ellipsis={{ tooltip: r.name }}>{r.name}</Text>
+          <Flex gap={4} align="center" style={{ minWidth: 0 }}>
+            <Text strong ellipsis={{ tooltip: r.name }}>{r.name}</Text>
+            {r.pool ? <Tooltip title={t('nodes.poolTag')}><Tag color="purple" style={{ marginInlineEnd: 0 }}>{r.pool}</Tag></Tooltip> : null}
+          </Flex>
           <Tooltip title={t('nodes.health.openChart', { machine: machineKey(r) })}>
             <Typography.Link
               ellipsis
@@ -621,7 +625,7 @@ export function NodesPage() {
                 editForm.setFieldsValue({
                   name: r.name,
                   blocked_kinds: r.blocked_kinds ?? [],
-                  pool: r.pool ?? '',
+                  pool: r.pool ?? null,
                 });
               }}
             />
@@ -772,8 +776,8 @@ export function NodesPage() {
           onFinish={(values) => {
             if (!editNode) return;
             patchMut.mutate(
-              { id: editNode.id, body: { ...values, pool: values.pool?.trim() || null } },
-              { onSuccess: () => setEditNode(null) },
+              { id: editNode.id, body: { ...values, pool: values.pool || null } },
+              { onSuccess: () => { setEditNode(null); void qc.invalidateQueries({ queryKey: ['pools'] }); } },
             );
           }}
         >
@@ -788,9 +792,8 @@ export function NodesPage() {
             name="pool"
             label={t('nodes.pool')}
             tooltip={t('nodes.poolHelp')}
-            rules={[{ pattern: /^$|^[a-z0-9][a-z0-9_-]{0,39}$/, message: t('nodes.poolInvalid') }]}
           >
-            <Input placeholder={t('nodes.poolPlaceholder')} allowClear />
+            <PoolSelect />
           </Form.Item>
         </Form>
       </Modal>

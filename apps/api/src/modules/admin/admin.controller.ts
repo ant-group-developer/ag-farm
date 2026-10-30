@@ -71,6 +71,12 @@ export class AdminController {
     return this.svc.listNodes(query);
   }
 
+  /** Các pool đang có (máy riêng của chi nhánh) và worker trong mỗi pool: ô chọn pool của trang Worker. */
+  @Get('pools')
+  async listPools() {
+    return this.svc.listPools();
+  }
+
   @Post('nodes')
   @HttpCode(201)
   async createNode(@Body(new ZodValidationPipe(CreateNodeSchema)) body: any) {

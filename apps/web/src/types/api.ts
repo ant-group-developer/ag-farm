@@ -342,6 +342,12 @@ export interface CreateNodeRequest {
   kinds: JobType[];
 }
 
+/** Một pool (máy riêng của một chi nhánh) và các worker của nó. */
+export interface PoolView {
+  pool: string;
+  nodes: { id: string; name: string; machine: string; online: boolean }[];
+}
+
 export interface PatchNodeRequest {
   name?: string;
   blocked_kinds?: JobType[];
