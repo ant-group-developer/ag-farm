@@ -125,6 +125,8 @@ export class AdminService {
     if (dto.schedule !== undefined) node.schedule = dto.schedule;
     if (dto.priority_order !== undefined) node.priorityOrder = dto.priority_order;
     if (dto.auto_update !== undefined) node.autoUpdate = dto.auto_update;
+    if (dto.pools !== undefined) node.pools = dto.pools;
+    if (dto.accept_shared !== undefined) node.acceptShared = dto.accept_shared;
     const saved = await this.nodeRepo.save(node);
     if (dto.priority_order !== undefined) await this.keepNewNodesLast();
     return toNodeView(saved, this.isOnline(saved));
@@ -166,6 +168,21 @@ export class AdminService {
     });
     const nodes = await this.nodeRepo.find({ order: { priorityOrder: 'ASC', name: 'ASC', id: 'ASC' } });
     return { items: nodes.map((n) => toNodeView(n, this.isOnline(n))) };
+  }
+
+  /**
+   * Pool nào đang có worker, theo tên; mỗi pool kèm worker của nó (tên, máy, online), một worker có thể ở nhiều pool.
+   * Pool không còn worker nào thì mất.
+   */
+  async listPools(): Promise<{ items: { pool: string; nodes: { id: string; name: string; machine: string; online: boolean }[] }[] }> {
+    const nodes = await this.nodeRepo.find({ order: { name: 'ASC', id: 'ASC' } });
+    const pools = new Map<string, { id: string; name: string; machine: string; online: boolean }[]>();
+    for (const n of nodes) {
+      for (const p of n.pools ?? []) {
+        pools.set(p, [...(pools.get(p) ?? []), { id: n.id, name: n.name, machine: n.machine, online: this.isOnline(n) }]);
+      }
+    }
+    return { items: [...pools].sort(([a], [b]) => a.localeCompare(b)).map(([pool, list]) => ({ pool, nodes: list })) };
   }
 
   /** Máy mới lấy số kế tiếp của sequence: đẩy sequence qua số lớn nhất admin vừa đặt để máy mới vẫn đứng cuối. */

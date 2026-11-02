@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RequirementsSchema } from './capabilities';
+import { PoolNameSchema, RequirementsSchema } from './capabilities';
 import {
   IsoDateTimeSchema,
   JobErrorSchema,
@@ -125,6 +125,18 @@ export const OwnerNodeViewSchema = z.strictObject({
   gpus: z.array(z.strictObject({ name: z.string(), vram_mb: z.int().nonnegative(), nvenc: z.boolean() })),
   running_jobs: z.int().nonnegative(),
   last_seen_at: IsoDateTimeSchema.nullable(),
+  /** Các pool máy thuộc (`requirements.pool`); thiếu = máy chung. Hub chỉ gửi khi có, để chủ job build cũ vẫn đọc được. */
+  pools: z.array(PoolNameSchema).max(20).optional(),
+  /**
+   * Deprecated: pool đầu tiên trong `pools`, cho chủ job build trước khi có `pools` (chỉ đọc `pool`). Hub gửi cùng
+   * `pools` một bản rồi bỏ; chủ job đọc `pools`.
+   */
+  pool: PoolNameSchema.optional(),
+  /**
+   * Máy có pool còn nhận job không đòi pool (`requirements.pool` thiếu). Hub chỉ gửi khi máy có pool; thiếu = máy chung
+   * (nhận việc chung).
+   */
+  accept_shared: z.boolean().optional(),
 });
 export type OwnerNodeView = z.infer<typeof OwnerNodeViewSchema>;
 

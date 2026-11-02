@@ -18,7 +18,8 @@ import type { SignClient } from './sign-client';
 const MAX_RETRIES = 5;
 const INITIAL_BACKOFF_MS = 500;
 
-function isTransientError(status: number): boolean {
+/** Mã HTTP đáng thử lại: hub / storage tạm lỗi hoặc đang quá tải. */
+export function isTransientError(status: number): boolean {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 

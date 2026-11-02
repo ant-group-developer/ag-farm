@@ -49,6 +49,10 @@ export const en: LocaleMessages = {
     pointSecure: 'Secure sign-in with Auth0',
     pointInternal: 'For system administrators only',
     secureNote: 'You will be taken to a secure sign-in page.',
+    expiredTitle: 'Your session has expired',
+    expiredPrompt: 'Sign in again to keep working. Nothing you saved is lost.',
+    expiredNote: 'You were signed out because the sign-in was revoked or sat unused too long.',
+    loginAgain: 'Sign in again',
     missingConfig: 'Auth0 is not configured',
     missingConfigDesc:
       'Check the VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID and VITE_AUTH0_AUDIENCE environment variables.',
@@ -224,6 +228,18 @@ export const en: LocaleMessages = {
     kindsHelp:
       'The worker reports the job types it can run each time it connects, and takes all of them, new ones included. Turn a type off here to stop this worker getting it.',
     kindNotReported: 'Turned off, and the worker no longer reports it.',
+    pool: "Pools (a branch's machines)",
+    poolHelp:
+      "Each AG Studio team picks one pool; its jobs run only on workers in that pool. A worker can be in several pools so teams share it. A worker in a pool still takes shared jobs unless “Take shared jobs” is off. Blank: the shared machines. Leave scan workers for ag-go blank.",
+    poolPlaceholder: 'Shared machines (no pool)',
+    acceptShared: 'Take shared jobs',
+    acceptSharedHelp:
+      "On: the worker takes its pools' jobs and also jobs asking for no pool, like a shared machine. Off: only its pools' jobs.",
+    poolWorkers: '{{count}} worker(s): {{names}}',
+    poolCreate: 'Create pool “{{name}}”',
+    poolNone: 'No pools yet: type a name to create one',
+    poolTag: "Pool: takes the jobs of teams using it",
+    poolInvalid: 'Pool name: lower case letters, digits, - and _ (at most 40)',
     order: 'Order',
     orderHelp: 'The order workers get jobs in: a worker higher up with a free slot gets a job before the ones below it. Drag the ⋮⋮ handle to change it.',
     orderDragHint: 'Drag to change the order workers get jobs in',

@@ -41,6 +41,7 @@ import { jobTypeOptions } from '../../shared/lib/job-labels';
 import { PAGE_TABLE_STICKY } from '../../shared/lib/sticky-table-header';
 import { columnsWidth } from '../../shared/lib/table-width';
 import { BlockedKindsField, KindSwitches } from './KindSwitches';
+import { PoolSelect } from './PoolSelect';
 import type {
   JobType,
   NodeCapabilities,
@@ -150,7 +151,13 @@ function NodeVersion({ node, latest }: { node: NodeView; latest: ReleaseManifest
   return (
     <Flex vertical gap={4} style={{ minWidth: 0 }}>
       <Flex align="center" gap={6} wrap>
-        {node.agent_version ? <Text>{node.agent_version}</Text> : <Text type="secondary">-</Text>}
+        {node.agent_version ? (
+          <Text ellipsis={{ tooltip: node.agent_version }} style={{ maxWidth: '100%' }}>
+            {node.agent_version}
+          </Text>
+        ) : (
+          <Text type="secondary">-</Text>
+        )}
         {isOutdated(node, latest) ? (
           <Tooltip title={t('nodes.versionOutdatedHelp', { latest: newest })}>
             <Tag color="orange" bordered={false} style={{ marginInlineEnd: 0 }}>
@@ -249,7 +256,7 @@ export function NodesPage() {
   const [metricSort, setMetricSort] = useState<{ key: MetricKey; order: MetricSortOrder } | null>(null);
   const metricSorted = metricSort !== null;
   const [form] = Form.useForm<{ name: string; machine?: string; kinds: JobType[] }>();
-  const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[] }>();
+  const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[]; pools: string[]; accept_shared: boolean }>();
 
   // URL state via nuqs
   const [query, setQuery] = useQueryStates({
@@ -399,7 +406,12 @@ export function NodesPage() {
       width: 200,
       render: (_: unknown, r: NodeView) => (
         <Flex vertical style={{ minWidth: 0 }}>
-          <Text strong ellipsis={{ tooltip: r.name }}>{r.name}</Text>
+          <Flex wrap gap={4} align="center" style={{ minWidth: 0 }}>
+            <Text strong ellipsis={{ tooltip: r.name }} style={{ maxWidth: '100%' }}>{r.name}</Text>
+            {(r.pools ?? []).map((p) => (
+              <Tooltip key={p} title={t('nodes.poolTag')}><Tag color="purple" style={{ marginInlineEnd: 0 }}>{p}</Tag></Tooltip>
+            ))}
+          </Flex>
           <Tooltip title={t('nodes.health.openChart', { machine: machineKey(r) })}>
             <Typography.Link
               ellipsis
@@ -621,6 +633,8 @@ export function NodesPage() {
                 editForm.setFieldsValue({
                   name: r.name,
                   blocked_kinds: r.blocked_kinds ?? [],
+                  pools: r.pools ?? [],
+                  accept_shared: r.accept_shared ?? true,
                 });
               }}
             />
@@ -771,8 +785,8 @@ export function NodesPage() {
           onFinish={(values) => {
             if (!editNode) return;
             patchMut.mutate(
-              { id: editNode.id, body: values },
-              { onSuccess: () => setEditNode(null) },
+              { id: editNode.id, body: { ...values, pools: values.pools ?? [] } },
+              { onSuccess: () => { setEditNode(null); void qc.invalidateQueries({ queryKey: ['pools'] }); } },
             );
           }}
         >
@@ -782,6 +796,28 @@ export function NodesPage() {
           {/* Worker ghi đè `kinds` ở mỗi heartbeat; admin chỉ tắt/bật từng loại (`blocked_kinds`). */}
           <Form.Item name="blocked_kinds" label={t('nodes.kinds')} tooltip={t('nodes.kindsHelp')}>
             <BlockedKindsField reported={editNode?.kinds ?? []} />
+          </Form.Item>
+          <Form.Item
+            name="pools"
+            label={t('nodes.pool')}
+            tooltip={t('nodes.poolHelp')}
+          >
+            <PoolSelect />
+          </Form.Item>
+          {/* Chỉ có nghĩa khi worker có pool: máy chung luôn nhận việc chung. */}
+          <Form.Item noStyle shouldUpdate={(a, b) => a.pools !== b.pools}>
+            {({ getFieldValue }) =>
+              (getFieldValue('pools') ?? []).length > 0 ? (
+                <Form.Item
+                  name="accept_shared"
+                  label={t('nodes.acceptShared')}
+                  tooltip={t('nodes.acceptSharedHelp')}
+                  valuePropName="checked"
+                >
+                  <Switch aria-label={t('nodes.acceptShared')} />
+                </Form.Item>
+              ) : null
+            }
           </Form.Item>
         </Form>
       </Modal>

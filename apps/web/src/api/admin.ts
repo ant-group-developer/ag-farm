@@ -16,6 +16,7 @@ import type {
   PagedResponse,
   PatchNodeRequest,
   PatchOwnerRequest,
+  PoolView,
   ReleaseManifest,
   StatsPeriodQuery,
   StatsPeriodResponse,
@@ -38,6 +39,11 @@ function toParams(obj: Record<string, string | number | boolean | undefined | nu
 
 export function listNodes(query: AdminListNodesQuery = {}): Promise<PagedResponse<NodeView>> {
   return api.get<PagedResponse<NodeView>>(`/v1/admin/nodes${toParams(query as Record<string, string | number | boolean | undefined | null>)}`);
+}
+
+/** Các pool đang có và worker của mỗi pool. */
+export function listPools(): Promise<{ items: PoolView[] }> {
+  return api.get<{ items: PoolView[] }>('/v1/admin/pools');
 }
 
 export function createNode(body: CreateNodeRequest): Promise<NodeView & { token: string }> {

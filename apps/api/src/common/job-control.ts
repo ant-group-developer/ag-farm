@@ -61,9 +61,10 @@ export async function controlJobs(
       updatedAt: now,
     });
   } else if (action === 'resume') {
-    qb.set({ status: 'queued', notBefore: null, updatedAt: now });
+    // not_before = bây giờ: chạy được ngay, và máy xếp trước có lại thời gian ưu tiên (`claimableSince`).
+    qb.set({ status: 'queued', notBefore: now, updatedAt: now });
   } else {
-    qb.set({ status: 'cancelled', finishedAt: now, updatedAt: now });
+    qb.set({ status: 'cancelled', leaseToken: null, leaseExpiresAt: null, finishedAt: now, updatedAt: now });
   }
   const result = await applySelector(qb, sel, FROM[action]).execute();
   return result.affected ?? 0;

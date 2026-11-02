@@ -49,6 +49,12 @@ function leaseToken(): string {
   return randomBytes(32).toString('base64url');
 }
 
+/**
+ * Lỗi hạ tầng của máy, không phải của job: máy hết slot lúc nhận (`no_slot`), máy đang lên bản mới (`worker_updating`).
+ * Trả job về hàng mà không tính lần thử, để `max_attempts` nhỏ (Studio đặt 2) không bị đốt bởi những lần job chưa chạy.
+ */
+const UNCOUNTED_FAIL_CODES = new Set(['no_slot', 'worker_updating']);
+
 function backoffMs(attempt: number): number {
   // min(30s * 2^(attempt-1), 15 min)
   return Math.min(30_000 * Math.pow(2, attempt - 1), 15 * 60_000);
@@ -97,6 +103,8 @@ export class WorkerService {
       capabilities: req.capabilities,
       freeSlots: req.free_slots,
       runningJobIds: req.running_job_ids,
+      // Worker cũ không gửi: coi như không bận độc quyền (như trước khi có trường này).
+      exclusiveBusy: req.exclusive_busy ?? [],
       os: req.capabilities.os,
       cpuCores: req.capabilities.cpu_cores,
       ramMb: req.capabilities.ram_mb,
@@ -149,7 +157,13 @@ export class WorkerService {
 
       if (effectiveKinds.length === 0) return null;
 
-      // Lấy tối đa 50 job queued, SKIP LOCKED
+      // Capabilities của node (đã cập nhật trong heartbeat)
+      const caps = freshNode.capabilities;
+      if (!caps) return null;
+
+      // Lấy tối đa 50 job queued, SKIP LOCKED. Luật pool, ghim máy và mức render nằm trong SQL, trước LIMIT: lọc sau
+      // trong JS thì 50 job đầu của một pool khác (hay đòi bản render mới hơn) chặn máy này mãi không thấy job của nó.
+      const nodePools = freshNode.pools ?? [];
       const qb = em
         .getRepository(FarmJobEntity)
         .createQueryBuilder('j')
@@ -157,6 +171,17 @@ export class WorkerService {
         .andWhere('j.type = ANY(:kinds)', { kinds: effectiveKinds })
         .andWhere('j.lane = ANY(:lanes)', { lanes: laneFilter })
         .andWhere('(j.not_before IS NULL OR j.not_before <= now())')
+        .andWhere(
+          `((j.requirements->>'pool') = ANY(:nodePools) OR ((j.requirements->>'pool') IS NULL AND :takesShared))`,
+          // nodeTakesPool: máy chung, hoặc máy có pool còn accept_shared, nhận job không đòi pool
+          { nodePools, takesShared: nodePools.length === 0 || freshNode.acceptShared !== false },
+        )
+        .andWhere(`((j.requirements->>'node_id') IS NULL OR (j.requirements->>'node_id') = :selfId)`, {
+          selfId: freshNode.id,
+        })
+        .andWhere(`COALESCE((j.requirements->>'studio_render_min')::int, 0) <= :renderLevel`, {
+          renderLevel: caps.engines.studio_render ?? 0,
+        })
         .orderBy(`(j.lane = 'interactive')`, 'DESC')
         .addOrderBy('j.priority', 'DESC');
 
@@ -172,9 +197,6 @@ export class WorkerService {
         .limit(50)
         .getMany();
 
-      // Capabilities của node (đã cập nhật trong heartbeat)
-      const caps = freshNode.capabilities;
-      if (!caps) return null;
       const freeSlots = req.free_slots;
 
       // Máy xếp trước đang rảnh: chỉ tính khi gặp job đầu tiên cần xét, mỗi claim một lần.
@@ -186,9 +208,9 @@ export class WorkerService {
         const spec = JOB_TYPE_SPECS[candidate.type as keyof typeof JOB_TYPE_SPECS];
         if (!spec) continue;
 
-        // Kiểm requirements
+        // Kiểm requirements (pool, ghim máy, mức render đã lọc trong SQL; kiểm lại cùng các điều kiện còn lại)
         const reqs = candidate.requirements as Requirements;
-        if (!nodeMeetsRequirements(freshNode.id, caps, reqs)) continue;
+        if (!nodeMeetsRequirements(freshNode.id, caps, reqs, nodePools, freshNode.acceptShared)) continue;
 
         // Thứ tự máy: còn máy xếp trước rảnh, nhận được job này thì để nó nhận. Job chờ quá grace thì
         // máy nào cũng nhận (máy xếp trước chậm hay kẹt không giữ việc lại). Job ghim máy không nhường.
@@ -388,14 +410,18 @@ export class WorkerService {
     if (!job) throw new NotFoundException('Job not found');
 
     const now = new Date();
-    const canRetry = req.error.retryable && job.attemptCount < job.maxAttempts;
+    // Lần thử job chưa thật sự chạy (lỗi hạ tầng của máy): trả lại lần thử claim đã cộng.
+    const uncounted = UNCOUNTED_FAIL_CODES.has(req.error.code);
+    const attempts = uncounted ? Math.max(job.attemptCount - 1, 0) : job.attemptCount;
+    const canRetry = req.error.retryable && attempts < job.maxAttempts;
     const patch: JobPatch = canRetry
       ? {
           status: 'queued',
           nodeId: null,
           leaseToken: null,
           leaseExpiresAt: null,
-          notBefore: new Date(now.getTime() + backoffMs(job.attemptCount)),
+          ...(uncounted ? { attemptCount: attempts } : {}),
+          notBefore: new Date(now.getTime() + backoffMs(Math.max(attempts, 1))),
           error: req.error,
           progressPercent: null,
           progressStage: null,

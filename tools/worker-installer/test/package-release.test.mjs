@@ -2,11 +2,12 @@
 //   node --test tools/worker-installer/test/package-release.test.mjs
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { finishRelease, publishDirFromArgv, publishOptionsFromArgv, uploadRelease } from '../package-release.mjs';
+import { branchesFromArgv, finishRelease, publishDirFromArgv, publishOptionsFromArgv, sourceCommits, uploadRelease } from '../package-release.mjs';
 
 const KEY = 'test-release-key-0000000000000000000000';
 
@@ -69,6 +70,14 @@ describe('uploadRelease', () => {
     }
   });
 
+  it('sends the commits the package was built from as source', async () => {
+    reply = { status: 201, body: { version: '0.9.1' } };
+    const source = { 'ag-farm': 'b'.repeat(40) };
+    await uploadRelease({ hubUrl: url, zipPath: zip, packageName: 'ag-render-worker', version: '0.9.1', sha256: 'a'.repeat(64), source, key: KEY });
+    assert.ok(last.body.includes('name="source"'));
+    assert.ok(last.body.includes(JSON.stringify(source)));
+  });
+
   it('a refusal says the hub reason and never the key', async () => {
     reply = { status: 409, body: { data: null, success: false, error: { code: 'version_not_newer', message: 'ag-render-worker 0.9.1 is not newer than the published 0.9.1' } } };
     await assert.rejects(
@@ -79,6 +88,42 @@ describe('uploadRelease', () => {
         return true;
       },
     );
+  });
+});
+
+describe('sourceCommits', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ag-source-'));
+  const repo = (name) => {
+    const dir = join(root, name);
+    mkdirSync(dir);
+    const g = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+    g('init', '-q', '-b', 'main');
+    g('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init');
+    return dir;
+  };
+  const a = repo('a');
+  const b = repo('b');
+  after(() => rmSync(root, { recursive: true, force: true }));
+
+  it('answers the commit of each repo when every tree is clean', () => {
+    const source = sourceCommits({ a, b }, { strict: true, branches: { a: 'main' } });
+    assert.deepEqual(Object.keys(source), ['a', 'b']);
+    for (const sha of Object.values(source)) assert.match(sha, /^[0-9a-f]{40}$/);
+  });
+
+  it('a change not committed (a new file too) or another branch stops a release, and only warns a trial packaging', () => {
+    writeFileSync(join(b, 'new.txt'), 'x');
+    assert.throws(() => sourceCommits({ a, b }, { strict: true }), /b: co thay doi chua commit[\s\S]*new\.txt/);
+    const warned = [];
+    sourceCommits({ a, b }, { warn: (m) => warned.push(m) });
+    assert.equal(warned.length, 1);
+    rmSync(join(b, 'new.txt'));
+    assert.throws(() => sourceCommits({ a }, { strict: true, branches: { a: 'release' } }), /a: dang o nhanh main, can release/);
+  });
+
+  it('--branches names the branch each repo must be on', () => {
+    assert.deepEqual(branchesFromArgv(['node', 'r', '--branches', 'ag-render-worker=main, ag-farm=dev']), { 'ag-render-worker': 'main', 'ag-farm': 'dev' });
+    assert.deepEqual(branchesFromArgv(['node', 'r']), {});
   });
 });
 

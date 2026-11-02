@@ -39,6 +39,13 @@ export const SlotsSchema = z.strictObject({
 });
 export type Slots = z.infer<typeof SlotsSchema>;
 
+/**
+ * Tên pool máy (nhóm máy của một chi nhánh): chữ thường, số, `-`, `_`, tối đa 40. Admin farm gán cho từng máy, một máy
+ * thuộc được nhiều pool (nhiều nhóm dùng chung máy đó). Job đòi pool chỉ chạy trên máy thuộc pool đó; job không đòi pool
+ * chạy trên máy chung (không pool) và trên máy có pool còn bật `accept_shared` (xem `nodeTakesPool`).
+ */
+export const PoolNameSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,39}$/, 'lower case letters, digits, - and _ (at most 40)');
+
 /** Điều kiện job đòi ở máy. Mọi trường là tuỳ chọn; thiếu nghĩa là không đòi. */
 export const RequirementsSchema = z.strictObject({
   gpu: z.boolean().optional(),
@@ -60,6 +67,12 @@ export const RequirementsSchema = z.strictObject({
    * strict của nó từ chối) không nhận job. Hub build trước khi có trường này từ chối requirements có nó.
    */
   studio_render_min: z.int().positive().optional(),
+  /**
+   * Pool máy job phải chạy trên (`PoolNameSchema`); thiếu = máy chung (máy không có pool, hoặc máy có pool bật
+   * `accept_shared`). Hub từ chối job đòi pool chưa có máy nào (400 `pool_unknown`). Hub build trước khi có trường này
+   * từ chối requirements có nó: lên hub trước.
+   */
+  pool: PoolNameSchema.optional(),
 });
 export type Requirements = z.infer<typeof RequirementsSchema>;
 
@@ -87,9 +100,29 @@ export function meetsRequirements(capabilities: Capabilities, requirements: Requ
   return true;
 }
 
-/** `meetsRequirements` cộng thêm việc ghim máy: job có `node_id` chỉ cho đúng máy đó. Hub dùng khi claim. */
-export function nodeMeetsRequirements(nodeId: string, capabilities: Capabilities, requirements: Requirements): boolean {
+/**
+ * Máy có nhận job theo pool không: job đòi pool chỉ cho máy thuộc pool đó (`nodePools` có nó), máy chung (không pool)
+ * không nhận job của pool; job không đòi pool cho máy chung và máy có pool còn `acceptShared` (mặc định bật: gán pool
+ * không làm máy mất việc chung, admin tắt nếu muốn máy chỉ làm việc của pool). Hub lọc đúng luật này trong SQL claim.
+ */
+export function nodeTakesPool(jobPool: string | undefined, nodePools: readonly string[], acceptShared = true): boolean {
+  if (jobPool) return nodePools.includes(jobPool);
+  return nodePools.length === 0 || acceptShared;
+}
+
+/**
+ * `meetsRequirements` cộng thêm việc ghim máy (job có `node_id` chỉ cho đúng máy đó) và pool (`nodeTakesPool`). Hub
+ * dùng khi claim.
+ */
+export function nodeMeetsRequirements(
+  nodeId: string,
+  capabilities: Capabilities,
+  requirements: Requirements,
+  nodePools: readonly string[] = [],
+  acceptShared = true,
+): boolean {
   if (requirements.node_id && requirements.node_id !== nodeId) return false;
+  if (!nodeTakesPool(requirements.pool, nodePools, acceptShared)) return false;
   return meetsRequirements(capabilities, requirements);
 }
 

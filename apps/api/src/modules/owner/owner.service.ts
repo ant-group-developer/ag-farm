@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -103,6 +104,21 @@ export class OwnerService {
       return { job: toJobView(existing), created: false };
     }
 
+    // Job đòi pool chưa có máy nào thì không bao giờ chạy: báo ngay thay vì để chủ job chờ tới hết hạn.
+    if (requirements.pool) {
+      const hasNode = await this.nodeRepo
+        .createQueryBuilder('n')
+        .where(':pool = ANY(n.pools)', { pool: requirements.pool })
+        .getExists();
+      if (!hasNode) {
+        throw new BadRequestException({
+          code: 'pool_unknown',
+          error: 'pool_unknown',
+          message: `No farm machine is in pool "${requirements.pool}"`,
+        });
+      }
+    }
+
     const entity = new FarmJobEntity();
     entity.owner = owner.id;
     entity.type = req.type;
@@ -197,24 +213,15 @@ export class OwnerService {
     return toJobView(job);
   }
 
+  /**
+   * Huỷ một job. Điều kiện trạng thái nằm trong câu UPDATE (`controlJobs`): job vừa xong giữa lúc đọc và lúc huỷ giữ
+   * nguyên `completed` / `failed`, không bị ghi đè thành `cancelled`. Trả job như nó đang là sau đó.
+   */
   async cancel(owner: FarmOwnerEntity, jobId: string): Promise<JobView> {
+    if (!UUID_RE.test(jobId)) throw new NotFoundException('Job not found');
+    await controlJobs(this.jobRepo, 'cancel', { owner: owner.id, ids: [jobId] });
     const job = await this.jobRepo.findOne({ where: { id: jobId, owner: owner.id } });
     if (!job) throw new NotFoundException('Job not found');
-
-    const terminal = ['completed', 'failed', 'cancelled'];
-    if (terminal.includes(job.status)) {
-      // Đã kết thúc → trả về như cũ
-      return toJobView(job);
-    }
-
-    const now = new Date();
-    await this.jobRepo.update(jobId, {
-      status: 'cancelled',
-      finishedAt: now,
-      updatedAt: now,
-    });
-    job.status = 'cancelled';
-    job.finishedAt = now;
     return toJobView(job);
   }
 

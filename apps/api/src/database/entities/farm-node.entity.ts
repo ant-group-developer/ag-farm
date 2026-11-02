@@ -24,6 +24,21 @@ export class FarmNodeEntity {
   @Column({ name: 'blocked_kinds', type: 'text', array: true, default: () => `'{}'` })
   blockedKinds!: string[];
 
+  /** Các pool máy thuộc (nhóm máy của chi nhánh): chỉ nhận job có `requirements.pool` là một trong số này; rỗng = máy chung. */
+  @Column({ type: 'text', array: true, default: () => `'{}'` })
+  pools!: string[];
+
+  /**
+   * Máy có pool còn nhận job không đòi pool (việc chung). Mặc định bật: gán pool không làm máy mất việc chung. Máy không
+   * pool luôn nhận việc chung.
+   */
+  @Column({ name: 'accept_shared', type: 'boolean', default: true })
+  acceptShared!: boolean;
+
+  /** Loại job máy đang chạy độc quyền ở heartbeat gần nhất (`exclusive_busy`): máy không claim thêm loại đó lúc này. */
+  @Column({ name: 'exclusive_busy', type: 'text', array: true, default: () => `'{}'` })
+  exclusiveBusy!: string[];
+
   /** sha256 hex của token node */
   @Column({ name: 'token_hash', type: 'char', length: 64, unique: true })
   tokenHash!: string;

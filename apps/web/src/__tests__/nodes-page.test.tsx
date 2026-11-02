@@ -14,7 +14,9 @@ const getMachineMetrics = vi.fn();
 const listNodeLogs = vi.fn();
 const requestNodeLogs = vi.fn();
 const downloadNodeLog = vi.fn();
+const listPools = vi.fn();
 vi.mock('../api/admin', () => ({
+  listPools: (...args: unknown[]) => listPools(...args),
   listNodes: (...args: unknown[]) => listNodes(...args),
   createNode: vi.fn(),
   patchNode: (...args: unknown[]) => patchNode(...args),
@@ -38,6 +40,8 @@ function node(name: string, priority_order: number, over: Partial<NodeView> = {}
     machine: 'PC',
     kinds: ['scan.extract'],
     blocked_kinds: [],
+    pools: [],
+    accept_shared: true,
     status: 'active',
     priority_order,
     os: 'windows',
@@ -91,6 +95,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   getLatestReleases.mockResolvedValue({ packages: {} });
+  listPools.mockResolvedValue({ items: [{ pool: 'hcm', nodes: [{ id: 'id-x', name: 'hcm-render', machine: 'PC-HCM', online: true }] }] });
 });
 
 describe('NodesPage', () => {
@@ -138,6 +143,48 @@ describe('NodesPage', () => {
     expect(listNodes).toHaveBeenLastCalledWith(expect.objectContaining({ sortBy: 'name', pageSize: 20 }));
     expect(container.querySelectorAll('svg.lucide-grip-vertical')).toHaveLength(0);
   });
+
+  it('pool: chọn nhiều pool trong các pool đang có (kèm worker), hoặc gõ tên để tạo pool mới; mỗi pool hiện một tag', async () => {
+    patchNode.mockResolvedValue({});
+    listNodes.mockResolvedValue({ items: [node('a', 1), node('b', 2, { pools: ['hcm', 'hn'] })], total: 2, page: 1, pageSize: 200 });
+    renderPage();
+    expect(await screen.findByText('hcm')).toBeTruthy();
+    expect(screen.getByText('hn')).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Sửa' })[0]!);
+    const pool = await screen.findByRole('combobox', { name: /Pool/ });
+    fireEvent.mouseDown(pool);
+    fireEvent.click(await screen.findByText('hcm · 1 worker: hcm-render'));
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu' }));
+    await waitFor(() => expect(patchNode).toHaveBeenCalledWith('id-a', expect.objectContaining({ pools: ['hcm'] })));
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Sửa' })[0]!);
+    const again = await screen.findByRole('combobox', { name: /Pool/ });
+    fireEvent.mouseDown(again);
+    fireEvent.change(again, { target: { value: 'Chi Nhanh HN' } });
+    fireEvent.click(await screen.findByText('Tạo pool mới “chi-nhanh-hn”'));
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu' }));
+    await waitFor(() => expect(patchNode).toHaveBeenLastCalledWith('id-a', expect.objectContaining({ pools: ['chi-nhanh-hn'] })));
+  }, 30_000);
+
+  it('worker có pool: công tắc "Nhận việc chung" (mặc định bật), tắt thì gửi accept_shared false; máy chung không có công tắc', async () => {
+    patchNode.mockResolvedValue({});
+    listNodes.mockResolvedValue({ items: [node('a', 1), node('b', 2, { pools: ['hcm'] })], total: 2, page: 1, pageSize: 200 });
+    renderPage();
+    expect(await screen.findByText('hcm', {}, { timeout: 10_000 })).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Sửa' })[0]!);
+    await screen.findByRole('combobox', { name: /Pool/ });
+    expect(screen.queryByRole('switch', { name: 'Nhận việc chung' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Hủy' }));
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Sửa' })[1]!);
+    const shared = await screen.findByRole('switch', { name: 'Nhận việc chung' });
+    expect(shared.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(shared);
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu' }));
+    await waitFor(() =>
+      expect(patchNode).toHaveBeenCalledWith('id-b', expect.objectContaining({ pools: ['hcm'], accept_shared: false })),
+    );
+  }, 30_000);
 
   it('mỗi loại job máy báo có một công tắc; tắt thì gửi blocked_kinds', async () => {
     patchNode.mockResolvedValue({});

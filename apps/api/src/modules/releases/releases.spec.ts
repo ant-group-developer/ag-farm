@@ -128,6 +128,17 @@ describe('releases', () => {
       expect(leftovers()).toEqual([]);
     });
 
+    it('keeps the commits the package was built from (source), and refuses a source that is not {repo: sha}', async () => {
+      const body = zip('0.9.2');
+      const source = { 'ag-render-worker': 'a'.repeat(40), 'ag-farm': 'b'.repeat(40), 'ag-studio': 'c'.repeat(40) };
+      const bad = await publish(body, { package: 'ag-render-worker', version: '0.9.2', sha256: sha(body), source: '{"ag-farm":"main"}' });
+      expect(bad.status).toBe(400);
+      const res = await publish(body, { package: 'ag-render-worker', version: '0.9.2', sha256: sha(body), source: JSON.stringify(source) });
+      expect(res.status).toBe(201);
+      expect(res.body.source).toEqual(source);
+      expect(JSON.parse(readFileSync(join(dir, 'latest.json'), 'utf8')).packages['ag-render-worker'].source).toEqual(source);
+    });
+
     it('refuses the same or an older version', async () => {
       for (const version of ['0.9.0', '0.8.9', '0.9.0-rc.1']) {
         const body = zip(version);

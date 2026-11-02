@@ -34,6 +34,9 @@ import { AgGoPrep2300000000000 } from './database/migrations/2300000000000-ag-go
 import { StudioBeats2400000000000 } from './database/migrations/2400000000000-studio-beats';
 import { NodeLogs2500000000000 } from './database/migrations/2500000000000-node-logs';
 import { OwnerWebUrl2600000000000 } from './database/migrations/2600000000000-owner-web-url';
+import { NodePool2700000000000 } from './database/migrations/2700000000000-node-pool';
+import { NodePools2800000000000 } from './database/migrations/2800000000000-node-pools';
+import { NodeAcceptShared2900000000000 } from './database/migrations/2900000000000-node-accept-shared';
 import { FarmEnrollmentEntity } from './database/entities/farm-enrollment.entity';
 import { EnrollService } from './modules/enroll/enroll.service';
 import { ACCOUNT_ME_CLIENT, AdminGuard } from './auth/admin.guard';
@@ -95,6 +98,9 @@ const MIGRATIONS = [
   StudioBeats2400000000000,
   NodeLogs2500000000000,
   OwnerWebUrl2600000000000,
+  NodePool2700000000000,
+  NodePools2800000000000,
+  NodeAcceptShared2900000000000,
 ];
 
 /** Fake AccountMeClient → luôn trả ADMIN */
@@ -2473,5 +2479,216 @@ describe('node logs (trang Máy: "Lấy log")', () => {
     await ds.query(`UPDATE farm_node_logs SET requested_at = now() - interval '15 days' WHERE id = $1`, [asked.id]);
     await app.get(ReaperService).pruneMetrics();
     expect(await ds.query(`SELECT 1 FROM farm_node_logs`)).toHaveLength(0);
+  });
+});
+
+describe('pools, uncounted fails and safe cancel', () => {
+  let app: INestApplication;
+  let ds: DataSource;
+  let ownerKey: string;
+
+  const CAPS = {
+    os: 'linux',
+    cpu_cores: 4,
+    ram_mb: 8192,
+    gpus: [],
+    engines: { ffmpeg: null, ollama_models: [], python: null },
+  };
+
+  beforeAll(async () => {
+    app = await buildAdminApp();
+    ds = getDs(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    await ds.query('TRUNCATE TABLE farm_jobs, farm_nodes, farm_owners, farm_enrollments RESTART IDENTITY CASCADE');
+    ownerKey = (await createOwner(ds, 'ag-go')).key;
+  });
+
+  async function heartbeat(token: string, extra: Record<string, unknown> = {}) {
+    return request(app.getHttpServer())
+      .post('/v1/worker/heartbeat')
+      .set('Authorization', `Node ${token}`)
+      .send({
+        agent_version: '1.0',
+        kinds: ['scan.extract'],
+        capabilities: CAPS,
+        free_slots: { cpu: 2, gpu: 0 },
+        running_job_ids: [],
+        ...extra,
+      });
+  }
+
+  async function addNode(name: string, pools: string[] = [], acceptShared = true): Promise<{ id: string; token: string }> {
+    const token = randomBytes(16).toString('base64url');
+    const repo = ds.getRepository(FarmNodeEntity);
+    const saved = await repo.save(
+      repo.create({
+        name,
+        machine: name,
+        kinds: ['scan.extract'],
+        tokenHash: createHash('sha256').update(token).digest('hex'),
+        status: 'active',
+        pools,
+        acceptShared,
+      }),
+    );
+    expect((await heartbeat(token)).status).toBe(200);
+    return { id: saved.id, token };
+  }
+
+  async function claim(token: string) {
+    const res = await request(app.getHttpServer())
+      .post('/v1/worker/claim')
+      .set('Authorization', `Node ${token}`)
+      .send({ kinds: ['scan.extract'], free_slots: { cpu: 2, gpu: 0 }, cached_affinity: [] });
+    expect(res.status).toBe(200);
+    return res.body.data.job as { id: string; lease_token: string; attempt: number } | null;
+  }
+
+  function submitRes(correlationId: string, requirements?: Record<string, unknown>, maxAttempts = 2) {
+    return request(app.getHttpServer())
+      .post('/v1/owner/jobs')
+      .set('Authorization', `Owner ${ownerKey}`)
+      .send({
+        type: 'scan.extract',
+        correlation_id: correlationId,
+        ...(requirements ? { requirements } : {}),
+        payload: {
+          asset: {
+            id: randomUUID(),
+            kind: 'video',
+            mime_type: 'video/mp4',
+            size_bytes: null,
+            checksum_sha256: null,
+            duration_ms: null,
+            width: null,
+            height: null,
+          },
+          extract_version: 'x1',
+        },
+        max_attempts: maxAttempts,
+      });
+  }
+
+  async function submit(correlationId: string, requirements?: Record<string, unknown>, maxAttempts = 2) {
+    const res = await submitRes(correlationId, requirements, maxAttempts);
+    expect(res.status).toBe(200);
+    return res.body.data.job.id as string;
+  }
+
+  it('a machine of pool B claims its job behind 60 queued jobs of pool A', async () => {
+    await addNode('a-box', ['pool-a']);
+    const b = await addNode('b-box', ['pool-b']);
+    for (let i = 0; i < 60; i++) await submit(`a-${i}`, { pool: 'pool-a' });
+    const jobB = await submit('b-1', { pool: 'pool-b' });
+    // the B job is the newest: it is claimed only if the pool is filtered before LIMIT 50
+    expect((await claim(b.token))?.id).toBe(jobB);
+  });
+
+  it('a pooled machine takes shared jobs unless accept_shared is off; a shared machine never takes a pool job', async () => {
+    const strict = await addNode('strict', ['hcm'], false);
+    const shared = await addNode('shared');
+    const sharedJob = await submit('shared-1');
+    expect(await claim(strict.token)).toBeNull();
+    await ds.getRepository(FarmNodeEntity).update(strict.id, { acceptShared: true });
+    expect((await claim(strict.token))?.id).toBe(sharedJob);
+
+    const poolJob = await submit('hcm-1', { pool: 'hcm' });
+    expect(await claim(shared.token)).toBeNull();
+    expect((await claim(strict.token))?.id).toBe(poolJob);
+  });
+
+  it('jobs needing a newer render level than the machine has do not hide the jobs behind them', async () => {
+    const node = await addNode('old-render');
+    for (let i = 0; i < 55; i++) await submit(`new-${i}`, { studio_render_min: 5 });
+    const plain = await submit('plain');
+    expect((await claim(node.token))?.id).toBe(plain);
+  });
+
+  it('submitting to a pool no machine is in is refused with pool_unknown', async () => {
+    const res = await submitRes('nowhere', { pool: 'nowhere' });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain('pool_unknown');
+    await addNode('hcm-box', ['hcm']);
+    expect((await submitRes('hcm-ok', { pool: 'hcm' })).status).toBe(200);
+  });
+
+  it('fail no_slot / worker_updating requeues without spending an attempt; another code spends it', async () => {
+    const node = await addNode('n');
+    const jobId = await submit('slots', undefined, 1);
+    for (const code of ['no_slot', 'worker_updating']) {
+      const job = await claim(node.token);
+      expect(job?.id).toBe(jobId);
+      expect(job?.attempt).toBe(1);
+      const res = await request(app.getHttpServer())
+        .post(`/v1/worker/jobs/${jobId}/fail`)
+        .set('Authorization', `Node ${node.token}`)
+        .send({ lease_token: job!.lease_token, error: { code, message: 'x', retryable: true } });
+      expect(res.status).toBe(200);
+      const after = await ds.getRepository(FarmJobEntity).findOneByOrFail({ id: jobId });
+      expect(after.status).toBe('queued');
+      expect(after.attemptCount).toBe(0);
+      await ds.getRepository(FarmJobEntity).update(jobId, { notBefore: null });
+    }
+    // max_attempts = 1: a real retryable error on the one attempt fails the job
+    const job = await claim(node.token);
+    await request(app.getHttpServer())
+      .post(`/v1/worker/jobs/${jobId}/fail`)
+      .set('Authorization', `Node ${node.token}`)
+      .send({ lease_token: job!.lease_token, error: { code: 'boom', message: 'x', retryable: true } });
+    expect((await ds.getRepository(FarmJobEntity).findOneByOrFail({ id: jobId })).status).toBe('failed');
+  });
+
+  it('cancelling a job that has just completed keeps it completed', async () => {
+    const node = await addNode('n');
+    const jobId = await submit('done');
+    const job = await claim(node.token);
+    await request(app.getHttpServer())
+      .post(`/v1/worker/jobs/${jobId}/complete`)
+      .set('Authorization', `Node ${node.token}`)
+      .send({ lease_token: job!.lease_token, result: { manifest: 'm.json' } })
+      .expect(200);
+    const res = await request(app.getHttpServer())
+      .post(`/v1/owner/jobs/${jobId}/cancel`)
+      .set('Authorization', `Owner ${ownerKey}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('completed');
+    expect((await ds.getRepository(FarmJobEntity).findOneByOrFail({ id: jobId })).status).toBe('completed');
+  });
+
+  it('cancelling a leased job clears its lease, so the worker cannot complete it', async () => {
+    const node = await addNode('n');
+    const jobId = await submit('running');
+    const job = await claim(node.token);
+    const res = await request(app.getHttpServer())
+      .post(`/v1/owner/jobs/${jobId}/cancel`)
+      .set('Authorization', `Owner ${ownerKey}`);
+    expect(res.body.data.status).toBe('cancelled');
+    const row = await ds.getRepository(FarmJobEntity).findOneByOrFail({ id: jobId });
+    expect(row.leaseToken).toBeNull();
+    const late = await request(app.getHttpServer())
+      .post(`/v1/worker/jobs/${jobId}/complete`)
+      .set('Authorization', `Node ${node.token}`)
+      .send({ lease_token: job!.lease_token, result: { manifest: 'm.json' } });
+    expect(late.status).toBe(409);
+  });
+
+  it('heartbeat stores exclusive_busy; a worker that does not send it is not busy', async () => {
+    const node = await addNode('n');
+    expect((await heartbeat(node.token, { exclusive_busy: ['scan.extract'] })).status).toBe(200);
+    expect((await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id })).exclusiveBusy).toEqual(['scan.extract']);
+    await heartbeat(node.token);
+    expect((await ds.getRepository(FarmNodeEntity).findOneByOrFail({ id: node.id })).exclusiveBusy).toEqual([]);
+  });
+
+  it('owner nodes show pools, the first as pool, and accept_shared', async () => {
+    await addNode('hcm-box', ['hcm', 'hn'], false);
+    const res = await request(app.getHttpServer()).get('/v1/owner/nodes').set('Authorization', `Owner ${ownerKey}`);
+    expect(res.body.data.nodes[0]).toMatchObject({ pools: ['hcm', 'hn'], pool: 'hcm', accept_shared: false });
   });
 });

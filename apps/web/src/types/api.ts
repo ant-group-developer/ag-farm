@@ -77,6 +77,10 @@ export interface NodeView {
   kinds: JobType[];
   /** Job types the admin turned off on this node; the node takes every other kind it reports. */
   blocked_kinds: JobType[];
+  /** Các pool máy thuộc (nhóm máy của chi nhánh): chỉ nhận job của các pool đó; rỗng = máy chung. */
+  pools: string[];
+  /** Worker có pool còn nhận job không đòi pool (việc chung); máy không pool luôn nhận. */
+  accept_shared: boolean;
   status: 'active' | 'disabled';
   /** Thứ tự nhận việc, số nhỏ trước: máy xếp trước còn slot thì nhận job trước máy xếp sau. */
   priority_order: number;
@@ -340,12 +344,22 @@ export interface CreateNodeRequest {
   kinds: JobType[];
 }
 
+/** Một pool (máy riêng của một chi nhánh) và các worker của nó. */
+export interface PoolView {
+  pool: string;
+  nodes: { id: string; name: string; machine: string; online: boolean }[];
+}
+
 export interface PatchNodeRequest {
   name?: string;
   blocked_kinds?: JobType[];
   status?: 'active' | 'disabled';
   priority_order?: number;
   auto_update?: boolean;
+  /** Pools the worker is in (branches' machines; several teams may share it); empty: the shared machines. */
+  pools?: string[];
+  /** A worker in a pool still takes jobs asking for no pool. */
+  accept_shared?: boolean;
 }
 
 export interface CreateOwnerRequest {

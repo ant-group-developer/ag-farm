@@ -47,6 +47,10 @@ export const vi = {
     pointSecure: 'Xác thực bảo mật qua Auth0',
     pointInternal: 'Chỉ dành cho quản trị viên hệ thống',
     secureNote: 'Bạn sẽ được chuyển đến trang đăng nhập an toàn.',
+    expiredTitle: 'Phiên đăng nhập đã hết hạn',
+    expiredPrompt: 'Đăng nhập lại để tiếp tục làm việc. Những gì đã lưu không bị mất.',
+    expiredNote: 'Bạn bị đăng xuất vì phiên đăng nhập đã bị thu hồi hoặc để quá lâu không dùng.',
+    loginAgain: 'Đăng nhập lại',
     missingConfig: 'Thiếu cấu hình Auth0',
     missingConfigDesc:
       'Kiểm tra các biến môi trường VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID, VITE_AUTH0_AUDIENCE.',
@@ -306,6 +310,18 @@ export const vi = {
     kindsHelp:
       'Worker tự báo các loại job nó chạy được mỗi lần kết nối và nhận hết, kể cả loại mới. Tắt một loại ở đây thì worker này không được giao loại đó nữa.',
     kindNotReported: 'Đã tắt, và worker không còn báo loại này.',
+    pool: 'Pool (nhóm máy của chi nhánh)',
+    poolHelp:
+      'Mỗi nhóm trong AG Studio chọn một pool; job của nhóm chỉ chạy trên máy thuộc pool đó. Một worker chọn được nhiều pool để nhiều nhóm dùng chung. Worker có pool vẫn nhận job của máy chung trừ khi tắt "Nhận việc chung". Để trống: máy chung. Worker scan cho ag-go nên để trống.',
+    poolPlaceholder: 'Máy chung (không pool)',
+    acceptShared: 'Nhận việc chung',
+    acceptSharedHelp:
+      'Bật: worker vừa nhận job của các pool trên, vừa nhận job không đòi pool như máy chung. Tắt: chỉ nhận job của các pool đó.',
+    poolWorkers: '{{count}} worker: {{names}}',
+    poolCreate: 'Tạo pool mới “{{name}}”',
+    poolNone: 'Chưa có pool nào: gõ tên để tạo',
+    poolTag: 'Pool: nhận job của các nhóm dùng pool này',
+    poolInvalid: 'Tên pool: chữ thường, số, - và _ (tối đa 40)',
     order: 'Thứ tự',
     orderHelp: 'Thứ tự nhận việc: worker xếp trên còn slot trống thì nhận job trước worker xếp dưới. Kéo biểu tượng ⋮⋮ để đổi.',
     orderDragHint: 'Kéo để đổi thứ tự nhận việc',

@@ -50,10 +50,53 @@ export function publishOptionsFromArgv(argv = process.argv) {
   return { publishDir: publishDirFromArgv(argv), uploadUrl: upload.value, keyEnv };
 }
 
+function git(dir, args) {
+  return execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd();
+}
+
+/**
+ * Commit dựng nên gói, theo repo: `{ <tên>: sha }`. Cây có thay đổi chưa commit (kể cả file mới chưa track) hoặc đang ở
+ * nhánh khác `branches[<tên>]` thì ném lỗi khi `strict` (phát hành), chỉ cảnh báo khi không (đóng gói thử): bản phát
+ * hành phải dựng lại được từ đúng các commit ghi trong latest.json.
+ * @param {Record<string, string>} repos tên → thư mục repo
+ * @param {{ branches?: Record<string, string>, strict?: boolean, warn?: (msg: string) => void }} [o]
+ */
+export function sourceCommits(repos, o = {}) {
+  const problems = [];
+  const source = {};
+  for (const [name, dir] of Object.entries(repos)) {
+    if (!existsSync(dir)) {
+      problems.push(`${name}: khong thay ${dir}`);
+      continue;
+    }
+    source[name] = git(dir, ['rev-parse', 'HEAD']);
+    const dirty = git(dir, ['status', '--porcelain']);
+    if (dirty) problems.push(`${name}: co thay doi chua commit\n${dirty.split('\n').slice(0, 10).join('\n')}`);
+    const want = o.branches?.[name];
+    if (want) {
+      const branch = git(dir, ['rev-parse', '--abbrev-ref', 'HEAD']);
+      if (branch !== want) problems.push(`${name}: dang o nhanh ${branch}, can ${want}`);
+    }
+  }
+  if (problems.length > 0) {
+    const msg = `Cay nguon chua san sang phat hanh:\n${problems.join('\n')}`;
+    if (o.strict) throw new Error(msg);
+    (o.warn ?? console.warn)(`${msg}\n(dong goi thu: van tiep tuc, khong phat hanh duoc)`);
+  }
+  return source;
+}
+
+/** `--branches worker=main,ag-farm=main` → `{ worker: 'main', 'ag-farm': 'main' }`. */
+export function branchesFromArgv(argv = process.argv) {
+  const value = argAfter(argv, '--branches').value;
+  if (!value) return {};
+  return Object.fromEntries(value.split(',').map((pair) => pair.split('=').map((s) => s.trim())).filter(([k, v]) => k && v));
+}
+
 /**
  * Đẩy một gói lên hub. Khoá chỉ đi trong header `Authorization: Release <khoá>`, không in, không ghi log. Trả bản ghi
  * hub lưu trong latest.json; lỗi (bản không mới hơn, sha256 sai, sai khoá, quá lớn) ném Error có câu của hub.
- * @param {{ hubUrl: string, zipPath: string, packageName: string, version: string, sha256: string, builtAt?: string, key: string, fetchImpl?: typeof fetch }} o
+ * @param {{ hubUrl: string, zipPath: string, packageName: string, version: string, sha256: string, builtAt?: string, source?: Record<string, string>, key: string, fetchImpl?: typeof fetch }} o
  */
 export async function uploadRelease(o) {
   const form = new FormData();
@@ -61,6 +104,8 @@ export async function uploadRelease(o) {
   form.append('version', o.version);
   form.append('sha256', o.sha256);
   if (o.builtAt) form.append('built_at', o.builtAt);
+  // hub build trước khi có `source` từ chối trường lạ (400): lên hub trước
+  if (o.source && Object.keys(o.source).length > 0) form.append('source', JSON.stringify(o.source));
   form.append('file', await openAsBlob(o.zipPath, { type: 'application/zip' }), basename(o.zipPath));
   const url = `${o.hubUrl.replace(/\/+$/, '')}/v1/admin/releases`;
   const res = await (o.fetchImpl ?? fetch)(url, { method: 'POST', headers: { Authorization: `Release ${o.key}` }, body: form });
@@ -80,9 +125,9 @@ export async function uploadRelease(o) {
 }
 
 /**
- * @param {{ repoRoot: string, releaseRoot: string, name: string, packageName: string, version: string, publishDir?: string | null, uploadUrl?: string | null, keyEnv?: string }} o
+ * @param {{ repoRoot: string, releaseRoot: string, name: string, packageName: string, version: string, publishDir?: string | null, uploadUrl?: string | null, keyEnv?: string, source?: Record<string, string> }} o
  *   repoRoot: repo worker (lấy binary ffmpeg đã cài); releaseRoot: thư mục `release/` chứa `<name>/`;
- *   name: `<packageName>-<version>`.
+ *   name: `<packageName>-<version>`; source: commit của từng repo (`sourceCommits`), ghi vào latest.json.
  */
 export async function finishRelease(o) {
   const out = join(o.releaseRoot, o.name);
@@ -153,6 +198,7 @@ export async function finishRelease(o) {
       version: o.version,
       sha256,
       builtAt,
+      ...(o.source ? { source: o.source } : {}),
       key,
     });
     console.log(`Da phat hanh ${o.packageName} ${entry?.version ?? o.version} len ${o.uploadUrl} (${entry?.file ?? `${o.name}.zip`}); may worker tu cap nhat o lan kiem ke tiep`);
@@ -169,6 +215,7 @@ export async function finishRelease(o) {
       sha256,
       size_bytes: size,
       built_at: builtAt,
+      ...(o.source && Object.keys(o.source).length > 0 ? { source: o.source } : {}),
     };
     writeFileSync(latestPath, `${JSON.stringify(latest, null, 2)}\n`);
     console.log(`Da phat hanh ${o.name} vao ${o.publishDir}`);

@@ -4,6 +4,12 @@ import type { PropsWithChildren } from 'react';
 import { useEffect } from 'react';
 import { clearAccessTokenGetter, setAccessTokenGetter } from './auth-client';
 import { LoginScreen } from './login-screen';
+import {
+  isAuthSessionError,
+  isSessionExpired,
+  markSessionExpired,
+  useSessionExpired,
+} from './session-expiry';
 import { useTranslation } from 'react-i18next';
 
 const domain = import.meta.env.VITE_AUTH0_DOMAIN as string | undefined;
@@ -14,8 +20,16 @@ function TokenBridge({ children }: PropsWithChildren) {
   const { getAccessTokenSilently } = useAuth0();
 
   useEffect(() => {
+    // Auth0 đã từ chối refresh token thì thôi hỏi tiếp (lần nào cũng hỏng như nhau) và để màn đăng nhập lại hiện ra.
     setAccessTokenGetter(async () => {
-      const token = await getAccessTokenSilently();
+      if (isSessionExpired()) throw new Error('Session expired');
+      let token: string | undefined;
+      try {
+        token = await getAccessTokenSilently();
+      } catch (error) {
+        if (isAuthSessionError(error)) markSessionExpired();
+        throw error;
+      }
       if (!token) throw new Error('Auth0 did not return an access token');
       return token;
     });
@@ -27,10 +41,20 @@ function TokenBridge({ children }: PropsWithChildren) {
 
 function AuthenticatedApp({ children }: PropsWithChildren) {
   const { t } = useTranslation();
-  const { isLoading, isAuthenticated, loginWithRedirect } = useAuth0();
+  const { isLoading, isAuthenticated, loginWithRedirect, logout } = useAuth0();
+  const expired = useSessionExpired();
 
   if (isLoading) {
     return <Spin fullscreen tip={t('auth.authenticating')} />;
+  }
+
+  if (expired) {
+    // Xoá token cũ trong localStorage trước, không thì sau khi quay về Auth0 vẫn đọc lại refresh token hỏng.
+    const loginAgain = async () => {
+      await logout({ openUrl: false });
+      await loginWithRedirect();
+    };
+    return <LoginScreen expired onLogin={() => void loginAgain()} />;
   }
 
   if (!isAuthenticated) {

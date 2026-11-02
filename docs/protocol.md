@@ -22,11 +22,17 @@ queued ──claim──► leased ──complete──► completed
   ▲                 │ ├──fail (retryable, còn lượt)──► queued (not_before lùi dần)
   │                 │ └──fail / hết lượt──────────────► failed
   └──reaper (lease hết hạn, còn lượt)──┘
-queued/leased ──cancel (chủ job)──► cancelled   (worker nhận 409 job_cancelled ở lần progress kế tiếp)
+queued/leased/paused ──cancel (chủ job)──► cancelled   (worker nhận 409 job_cancelled ở lần progress kế tiếp)
 ```
 
-- Claim chọn job theo thứ tự: `lane = interactive` trước, rồi `priority` cao hơn, rồi job có `affinity_key` worker đang cache, rồi job cũ nhất. Job chỉ được giao khi máy đáp ứng `requirements` (`meetsRequirements`) và còn slot đúng loại (`JOB_TYPE_SPECS[type].slot`).
-- Thứ tự máy (`farm_nodes.priority_order`, số nhỏ trước; admin kéo thả ở trang Worker, hay `POST /v1/admin/nodes/reorder {ids}`): máy B xin việc thì bỏ qua một job nếu còn máy A xếp trước B đang bật, online (heartbeat trong `NODE_OFFLINE_AFTER_SECONDS`), trong lịch (không `paused`), nhận loại job đó (`kinds` báo − `blocked_kinds`), đủ `requirements` và còn slot đúng loại. Slot trống của A là `free_slots` ở heartbeat gần nhất trừ các job (còn `leased`) đã giao cho A sau heartbeat đó; mỗi job B nhường giữ một slot của A trong lần claim ấy, nên B chỉ nhường số job A nhận nổi. Job chờ quá `NODE_PRIORITY_GRACE_SECONDS` (mặc định 10 s, tính từ mốc muộn nhất trong `created_at`, `updated_at` — lần vào lại hàng — và `not_before`) thì máy nào cũng nhận, để A chậm hay kẹt không giữ việc lại. Job ghim máy (`requirements.node_id`) không nhường. Thứ tự này chỉ là của hub: không đổi gì ở API worker; `GET /v1/owner/nodes` trả máy theo thứ tự này.
+- `fail` với `error.code` là `no_slot` (máy nhận rồi mà không có slot) hoặc `worker_updating` (máy đang lên bản mới, trả
+  job lại) **không tính lần thử**: hub trả lại lần thử claim đã cộng, nên `max_attempts` nhỏ (Studio đặt 2) không bị đốt
+  bởi những lần job chưa thật sự chạy. Job vẫn về `queued` với `not_before` lùi (≥ 30 s).
+- `cancel` chỉ đổi job đang `queued` / `leased` / `paused` (điều kiện nằm trong câu UPDATE, xoá `lease_token`): job vừa
+  `completed` / `failed` giữ nguyên trạng thái, `POST /v1/owner/jobs/:id/cancel` trả job như nó đang là.
+
+- Claim chọn job theo thứ tự: `lane = interactive` trước, rồi `priority` cao hơn, rồi job có `affinity_key` worker đang cache, rồi job cũ nhất. Job chỉ được giao khi máy đáp ứng `requirements` (`nodeMeetsRequirements`) và còn slot đúng loại (`JOB_TYPE_SPECS[type].slot`). Luật pool, ghim máy (`node_id`) và mức render (`studio_render_min` ≤ `engines.studio_render`) được lọc ngay trong SQL, trước khi lấy 50 job đầu: lọc sau thì 50 job của pool khác (hay đòi bản render mới hơn) chặn máy này mãi.
+- Thứ tự máy (`farm_nodes.priority_order`, số nhỏ trước; admin kéo thả ở trang Worker, hay `POST /v1/admin/nodes/reorder {ids}`): máy B xin việc thì bỏ qua một job nếu còn máy A xếp trước B đang bật, online (heartbeat trong `NODE_OFFLINE_AFTER_SECONDS`), trong lịch (không `paused`), nhận loại job đó (`kinds` báo − `blocked_kinds`), đủ `requirements` và còn slot đúng loại. Slot trống của A là `free_slots` ở heartbeat gần nhất trừ các job (còn `leased`) đã giao cho A sau heartbeat đó; mỗi job B nhường giữ một slot của A trong lần claim ấy, nên B chỉ nhường số job A nhận nổi. Job chờ quá `NODE_PRIORITY_GRACE_SECONDS` (mặc định 10 s, tính từ mốc muộn nhất trong `created_at` và `not_before`; mọi đường vào lại hàng — thử lại, lease hết hạn, chạy tiếp sau tạm dừng — đặt `not_before`, còn nâng ưu tiên chỉ đổi `updated_at` nên không bắt chờ lại) thì máy nào cũng nhận, để A chậm hay kẹt không giữ việc lại. Job ghim máy (`requirements.node_id`) không nhường. Máy A đang chạy một job loại độc quyền (heartbeat có `exclusive_busy`, xem dưới) không được tính là nhận loại đó, nên B không nhường job loại đó cho A. Thứ tự này chỉ là của hub: không đổi gì ở API worker; `GET /v1/owner/nodes` trả máy theo thứ tự này.
 - Chủ job nâng một job đang chờ bằng `POST /v1/owner/jobs/:id/raise {lane?, priority}` (`priority` −100..100, thiếu
   `lane` thì giữ lane cũ): chỉ job `queued` của chính nó, job ở trạng thái khác nhận 409 `job_not_queued`; trả `JobView`.
   Ví dụ ag-go nâng job `scan.prep` đang chờ trong lô chạy bù lên `interactive` khi Studio cần footage đó ngay.
@@ -46,6 +52,12 @@ Worker gửi danh sách thao tác, chủ job trả kết quả theo đúng thứ
 | `mp_create`, `mp_part_urls`, `mp_complete`, `mp_abort` | Multipart cho file lớn; chủ job khởi tạo và hoàn tất vì chỉ chủ job giữ khoá. Phần 16 MiB |
 
 `output` là đường dẫn tương đối dưới thư mục output của job. Chủ job tự ghép với prefix thật, chặn `..`, và chỉ ký thứ thuộc job trong vé. Worker không biết cấu trúc bucket.
+
+Chủ job nên (ag-studio làm vậy):
+- kiểm vé bằng `verifyTicket` của `@ag-farm/protocol` (schema zod của claims), và `type` trong vé đúng loại job đã gửi;
+- ghi output của mỗi lần thử vào prefix riêng theo `attempt` trong vé (Studio: `.../out/a<attempt>/`), rồi đọc output của
+  lần thử đã `completed` (`JobView.attempt_count`): máy còn chạy lần thử cũ (mất lease) không ghi đè được kết quả;
+- chỉ ký input dùng chung (`library:`) mà job có nhắc tới (Studio ghi danh sách lúc gửi job), không ký mọi key.
 
 ## Loại job
 
@@ -122,6 +134,43 @@ Hub giao cho máy các loại nó báo trừ các loại admin chặn ở máy �
 `PATCH /v1/admin/nodes/:id {blocked_kinds}`, trang Máy có công tắc từng loại). Loại mới worker báo lên tự được giao.
 `allowed_kinds` (danh sách cho phép) đã bỏ: migration `1900000000000` chuyển thành chặn = loại đã báo − loại được phép,
 và PATCH có `allowed_kinds` trả 400.
+
+Input bắt buộc (footage, lời dẫn, nhạc) tải không được thì render worker `fail` với `input_missing`, `retryable: false`
+(link ký đã được thử lại, kể cả xin link mới khi hết hạn: còn lỗi là file không có hoặc chủ job không cho tải). Chỉ
+logo / thư mục brand được bỏ qua (video ra không có chúng).
+
+### Pool máy
+
+Mỗi máy có `pools` (admin farm đặt; rỗng = máy chung) và `accept_shared` (mặc định bật). Luật (`nodeTakesPool`):
+
+| Job | Máy nhận |
+|---|---|
+| `requirements.pool = P` | chỉ máy có `P` trong `pools` |
+| không có `pool` | máy chung (`pools` rỗng) và máy có pool còn `accept_shared` |
+
+Tắt `accept_shared` (trang Worker, "Nhận việc chung") để máy chỉ làm việc của pool. Gửi job với pool chưa có máy nào thì
+hub trả 400 `pool_unknown` (job đó không bao giờ chạy). `GET /v1/owner/nodes` trả `pools` và `accept_shared` khi máy
+có pool, cùng `pool` (pool đầu tiên, deprecated) cho chủ job build trước khi có `pools`; chủ job đọc `pools`.
+
+### Job độc quyền trên máy
+
+Worker có `exclusive_kinds` (render worker: mọi bản render) chạy một job của nhóm một lúc. Đang chạy thì heartbeat gửi
+`exclusive_busy: [<các loại đó>]` (tuỳ chọn; hub build trước khi có trường này từ chối nó: lên hub trước) để hub không
+giữ job loại đó cho máy này theo thứ tự máy. Hub cũ trả 400 thì worker gửi heartbeat không có trường này một giờ.
+
+### Worker-sdk: nộp kết quả và thư mục làm việc
+
+- `complete` lỗi mạng / 5xx / 429 thì thử lại với backoff (2 s, gấp đôi tới 30 s) tới khi lease hết; 409 dừng ngay, không
+  gọi `fail`.
+- `ctx.download` xin link mới (`refreshUrl`) khi link ký hết hạn giữa lúc tải.
+- Mỗi thư mục job (`work_dir/<job id>`) có `.owner` ghi pid worker; lúc khởi động worker xoá các thư mục mà process ghi
+  trong đó không còn (thư mục không có `.owner` thì chỉ xoá khi cũ hơn một ngày).
+
+### Phát hành worker
+
+`ag-render-worker/scripts/release.mjs --publish ...` chặn khi ag-render-worker, `../ag-farm` hoặc `../ag-studio` có
+thay đổi chưa commit (hoặc khác nhánh đòi bằng `--branches`), và ghi commit của cả ba vào mục của gói trong
+`latest.json` (`source`). Hub build trước khi có `source` từ chối trường này: lên hub trước.
 
 ### Tự cập nhật worker
 

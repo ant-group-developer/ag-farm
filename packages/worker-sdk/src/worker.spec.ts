@@ -3,7 +3,7 @@
  */
 import { createServer } from 'node:http';
 import type { Server, IncomingMessage, ServerResponse } from 'node:http';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as os from 'node:os';
 import type { Capabilities } from '@ag-farm/protocol';
@@ -992,6 +992,176 @@ describe('runWorker - "Lấy log"', () => {
       });
       expect(asked).toBe(1);
       expect(heartbeats).toBeGreaterThanOrEqual(6);
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 10_000);
+});
+
+describe('runWorker - complete retried on a flaky hub', () => {
+  /** A hub answering `complete` with the given statuses in turn (then 200); counts complete and fail calls. */
+  async function run(completeStatuses: number[]) {
+    const tmpDir = makeTmpDir();
+    const stopCtrl = new AbortController();
+    let claimCount = 0;
+    let completeCalls = 0;
+    let failCalls = 0;
+    const { server, url } = await startServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        const path = req.url ?? '';
+        res.setHeader('Content-Type', 'application/json');
+        if (path.includes('heartbeat')) {
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path.includes('claim')) {
+          claimCount++;
+          res.writeHead(200);
+          res.end(JSON.stringify({ job: claimCount === 1 ? makeJob(`${url}/sign`) : null }));
+        } else if (path.includes('progress')) {
+          res.writeHead(200);
+          res.end(JSON.stringify({ lease_expires_at: new Date(Date.now() + 120_000).toISOString(), ticket: 'ticket-2' }));
+        } else if (path.includes('complete')) {
+          const status = completeStatuses[completeCalls++] ?? 200;
+          if (status !== 503) stopCtrl.abort();
+          if (status === 409) {
+            res.writeHead(409); res.end(JSON.stringify({ error: 'lease_lost', message: 'gone' }));
+          } else {
+            res.writeHead(status); res.end('{}');
+          }
+        } else if (path.includes('fail')) {
+          failCalls++;
+          res.writeHead(200); res.end('{}');
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+    try {
+      const config = makeConfig(tmpDir, url);
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.0.1',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        progressIntervalMs: 50,
+        completeRetryMs: 20,
+        stopSignal: stopCtrl.signal,
+        handlers: { 'scan.extract': async () => ({ manifest: 'extract.json', summary: {} }) },
+      });
+      return { completeCalls, failCalls };
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  it('a 503 on complete is retried until the hub takes it, and the job is not failed', async () => {
+    expect(await run([503, 503])).toEqual({ completeCalls: 3, failCalls: 0 });
+  }, 10_000);
+
+  it('a 409 on complete stops at once: no retry, no fail', async () => {
+    expect(await run([409])).toEqual({ completeCalls: 1, failCalls: 0 });
+  }, 10_000);
+});
+
+describe('runWorker - heartbeat says which one-at-a-time kinds are busy', () => {
+  it('sends exclusive_busy while a job of the group runs, and nothing once it is done', async () => {
+    const tmpDir = makeTmpDir();
+    const stopCtrl = new AbortController();
+    let claimCount = 0;
+    const busy: unknown[] = [];
+    let finished = false;
+    const afterFinish: unknown[] = [];
+    const { server, url } = await startServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c as Buffer));
+      req.on('end', () => {
+        const path = req.url ?? '';
+        res.setHeader('Content-Type', 'application/json');
+        const body = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>) : {};
+        if (path.includes('heartbeat')) {
+          (finished ? afterFinish : busy).push(body['exclusive_busy']);
+          res.writeHead(200); res.end(heartbeatOk());
+        } else if (path.includes('claim')) {
+          claimCount++;
+          res.writeHead(200);
+          res.end(JSON.stringify({ job: claimCount === 1 ? makeJob(`${url}/sign`) : null }));
+        } else if (path.includes('progress')) {
+          res.writeHead(200);
+          res.end(JSON.stringify({ lease_expires_at: new Date(Date.now() + 120_000).toISOString(), ticket: 't' }));
+        } else if (path.includes('complete')) {
+          res.writeHead(200); res.end('{}');
+          setTimeout(() => { finished = true; }, 50);
+          setTimeout(() => stopCtrl.abort(), 400);
+        } else {
+          res.writeHead(404); res.end();
+        }
+      });
+    });
+    try {
+      const config = makeConfig(tmpDir, url);
+      mkdirSync(config.work_dir, { recursive: true });
+      const { runWorker } = await import('./worker');
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.0.1',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 50,
+        progressIntervalMs: 50,
+        exclusiveKinds: ['scan.extract'],
+        stopSignal: stopCtrl.signal,
+        handlers: {
+          'scan.extract': async () => {
+            await sleep(400);
+            return { manifest: 'extract.json', summary: {} };
+          },
+        },
+      });
+      expect(busy).toContainEqual(['scan.extract']);
+      expect(afterFinish.length).toBeGreaterThan(0);
+      for (const b of afterFinish) expect(b).toBeUndefined();
+    } finally {
+      await closeServer(server);
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 10_000);
+});
+
+describe('runWorker - work dirs left by an earlier run', () => {
+  it('removes a job dir whose worker is gone when it starts', async () => {
+    const tmpDir = makeTmpDir();
+    const stopCtrl = new AbortController();
+    const { server, url } = await startServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        res.setHeader('Content-Type', 'application/json');
+        if ((req.url ?? '').includes('heartbeat')) {
+          res.writeHead(200); res.end(heartbeatOk());
+        } else {
+          res.writeHead(200); res.end(JSON.stringify({ job: null }));
+        }
+      });
+    });
+    try {
+      const config = makeConfig(tmpDir, url);
+      const left = join(config.work_dir, '123e4567-e89b-42d3-a456-0000000000ff');
+      mkdirSync(left, { recursive: true });
+      // a pid no process has (pids are far below this)
+      writeFileSync(join(left, '.owner'), '2147483646');
+      const { runWorker } = await import('./worker');
+      setTimeout(() => stopCtrl.abort(), 200);
+      await runWorker({
+        config: config as Parameters<typeof runWorker>[0]['config'],
+        version: '0.0.1',
+        capabilities: FAKE_CAPS,
+        heartbeatIntervalMs: 100,
+        stopSignal: stopCtrl.signal,
+        handlers: { 'scan.extract': async () => ({ manifest: null, summary: {} }) },
+      });
+      expect(existsSync(left)).toBe(false);
     } finally {
       await closeServer(server);
       rmSync(tmpDir, { recursive: true, force: true });

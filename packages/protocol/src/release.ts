@@ -25,6 +25,11 @@ export const ReleaseEntrySchema = z.object({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   size_bytes: z.int().nonnegative(),
   built_at: IsoDateTimeSchema.optional(),
+  /**
+   * Commit của từng repo dựng nên gói (`ag-render-worker`, `ag-farm`, `ag-studio` → SHA 40 ký tự), để biết một bản
+   * phát hành chạy code nào. Gói cũ không có.
+   */
+  source: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/).max(60), z.string().regex(/^[0-9a-f]{40}$/)).optional(),
 });
 export type ReleaseEntry = z.infer<typeof ReleaseEntrySchema>;
 
