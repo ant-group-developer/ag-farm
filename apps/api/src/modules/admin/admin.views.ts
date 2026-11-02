@@ -15,6 +15,8 @@ export function toNodeView(node: FarmNodeEntity, online: boolean) {
     kinds: node.kinds,
     blocked_kinds: node.blockedKinds ?? [],
     pools: node.pools ?? [],
+    accept_shared: node.acceptShared ?? true,
+    exclusive_busy: node.exclusiveBusy ?? [],
     status: node.status,
     priority_order: node.priorityOrder,
     os: node.os,

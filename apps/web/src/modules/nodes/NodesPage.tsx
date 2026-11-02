@@ -250,7 +250,7 @@ export function NodesPage() {
   const [metricSort, setMetricSort] = useState<{ key: MetricKey; order: MetricSortOrder } | null>(null);
   const metricSorted = metricSort !== null;
   const [form] = Form.useForm<{ name: string; machine?: string; kinds: JobType[] }>();
-  const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[]; pools: string[] }>();
+  const [editForm] = Form.useForm<{ name: string; blocked_kinds: JobType[]; pools: string[]; accept_shared: boolean }>();
 
   // URL state via nuqs
   const [query, setQuery] = useQueryStates({
@@ -628,6 +628,7 @@ export function NodesPage() {
                   name: r.name,
                   blocked_kinds: r.blocked_kinds ?? [],
                   pools: r.pools ?? [],
+                  accept_shared: r.accept_shared ?? true,
                 });
               }}
             />
@@ -796,6 +797,21 @@ export function NodesPage() {
             tooltip={t('nodes.poolHelp')}
           >
             <PoolSelect />
+          </Form.Item>
+          {/* Chỉ có nghĩa khi worker có pool: máy chung luôn nhận việc chung. */}
+          <Form.Item noStyle shouldUpdate={(a, b) => a.pools !== b.pools}>
+            {({ getFieldValue }) =>
+              (getFieldValue('pools') ?? []).length > 0 ? (
+                <Form.Item
+                  name="accept_shared"
+                  label={t('nodes.acceptShared')}
+                  tooltip={t('nodes.acceptSharedHelp')}
+                  valuePropName="checked"
+                >
+                  <Switch aria-label={t('nodes.acceptShared')} />
+                </Form.Item>
+              ) : null
+            }
           </Form.Item>
         </Form>
       </Modal>

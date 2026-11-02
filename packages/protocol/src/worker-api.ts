@@ -48,6 +48,12 @@ export const HeartbeatRequestSchema = z.strictObject({
    * khi có trường này từ chối heartbeat có nó (`strictObject`): lên hub trước rồi mới lên worker.
    */
   metrics: MachineMetricsSchema.optional(),
+  /**
+   * Loại job máy đang chạy độc quyền (`exclusive_kinds` của worker, đang có một job loại đó chạy): máy không claim
+   * thêm loại đó tới khi xong, nên hub không giữ job loại đó cho máy (thứ tự máy). Tuỳ chọn; hub build trước khi có
+   * trường này từ chối heartbeat có nó: lên hub trước.
+   */
+  exclusive_busy: z.array(JobTypeSchema).max(64).optional(),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequestSchema>;
 

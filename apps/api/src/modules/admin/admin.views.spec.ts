@@ -13,6 +13,8 @@ describe('admin views', () => {
       kinds: ['studio.tts'],
       blockedKinds: [],
       pools: [],
+      acceptShared: true,
+      exclusiveBusy: [],
       tokenHash: 'a'.repeat(64),
       status: 'active',
       priorityOrder: 3,

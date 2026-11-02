@@ -308,8 +308,11 @@ export const vi = {
     kindNotReported: 'Đã tắt, và worker không còn báo loại này.',
     pool: 'Pool (nhóm máy của chi nhánh)',
     poolHelp:
-      'Mỗi nhóm trong AG Studio chọn một pool; job của nhóm chỉ chạy trên máy thuộc pool đó. Một worker chọn được nhiều pool để nhiều nhóm dùng chung. Worker có pool không nhận job của máy chung. Để trống: máy chung. Worker scan cho ag-go nên để trống.',
+      'Mỗi nhóm trong AG Studio chọn một pool; job của nhóm chỉ chạy trên máy thuộc pool đó. Một worker chọn được nhiều pool để nhiều nhóm dùng chung. Worker có pool vẫn nhận job của máy chung trừ khi tắt "Nhận việc chung". Để trống: máy chung. Worker scan cho ag-go nên để trống.',
     poolPlaceholder: 'Máy chung (không pool)',
+    acceptShared: 'Nhận việc chung',
+    acceptSharedHelp:
+      'Bật: worker vừa nhận job của các pool trên, vừa nhận job không đòi pool như máy chung. Tắt: chỉ nhận job của các pool đó.',
     poolWorkers: '{{count}} worker: {{names}}',
     poolCreate: 'Tạo pool mới “{{name}}”',
     poolNone: 'Chưa có pool nào: gõ tên để tạo',

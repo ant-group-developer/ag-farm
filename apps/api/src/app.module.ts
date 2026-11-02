@@ -29,6 +29,7 @@ import { NodeLogs2500000000000 } from './database/migrations/2500000000000-node-
 import { OwnerWebUrl2600000000000 } from './database/migrations/2600000000000-owner-web-url';
 import { NodePool2700000000000 } from './database/migrations/2700000000000-node-pool';
 import { NodePools2800000000000 } from './database/migrations/2800000000000-node-pools';
+import { NodeAcceptShared2900000000000 } from './database/migrations/2900000000000-node-accept-shared';
 import { EnrollModule } from './modules/enroll/enroll.module';
 import { HealthController } from './health.controller';
 import { AdminModule } from './modules/admin/admin.module';
@@ -52,7 +53,7 @@ import { WorkerModule } from './modules/worker/worker.module';
         poolSize: config.get<number>('DATABASE_POOL_MAX') ?? 10,
         connectTimeoutMS: 10_000,
         entities: [FarmOwnerEntity, FarmNodeEntity, FarmJobEntity, FarmEnrollmentEntity],
-        migrations: [Initial1000000000000, Enrollments1100000000000, JobPause1200000000000, AdminListIndexes1300000000000, StudioExportPremiere1400000000000, DropOwnerDefaultLane1500000000000, StudioTranscribe1600000000000, StatsFinishedIndex1700000000000, NodePriorityOrder1800000000000, NodeBlockedKinds1900000000000, NodeSelfUpdate2000000000000, MachineMetrics2100000000000, StudioReferenceFetch2200000000000, AgGoPrep2300000000000, StudioBeats2400000000000, NodeLogs2500000000000, OwnerWebUrl2600000000000, NodePool2700000000000, NodePools2800000000000],
+        migrations: [Initial1000000000000, Enrollments1100000000000, JobPause1200000000000, AdminListIndexes1300000000000, StudioExportPremiere1400000000000, DropOwnerDefaultLane1500000000000, StudioTranscribe1600000000000, StatsFinishedIndex1700000000000, NodePriorityOrder1800000000000, NodeBlockedKinds1900000000000, NodeSelfUpdate2000000000000, MachineMetrics2100000000000, StudioReferenceFetch2200000000000, AgGoPrep2300000000000, StudioBeats2400000000000, NodeLogs2500000000000, OwnerWebUrl2600000000000, NodePool2700000000000, NodePools2800000000000, NodeAcceptShared2900000000000],
         migrationsRun: false,
         synchronize: false,
       }),

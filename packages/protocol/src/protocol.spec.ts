@@ -227,7 +227,11 @@ describe('requirements', () => {
     expect(nodeMeetsRequirements(id, gpuBox, { pool: 'hn' }, ['hn', 'hcm'])).toBe(true);
     expect(nodeMeetsRequirements(id, gpuBox, { pool: 'hcm' }, [])).toBe(false);
     expect(nodeMeetsRequirements(id, gpuBox, { pool: 'hcm' }, ['hn'])).toBe(false);
-    expect(nodeMeetsRequirements(id, gpuBox, {}, ['hcm'])).toBe(false);
+    // a pooled machine takes shared jobs unless the admin turned `accept_shared` off
+    expect(nodeMeetsRequirements(id, gpuBox, {}, ['hcm'])).toBe(true);
+    expect(nodeMeetsRequirements(id, gpuBox, {}, ['hcm'], false)).toBe(false);
+    expect(nodeMeetsRequirements(id, gpuBox, {}, [], false)).toBe(true);
+    expect(nodeMeetsRequirements(id, gpuBox, { pool: 'hcm' }, ['hcm'], false)).toBe(true);
     expect(nodeMeetsRequirements(id, gpuBox, {}, [])).toBe(true);
     expect(nodeMeetsRequirements(id, gpuBox, {})).toBe(true);
     expect(nodeMeetsRequirements(id, cpuBox, { pool: 'hcm', gpu: true }, ['hcm'])).toBe(false);

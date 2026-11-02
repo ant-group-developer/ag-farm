@@ -35,7 +35,9 @@ export interface EarlierNode {
 
 /**
  * Các máy xếp trước `self` đang nhận việc được: bật, online, trong lịch, đã báo năng lực và slot trống.
- * Theo thứ tự ưu tiên. `free` là slot trống ở heartbeat gần nhất, chưa trừ job giao sau heartbeat đó.
+ * Theo thứ tự ưu tiên. `free` là slot trống ở heartbeat gần nhất, chưa trừ job giao sau heartbeat đó. `kinds` bỏ các
+ * loại máy đang bận chạy độc quyền (`exclusive_busy` ở heartbeat): máy đó không claim loại ấy tới khi xong, nên không
+ * giữ job loại ấy cho nó.
  */
 export function earlierReadyNodes(
   nodes: readonly FarmNodeEntity[],
@@ -57,7 +59,11 @@ export function earlierReadyNodes(
         n.freeSlots != null,
     )
     .sort((a, b) => (isAhead(a, b) ? -1 : 1))
-    .map((n) => ({ node: n, kinds: effectiveKinds(n.kinds, n.blockedKinds), free: { ...n.freeSlots! } }));
+    .map((n) => ({
+      node: n,
+      kinds: effectiveKinds(n.kinds, [...(n.blockedKinds ?? []), ...(n.exclusiveBusy ?? [])]),
+      free: { ...n.freeSlots! },
+    }));
 }
 
 /** Trừ vào slot trống các job đã giao cho máy sau lần heartbeat gần nhất của nó (heartbeat chưa tính các job này). */
@@ -89,12 +95,19 @@ export function earlierNodeFor(
   const slot: SlotKind = spec.slot;
   return (
     earlier.find(
-      (e) => e.free[slot] >= 1 && e.kinds.includes(job.type) && nodeMeetsRequirements(e.node.id, e.node.capabilities!, reqs, e.node.pools),
+      (e) =>
+        e.free[slot] >= 1 &&
+        e.kinds.includes(job.type) &&
+        nodeMeetsRequirements(e.node.id, e.node.capabilities!, reqs, e.node.pools, e.node.acceptShared),
     ) ?? null
   );
 }
 
-/** Lúc job bắt đầu chờ được nhận: lúc tạo, lúc vào lại hàng (updated_at) hoặc `not_before`, lấy mốc muộn nhất. */
-export function claimableSince(job: Pick<FarmJobEntity, 'createdAt' | 'updatedAt' | 'notBefore'>): number {
-  return Math.max(job.createdAt.getTime(), job.updatedAt.getTime(), job.notBefore?.getTime() ?? 0);
+/**
+ * Lúc job bắt đầu chờ được nhận: lúc tạo hoặc `not_before`, lấy mốc muộn nhất. Mọi đường đưa job vào lại hàng (thử
+ * lại, lease hết hạn, chạy tiếp sau tạm dừng) đều đặt `not_before`; `updated_at` thì đổi cả khi chỉ nâng độ ưu tiên,
+ * nên không dùng (nâng ưu tiên không được bắt job chờ lại từ đầu).
+ */
+export function claimableSince(job: Pick<FarmJobEntity, 'createdAt' | 'notBefore'>): number {
+  return Math.max(job.createdAt.getTime(), job.notBefore?.getTime() ?? 0);
 }

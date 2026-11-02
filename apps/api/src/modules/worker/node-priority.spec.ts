@@ -111,15 +111,33 @@ describe('node priority', () => {
     expect(earlierNodeFor(job({ type: 'scan.ai', requirements: { gpu: true } }), ready)).toBeNull();
   });
 
+  it('earlierNodeFor: a node busy with a one-at-a-time kind does not hold that kind, only the others', () => {
+    const busy = node({ kinds: ['studio.render_final', 'scan.extract'], exclusiveBusy: ['studio.render_final'] });
+    const ready = earlierReadyNodes([busy], node({ priorityOrder: 99 }), NOW, 90);
+    expect(earlierNodeFor(job({ type: 'studio.render_final' }), ready)).toBeNull();
+    expect(earlierNodeFor(job({ type: 'scan.extract' }), ready)?.node.id).toBe(busy.id);
+  });
+
+  it('earlierNodeFor: a pooled node holds a shared job only while it accepts shared work', () => {
+    const shared = node({ pools: ['hcm'], acceptShared: true });
+    const strict = node({ pools: ['hn'], acceptShared: false });
+    expect(earlierNodeFor(job({}), earlierReadyNodes([strict], node({ priorityOrder: 99 }), NOW, 90))).toBeNull();
+    expect(earlierNodeFor(job({}), earlierReadyNodes([shared], node({ priorityOrder: 99 }), NOW, 90))?.node.id).toBe(shared.id);
+  });
+
   it('earlierNodeFor: a job pinned to a node never yields', () => {
     const ready = earlierReadyNodes([node()], node({ priorityOrder: 99 }), NOW, 90);
     expect(earlierNodeFor(job({ requirements: { node_id: '00000000-0000-4000-8000-0000000000ff' } }), ready)).toBeNull();
   });
 
-  it('claimableSince: the latest of created, requeued (updated) and not_before', () => {
+  it('claimableSince: the later of created and not_before, a raise (updated) does not restart it', () => {
     const t = (s: number) => new Date(NOW + s * 1000);
-    expect(claimableSince({ createdAt: t(0), updatedAt: t(0), notBefore: null })).toBe(NOW);
-    expect(claimableSince({ createdAt: t(0), updatedAt: t(30), notBefore: null })).toBe(NOW + 30_000);
-    expect(claimableSince({ createdAt: t(0), updatedAt: t(30), notBefore: t(60) })).toBe(NOW + 60_000);
+    const at = (created: number, updated: number, notBefore: number | null) => {
+      const j = { createdAt: t(created), updatedAt: t(updated), notBefore: notBefore == null ? null : t(notBefore) };
+      return claimableSince(j);
+    };
+    expect(at(0, 0, null)).toBe(NOW);
+    expect(at(0, 30, null)).toBe(NOW);
+    expect(at(0, 30, 60)).toBe(NOW + 60_000);
   });
 });

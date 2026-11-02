@@ -27,12 +27,14 @@ export const PatchNodeSchema = z.strictObject({
   auto_update: z.boolean().optional(),
   /** Số nhỏ trước. Muốn xếp lại cả danh sách thì dùng `POST nodes/reorder`. */
   priority_order: z.number().int().min(0).max(1_000_000).optional(),
-  /** Các pool máy thuộc (nhóm máy của chi nhánh); rỗng = máy chung. Máy có pool chỉ nhận job của các pool đó. */
+  /** Các pool máy thuộc (nhóm máy của chi nhánh); rỗng = máy chung. Máy có pool nhận job của các pool đó. */
   pools: z
     .array(PoolNameSchema)
     .max(20)
     .transform((pools) => [...new Set(pools)].sort())
     .optional(),
+  /** Máy có pool còn nhận job không đòi pool (việc chung). Máy không pool luôn nhận. */
+  accept_shared: z.boolean().optional(),
 });
 export type PatchNodeDto = z.infer<typeof PatchNodeSchema>;
 

@@ -22,6 +22,20 @@ export const PublishReleaseSchema = z.strictObject({
     .transform((s) => s.toLowerCase())
     .pipe(z.string().regex(/^[0-9a-f]{64}$/, { message: 'sha256 must be 64 hex characters' })),
   built_at: z.iso.datetime({ offset: true }).optional(),
+  /** JSON `{repo: sha}` các commit dựng nên gói (multipart chỉ có chuỗi); ghi vào latest.json. */
+  source: z
+    .string()
+    .max(2000)
+    .transform((s, ctx) => {
+      try {
+        return JSON.parse(s) as unknown;
+      } catch {
+        ctx.addIssue({ code: 'custom', message: 'source must be JSON {repo: sha}' });
+        return z.NEVER;
+      }
+    })
+    .pipe(ReleaseEntrySchema.shape.source.unwrap())
+    .optional(),
 });
 export type PublishReleaseDto = z.infer<typeof PublishReleaseSchema>;
 
@@ -89,6 +103,7 @@ export class ReleasesService {
           sha256: actual,
           size_bytes: file.size,
           built_at: dto.built_at ?? new Date().toISOString(),
+          ...(dto.source ? { source: dto.source } : {}),
         };
         const dir = this.dir();
         await rename(file.path, join(dir, entry.file));

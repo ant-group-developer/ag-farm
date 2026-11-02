@@ -226,8 +226,11 @@ export const en: LocaleMessages = {
     kindNotReported: 'Turned off, and the worker no longer reports it.',
     pool: "Pools (a branch's machines)",
     poolHelp:
-      "Each AG Studio team picks one pool; its jobs run only on workers in that pool. A worker can be in several pools so teams share it. A worker in any pool takes no shared jobs. Blank: the shared machines. Leave scan workers for ag-go blank.",
+      "Each AG Studio team picks one pool; its jobs run only on workers in that pool. A worker can be in several pools so teams share it. A worker in a pool still takes shared jobs unless “Take shared jobs” is off. Blank: the shared machines. Leave scan workers for ag-go blank.",
     poolPlaceholder: 'Shared machines (no pool)',
+    acceptShared: 'Take shared jobs',
+    acceptSharedHelp:
+      "On: the worker takes its pools' jobs and also jobs asking for no pool, like a shared machine. Off: only its pools' jobs.",
     poolWorkers: '{{count}} worker(s): {{names}}',
     poolCreate: 'Create pool “{{name}}”',
     poolNone: 'No pools yet: type a name to create one',

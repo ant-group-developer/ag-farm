@@ -44,7 +44,8 @@ import type { MetricsProbes } from './metrics';
 import type { SlotHandle } from './machine';
 import { SignClient } from './sign-client';
 import type { UploadOutputOptions } from './transfer';
-import { downloadToFile, uploadJson, uploadOutput } from './transfer';
+import { downloadToFile, isTransientError, uploadJson, uploadOutput } from './transfer';
+import { cleanStaleWorkDirs, markWorkDir } from './work-dir';
 
 /**
  * Đưa file từ cache vào thư mục job: hard link (tức thì, không tốn thêm đĩa — file gốc 4K có thể vài GB),
@@ -135,6 +136,8 @@ export interface RunWorkerOptions {
   progressMinGapMs?: number;
   /** Chu kỳ kiểm máy đã rảnh khi job batch đang nhường slot (ms, mặc định 2 s). */
   yieldPollMs?: number;
+  /** Lần chờ đầu khi thử lại `complete` (ms, mặc định 2 s, gấp đôi mỗi lần tới 30 s). Dùng trong tests. */
+  completeRetryMs?: number;
   /** Signal để dừng worker từ bên ngoài (không cần SIGTERM). */
   stopSignal?: AbortSignal;
   /**
@@ -172,7 +175,12 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
   const progressMs = options.progressIntervalMs ?? PROGRESS_INTERVAL_SECONDS * 1000;
   const progressMinGapMs = options.progressMinGapMs ?? 5_000;
   const yieldPollMs = options.yieldPollMs ?? 2_000;
+  const completeRetryMs = options.completeRetryMs ?? 2_000;
   const log = rootLogger.child({ worker: config.name, version });
+
+  // Thư mục job còn lại từ lần chạy trước (worker bị tắt ngang, máy mất điện): job đó đã về hub, xoá cho đỡ đầy ổ.
+  const stale = cleanStaleWorkDirs(config.work_dir);
+  if (stale.length > 0) log.info('Removed work dirs left by an earlier run', { count: stale.length });
 
   const token = resolveToken(config);
   const hub = new HubClient(config.hub_url, token);
@@ -224,8 +232,8 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
           onError: (what, err) => log.warn('Machine metric unavailable', { what, err: String(err) }),
         });
   sampler?.start();
-  /** Hub cũ (chưa biết `metrics`) trả 400: gửi heartbeat không có số đo tới mốc này rồi thử lại. */
-  let metricsPausedUntil = 0;
+  /** Hub cũ (chưa biết `metrics` / `exclusive_busy`) trả 400: gửi heartbeat không có các trường đó tới mốc này. */
+  let extrasPausedUntil = 0;
 
   let running = true;
   let claimEnabled = true;
@@ -260,15 +268,24 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
         // Chỉ máy tự cập nhật mới gửi: worker chạy tay vẫn nói chuyện được với hub chưa biết trường này.
         ...(updater ? { update: updater.report } : {}),
       };
-      const metrics = sampler && Date.now() >= metricsPausedUntil ? sampler.latest() : undefined;
+      const extrasOn = Date.now() >= extrasPausedUntil;
+      const metrics = sampler && extrasOn ? sampler.latest() : undefined;
+      // Đang chạy một job của nhóm một-lúc-một-cái: máy không xin các loại của nhóm (xem vòng claim), báo để hub
+      // không giữ job loại đó cho máy này theo thứ tự máy. Chỉ gửi khi có, như `metrics`.
+      const exclusiveBusy = extrasOn && exclusiveRunning.size > 0 ? kinds.filter((k) => exclusive.has(k)) : [];
+      const extras = {
+        ...(metrics ? { metrics } : {}),
+        ...(exclusiveBusy.length > 0 ? { exclusive_busy: exclusiveBusy } : {}),
+      };
       let res: Awaited<ReturnType<typeof hub.heartbeat>>;
       try {
-        res = await hub.heartbeat(metrics ? { ...base, metrics } : base);
+        res = await hub.heartbeat({ ...base, ...extras });
       } catch (err) {
-        // Hub build trước khi có `metrics` từ chối cả heartbeat (strictObject): đừng để máy thành offline vì số đo.
-        if (!metrics || !(err instanceof HubRequestError) || err.status !== 400) throw err;
-        metricsPausedUntil = Date.now() + 60 * 60_000;
-        log.warn('Hub refused machine metrics (older hub?); sending heartbeats without them for an hour', {
+        // Hub build trước khi có `metrics` / `exclusive_busy` từ chối cả heartbeat (strictObject): đừng để máy thành
+        // offline vì các trường tuỳ chọn.
+        if (Object.keys(extras).length === 0 || !(err instanceof HubRequestError) || err.status !== 400) throw err;
+        extrasPausedUntil = Date.now() + 60 * 60_000;
+        log.warn('Hub refused machine metrics / exclusive_busy (older hub?); sending heartbeats without them for an hour', {
           err: String(err),
         });
         res = await hub.heartbeat(base);
@@ -515,6 +532,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
 
     const workDir = join(config.work_dir, job.id);
     mkdirSync(workDir, { recursive: true });
+    markWorkDir(workDir);
 
     const abortCtrl = new AbortController();
     activeJobs.set(job.id, abortCtrl);
@@ -530,6 +548,8 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     let currentTicket = job.ticket;
     const signClient = new SignClient(job.sign_url, () => currentTicket);
     const leaseToken = job.lease_token;
+    // Hạn lease mới nhất (claim, rồi mỗi lần progress): `complete` thử lại tới mốc này.
+    let leaseExpiresAt = Date.parse(job.lease_expires_at);
 
     // Tiến độ: luôn gửi giá trị mới nhất. Lần gọi quá gần lần gửi trước được dời tới hết khoảng
     // `progressMinGapMs` (không bỏ đi như trước: handler báo 8% → 48% mà hub vẫn thấy 2%).
@@ -547,6 +567,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
       try {
         const res = await hub.progress(job.id, { lease_token: leaseToken, ...latest });
         currentTicket = res.ticket;
+        leaseExpiresAt = Date.parse(res.lease_expires_at);
       } catch (err) {
         if (err instanceof LeaseLostError) {
           jobLog.warn('Lease lost while reporting progress', { reason: err.reason });
@@ -595,6 +616,27 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
         abortCtrl.abort();
       }
     });
+
+    /**
+     * Nộp kết quả, thử lại khi lỗi mạng / hub tạm lỗi (5xx, 429) với backoff, chừng nào lease còn hạn: output đã tải
+     * lên, mất kết quả vì một lần hub chập chờn thì cả lần chạy phải làm lại. 409 (lease mất, job huỷ) ném ngay.
+     */
+    const completeWithRetry = async (result: Parameters<typeof hub.complete>[1]['result']): Promise<void> => {
+      let delay = completeRetryMs;
+      for (;;) {
+        try {
+          await hub.complete(job.id, { lease_token: leaseToken, result });
+          return;
+        } catch (err) {
+          if (err instanceof LeaseLostError) throw err;
+          const transient = !(err instanceof HubRequestError) || isTransientError(err.status);
+          if (!transient || Date.now() + delay >= leaseExpiresAt) throw err;
+          jobLog.warn('Complete failed, retrying', { err: String(err), inMs: delay });
+          await sleep(delay);
+          delay = Math.min(delay * 2, 30_000);
+        }
+      }
+    };
 
     const shouldYield = (): boolean => job.lane !== 'interactive' && allocator.interactivePressure();
 
@@ -649,14 +691,19 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
       async download(inputName, dest, opts) {
         const { url, cacheKey } = await signClient.getInput(inputName);
         const effectiveKey = opts?.useCacheKey !== undefined ? opts.useCacheKey : cacheKey;
+        // Link ký hết hạn giữa chừng (tải lâu, thử lại): xin link mới cho đúng input đó.
+        const transfer = {
+          signal: abortCtrl.signal,
+          refreshUrl: async () => (await signClient.getInput(inputName)).url,
+        };
         if (effectiveKey) {
           const cached = await cache.getOrDownload(effectiveKey, null, async (tmpDest) => {
-            await downloadToFile(url, tmpDest, { signal: abortCtrl.signal });
+            await downloadToFile(url, tmpDest, transfer);
           });
           mkdirSync(dirname(dest), { recursive: true });
           linkOrCopy(cached, dest);
         } else {
-          await downloadToFile(url, dest, { signal: abortCtrl.signal });
+          await downloadToFile(url, dest, transfer);
         }
       },
       async upload(localPath, outputPath, contentType, uploadOpts) {
@@ -673,7 +720,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
       stopTimers();
 
       if (!abortCtrl.signal.aborted) {
-        await hub.complete(job.id, { lease_token: leaseToken, result });
+        await completeWithRetry(result);
         jobLog.info('Job completed', { manifest: result.manifest });
       }
     } catch (err) {

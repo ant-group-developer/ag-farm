@@ -23,6 +23,9 @@ if [[ "$TAG" != latest ]]; then
   docker tag "ag-farm-web:$TAG" ag-farm-web:latest
 fi
 
+# Migration theo kiểu expand/contract: bản này chỉ thêm (cột, bảng), không xoá thứ bản trước còn đọc, để quay lại bản
+# trước (image cũ) vẫn chạy được trên schema mới. Xoá (vd. cột farm_nodes.pool cũ, thay bằng pools ở 2800) để ở một
+# migration của bản phát hành SAU, khi không còn cần quay lại.
 if [[ "${SKIP_MIGRATION:-0}" != 1 ]]; then
   log 'Chay migration'
   docker compose run --rm --no-deps api \

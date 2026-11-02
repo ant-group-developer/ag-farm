@@ -126,6 +126,7 @@ export class AdminService {
     if (dto.priority_order !== undefined) node.priorityOrder = dto.priority_order;
     if (dto.auto_update !== undefined) node.autoUpdate = dto.auto_update;
     if (dto.pools !== undefined) node.pools = dto.pools;
+    if (dto.accept_shared !== undefined) node.acceptShared = dto.accept_shared;
     const saved = await this.nodeRepo.save(node);
     if (dto.priority_order !== undefined) await this.keepNewNodesLast();
     return toNodeView(saved, this.isOnline(saved));
