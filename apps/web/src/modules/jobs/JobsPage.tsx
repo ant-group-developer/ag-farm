@@ -263,7 +263,12 @@ export function JobsPage() {
       width: 110,
       ellipsis: true,
       render: (v: Lane) => (
-        <Tag color={v === 'interactive' ? 'purple' : 'default'}>{laneLabel(v)}</Tag>
+        <Tag
+          color={v === 'interactive' ? 'purple' : 'default'}
+          style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}
+        >
+          {laneLabel(v)}
+        </Tag>
       ),
     },
     {
@@ -328,6 +333,7 @@ export function JobsPage() {
       title: <Tooltip title={t('jobs.durationHelp')}>{t('jobs.duration')}</Tooltip>,
       key: 'duration',
       width: 200,
+      ellipsis: true,
       render: (_: unknown, r: JobView) => <JobDurationCell job={r} />,
     },
     {
@@ -632,7 +638,7 @@ function JobDurationCell({ job }: { job: JobView }) {
           {formatDuration(timing.durationMs)}
         </Text>
         <br />
-        <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+        <Text type="secondary" ellipsis style={{ fontSize: 12, maxWidth: '100%' }}>
           {t('jobs.durationRange', { start: formatTimeShort(timing.start), end })}
         </Text>
       </div>

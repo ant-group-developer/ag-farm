@@ -151,7 +151,13 @@ function NodeVersion({ node, latest }: { node: NodeView; latest: ReleaseManifest
   return (
     <Flex vertical gap={4} style={{ minWidth: 0 }}>
       <Flex align="center" gap={6} wrap>
-        {node.agent_version ? <Text>{node.agent_version}</Text> : <Text type="secondary">-</Text>}
+        {node.agent_version ? (
+          <Text ellipsis={{ tooltip: node.agent_version }} style={{ maxWidth: '100%' }}>
+            {node.agent_version}
+          </Text>
+        ) : (
+          <Text type="secondary">-</Text>
+        )}
         {isOutdated(node, latest) ? (
           <Tooltip title={t('nodes.versionOutdatedHelp', { latest: newest })}>
             <Tag color="orange" bordered={false} style={{ marginInlineEnd: 0 }}>
@@ -400,8 +406,8 @@ export function NodesPage() {
       width: 200,
       render: (_: unknown, r: NodeView) => (
         <Flex vertical style={{ minWidth: 0 }}>
-          <Flex gap={4} align="center" style={{ minWidth: 0 }}>
-            <Text strong ellipsis={{ tooltip: r.name }}>{r.name}</Text>
+          <Flex wrap gap={4} align="center" style={{ minWidth: 0 }}>
+            <Text strong ellipsis={{ tooltip: r.name }} style={{ maxWidth: '100%' }}>{r.name}</Text>
             {(r.pools ?? []).map((p) => (
               <Tooltip key={p} title={t('nodes.poolTag')}><Tag color="purple" style={{ marginInlineEnd: 0 }}>{p}</Tag></Tooltip>
             ))}
