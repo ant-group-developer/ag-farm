@@ -49,6 +49,10 @@ export const en: LocaleMessages = {
     pointSecure: 'Secure sign-in with Auth0',
     pointInternal: 'For system administrators only',
     secureNote: 'You will be taken to a secure sign-in page.',
+    expiredTitle: 'Your session has expired',
+    expiredPrompt: 'Sign in again to keep working. Nothing you saved is lost.',
+    expiredNote: 'You were signed out because the sign-in was revoked or sat unused too long.',
+    loginAgain: 'Sign in again',
     missingConfig: 'Auth0 is not configured',
     missingConfigDesc:
       'Check the VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID and VITE_AUTH0_AUDIENCE environment variables.',

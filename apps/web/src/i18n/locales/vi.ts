@@ -47,6 +47,10 @@ export const vi = {
     pointSecure: 'Xác thực bảo mật qua Auth0',
     pointInternal: 'Chỉ dành cho quản trị viên hệ thống',
     secureNote: 'Bạn sẽ được chuyển đến trang đăng nhập an toàn.',
+    expiredTitle: 'Phiên đăng nhập đã hết hạn',
+    expiredPrompt: 'Đăng nhập lại để tiếp tục làm việc. Những gì đã lưu không bị mất.',
+    expiredNote: 'Bạn bị đăng xuất vì phiên đăng nhập đã bị thu hồi hoặc để quá lâu không dùng.',
+    loginAgain: 'Đăng nhập lại',
     missingConfig: 'Thiếu cấu hình Auth0',
     missingConfigDesc:
       'Kiểm tra các biến môi trường VITE_AUTH0_DOMAIN, VITE_AUTH0_CLIENT_ID, VITE_AUTH0_AUDIENCE.',
