@@ -74,6 +74,11 @@ export const WorkerConfigSchema = z
      * không gửi (hub chưa biết trường `metrics` cũng tự bị bỏ, xem worker.ts).
      */
     metrics: z.boolean().optional(),
+    /**
+     * Trang xem việc đang chạy và log trên máy này: http://127.0.0.1:<port> (chỉ máy này mở được, chỉ đọc; xem
+     * `local-ui.ts`). install.ps1 ghi scan 47811, render 47812. Vắng mặt hoặc `false`: không mở.
+     */
+    local_ui: z.union([z.literal(false), z.object({ port: z.int().min(1).max(65535) })]).optional(),
     /** Passthrough: các trường tuỳ worker, ví dụ ollama_url. */
     extra: z.record(z.string(), z.unknown()).optional(),
   })

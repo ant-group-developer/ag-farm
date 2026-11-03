@@ -199,6 +199,54 @@ $wrapper = New-AgUpdaterScript -InstallDir 'C:\ag farm'
 Assert-Equal 'update.ps1 parses' $errors.Count 0
 Assert-Equal 'update.ps1 runs the auto-update of its install dir' ($wrapper -match "Invoke-AgAutoUpdate -InstallDir 'C:\\ag farm'") $true
 
+# ---- Thư mục cài ở ổ khác, trang trên máy ----
+
+Assert-Equal 'install dir from the render task' (Get-AgInstallDirFromTaskArgs '/c "D:\ag-farm\render\app\run.cmd"') 'D:\ag-farm'
+Assert-Equal 'install dir with a space' (Get-AgInstallDirFromTaskArgs '/c "E:\Farm Work\ag\scan\app\run.cmd"') 'E:\Farm Work\ag'
+Assert-Equal 'other task: no install dir' ($null -eq (Get-AgInstallDirFromTaskArgs '/c "D:\tools\run.cmd"')) $true
+Assert-Equal 'install dir: trailing slash dropped' (ConvertTo-AgInstallDir 'D:\ag-farm\') 'D:\ag-farm'
+foreach ($bad in @('D:\', 'ag-farm', '\\server\share\ag', 'D:ag-farm', 'D:\a"b')) {
+  $threw = $false
+  try { ConvertTo-AgInstallDir $bad | Out-Null } catch { $threw = $true }
+  Assert-Equal "install dir '$bad' refused" $threw $true
+}
+Assert-Equal 'same path ignores case and slash' (Test-AgSamePath 'C:\AG-farm\' 'c:\ag-farm') $true
+Assert-Equal 'path under its dir' (Test-AgPathUnder 'C:\ag-farm\cache' 'C:\ag-farm') $true
+Assert-Equal 'sibling with the same prefix is not under' (Test-AgPathUnder 'C:\ag-farm2' 'C:\ag-farm') $false
+
+$moveCfg = @(
+  "work_dir: 'C:\ag-farm\render\work'",
+  'cache:',
+  "  dir: 'C:\AG-FARM\cache\render'",
+  "updater_dir: 'C:\ag-farm\updater'",
+  "machine_file: 'C:\ProgramData\ag-farm\machine.yaml'",
+  'extra:',
+  "  python_bin: 'C:\ag-farm\venv\Scripts\python.exe'",
+  "  other_tool: 'C:\ag-farm2\x.exe'",
+  "  root: 'C:\ag-farm'"
+) -join "`r`n"
+$movedCfg = Convert-AgConfigPaths -Text $moveCfg -From 'C:\ag-farm' -To 'D:\farm$1'
+Assert-Equal 'move: work_dir' (Get-YamlKeyLines $movedCfg '^work_dir:')[0] "work_dir: 'D:\farm`$1\render\work'"
+Assert-Equal 'move: cache dir (other case)' (Get-YamlKeyLines $movedCfg '^  dir:')[0] "  dir: 'D:\farm`$1\cache\render'"
+Assert-Equal 'move: python_bin' (Get-YamlKeyLines $movedCfg '^  python_bin:')[0] "  python_bin: 'D:\farm`$1\venv\Scripts\python.exe'"
+Assert-Equal 'move: the dir itself' (Get-YamlKeyLines $movedCfg '^  root:')[0] "  root: 'D:\farm`$1'"
+Assert-Equal 'move: machine.yaml stays' (Get-YamlKeyLines $movedCfg '^machine_file:')[0] "machine_file: 'C:\ProgramData\ag-farm\machine.yaml'"
+Assert-Equal 'move: C:\ag-farm2 untouched' (Get-YamlKeyLines $movedCfg '^  other_tool:')[0] "  other_tool: 'C:\ag-farm2\x.exe'"
+$ex = Get-AgMoveExcludes -From 'C:\ag-farm' -Roles @('scan', 'render')
+Assert-Equal 'move: skips work, staging, tmp and cache' ($ex -join '|') 'C:\ag-farm\tmp|C:\ag-farm\scan\work|C:\ag-farm\scan\staging|C:\ag-farm\render\work|C:\ag-farm\render\staging|C:\ag-farm\cache'
+Assert-Equal 'move -CopyCache: keeps the cache' ((Get-AgMoveExcludes -From 'C:\ag-farm' -Roles @('render') -CopyCache) -contains 'C:\ag-farm\cache') $false
+
+$ui = New-AgConfigYaml -Hub 'http://hub' -Node $node -RoleDir 'D:\ag-farm\render' -CacheDir 'D:\ag-farm\cache\render' -CacheGb 40 `
+  -MachineFile 'C:\ProgramData\ag-farm\machine.yaml' -Extra ([ordered]@{ encoder = 'auto' }) -OmitKinds -LocalUiPort 47812
+Assert-Equal 'local ui: port added' ((Get-YamlKeyLines $ui '^local_ui:$|^  port: 47812$').Count) 2
+$userUi = $ui -replace 'port: 47812', 'port: 48000'
+$again = New-AgConfigYaml -Hub 'http://hub' -Node $node -RoleDir 'D:\ag-farm\render' -CacheDir 'D:\ag-farm\cache\render' -CacheGb 40 `
+  -MachineFile 'C:\ProgramData\ag-farm\machine.yaml' -Extra ([ordered]@{ encoder = 'auto' }) -Existing $userUi -OmitKinds -LocalUiPort 47812
+Assert-Equal 'local ui: a port someone set is kept' ($again -eq $userUi) $true
+$off = New-AgConfigYaml -Hub 'http://hub' -Node $node -RoleDir 'D:\ag-farm\render' -CacheDir 'D:\ag-farm\cache\render' -CacheGb 40 `
+  -MachineFile 'C:\ProgramData\ag-farm\machine.yaml' -Extra ([ordered]@{ encoder = 'auto' }) -Existing "name: 'x'`r`ntoken: 'y'`r`nlocal_ui: false" -OmitKinds -LocalUiPort 47812
+Assert-Equal 'local ui: turned off stays off' ((Get-YamlKeyLines $off '^local_ui: false$|^  port:').Count) 1
+
 # Thay app giữ app.prev, quay về được
 $roleDir = Join-Path $tmp 'render'
 function New-TestPackageZip([string]$Version) {
@@ -239,7 +287,7 @@ if ($OutDir) {
   [IO.File]::WriteAllText((Join-Path $OutDir 'config.yaml'), $yaml, (New-Object Text.UTF8Encoding($false)))
   $noKinds = New-AgConfigYaml -Hub 'http://192.168.1.2:3010' -Node $node -RoleDir 'C:\ag-farm\scan' -CacheDir 'C:\ag-farm\cache\scan' -CacheGb 50 `
     -MachineFile 'C:\ProgramData\ag-farm\machine.yaml' -Extra ([ordered]@{ ollama_url = 'http://127.0.0.1:11434'; unload_ollama_before_tts = $true }) -OmitKinds `
-    -UpdaterDir 'C:\ag-farm\updater'
+    -UpdaterDir 'C:\ag-farm\updater' -LocalUiPort 47811
   [IO.File]::WriteAllText((Join-Path $OutDir 'config-nokinds.yaml'), $noKinds, (New-Object Text.UTF8Encoding($false)))
   $plan = Get-AgSlotPlan -Cores 28 -Gpus $gpu16 -Roles @('scan', 'render')
   [IO.File]::WriteAllText((Join-Path $OutDir 'machine.yaml'), (New-AgMachineYaml $plan), (New-Object Text.UTF8Encoding($false)))
@@ -267,6 +315,8 @@ function Register-AgTask { }
 function Register-AgUpdaterTask { }
 function Save-AgUpdater { }
 function Install-AgOllama { }
+function Set-AgInstallDirRecord { }
+function Update-AgShortcut { }
 function Start-ScheduledTask { param([string]$TaskName) $script:started += $TaskName }
 function Start-Transcript { }
 function Stop-Transcript { }

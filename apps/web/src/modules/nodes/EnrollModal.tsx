@@ -18,10 +18,31 @@ interface EnrollForm {
   roles: WorkerRole[];
 }
 
+/** Thư mục cài mặc định của install.ps1: để trống hay đúng giá trị này thì lệnh không kèm `-InstallDir`. */
+export const DEFAULT_INSTALL_DIR = 'C:\\ag-farm';
+
+/** Đường dẫn Windows đầy đủ có ổ đĩa và ít nhất một thư mục (`D:\ag-farm`), như install.ps1 nhận. */
+export function isValidInstallDir(dir: string): boolean {
+  return /^[A-Za-z]:\\[^"'*?<>|:]+$/.test(dir.trim().replace(/\\+$/, ''));
+}
+
+/** `-InstallDir '<dir>'` (nháy đơn: thư mục có dấu cách), rỗng khi là thư mục mặc định. */
+function installDirArg(dir: string | undefined): string {
+  const d = (dir ?? '').trim().replace(/\\+$/, '');
+  if (!d || d.toLowerCase() === DEFAULT_INSTALL_DIR.toLowerCase()) return '';
+  return ` -InstallDir '${d}'`;
+}
+
 /** Lệnh PowerShell một dòng cài máy worker (xem ag-farm/tools/worker-installer/install.ps1). */
-export function installCommand(hub: string, code: string): string {
+export function installCommand(hub: string, code: string, installDir?: string): string {
   const base = hub.replace(/\/+$/, '');
-  return `iwr ${base}/dist/install.ps1 -UseBasicParsing | iex; Install-AgWorker -Hub ${base} -Code ${code}`;
+  return `iwr ${base}/dist/install.ps1 -UseBasicParsing | iex; Install-AgWorker -Hub ${base} -Code ${code}${installDirArg(installDir)}`;
+}
+
+/** Lệnh chuyển máy đã cài sang thư mục / ổ khác (`Move-AgWorker` của install.ps1). */
+export function moveCommand(hub: string, to: string): string {
+  const base = hub.replace(/\/+$/, '');
+  return `iwr ${base}/dist/install.ps1 -UseBasicParsing | iex; Move-AgWorker -To '${to.trim().replace(/\\+$/, '')}'`;
 }
 
 /**
@@ -33,6 +54,7 @@ export function EnrollModal({ open, onClose }: EnrollModalProps) {
   const [form] = Form.useForm<EnrollForm>();
   const [created, setCreated] = useState<CreateEnrollmentResponse | null>(null);
   const [hub, setHub] = useState('');
+  const [installDir, setInstallDir] = useState(DEFAULT_INSTALL_DIR);
   const [copied, setCopied] = useState(false);
 
   const createMut = useMutation({
@@ -45,13 +67,15 @@ export function EnrollModal({ open, onClose }: EnrollModalProps) {
 
   const close = () => {
     setCreated(null);
+    setInstallDir(DEFAULT_INSTALL_DIR);
     setCopied(false);
     createMut.reset();
     form.resetFields();
     onClose();
   };
 
-  const command = created ? installCommand(hub, created.code) : '';
+  const dirOk = isValidInstallDir(installDir);
+  const command = created ? installCommand(hub, created.code, dirOk ? installDir : undefined) : '';
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(command);
@@ -131,6 +155,18 @@ export function EnrollModal({ open, onClose }: EnrollModalProps) {
             <Typography.Text type="secondary">{t('enroll.hubHelp')}</Typography.Text>
           </div>
           <div>
+            <Typography.Text strong>{t('enroll.installDir')}</Typography.Text>
+            <Input
+              value={installDir}
+              status={dirOk ? undefined : 'error'}
+              placeholder={DEFAULT_INSTALL_DIR}
+              onChange={(e) => setInstallDir(e.target.value)}
+            />
+            <Typography.Text type={dirOk ? 'secondary' : 'danger'}>
+              {dirOk ? t('enroll.installDirHelp') : t('enroll.installDirInvalid')}
+            </Typography.Text>
+          </div>
+          <div>
             <Typography.Text strong>{t('enroll.command')}</Typography.Text>
             <Space.Compact style={{ width: '100%' }}>
               <Input.TextArea value={command} readOnly autoSize={{ minRows: 2, maxRows: 4 }} style={{ fontFamily: 'monospace' }} />
@@ -142,6 +178,9 @@ export function EnrollModal({ open, onClose }: EnrollModalProps) {
             </Space.Compact>
           </div>
           <Typography.Text type="secondary">{t('enroll.updateHint')}</Typography.Text>
+          <Typography.Text type="secondary">
+            {t('enroll.moveHint')} <Typography.Text code copyable>{moveCommand(hub, 'D:\\ag-farm')}</Typography.Text>
+          </Typography.Text>
         </Space>
       )}
     </Modal>

@@ -173,7 +173,11 @@ export const en: LocaleMessages = {
     hub: 'Hub address (the machine must be able to reach it)',
     hubHelp: 'On the LAN use the farm server IP, e.g. http://192.168.1.2:3010.',
     command: 'Install command',
-    updateHint: 'To update later: run the same command without the -Code part.',
+    updateHint: 'To update later: run the same command without the -Code part (no -InstallDir needed, the machine remembers where it is installed).',
+    installDir: 'Install folder on the worker machine',
+    installDirHelp: 'Pick another drive if C: is short on space, e.g. D:\\ag-farm. The venv, models, cache and logs all live in this folder.',
+    installDirInvalid: 'Needs a full path with a drive letter, e.g. D:\\ag-farm (no quotes).',
+    moveHint: 'Machine already installed on C: and you want it on another drive (keeps token, venv, models):',
   },
   nodes: {
     logs: {
