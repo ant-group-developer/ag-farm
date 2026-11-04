@@ -171,7 +171,11 @@ export const vi = {
     hub: 'Địa chỉ hub (máy cần cài phải gọi tới được)',
     hubHelp: 'Máy trong mạng LAN dùng IP của máy chủ farm, vd http://192.168.1.2:3010.',
     command: 'Lệnh cài',
-    updateHint: 'Cập nhật bản mới sau này: chạy lại lệnh trên nhưng bỏ phần -Code.',
+    updateHint: 'Cập nhật bản mới sau này: chạy lại lệnh trên nhưng bỏ phần -Code (không cần -InstallDir, máy tự nhớ chỗ đã cài).',
+    installDir: 'Thư mục cài trên máy worker',
+    installDirHelp: 'Đổi sang ổ khác nếu ổ C ít chỗ, vd D:\\ag-farm. Venv, model, cache và log đều nằm trong thư mục này.',
+    installDirInvalid: 'Cần đường dẫn đầy đủ có ổ đĩa, vd D:\\ag-farm (không dùng dấu nháy).',
+    moveHint: 'Máy đã cài ở ổ C, muốn chuyển sang ổ khác (giữ token, venv, model):',
   },
   owners: {
     title: 'Ứng dụng',

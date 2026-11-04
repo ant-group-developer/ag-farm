@@ -8,8 +8,12 @@
 # Chạy từ file tải về:
 #   iex (Get-Content -Raw -Encoding UTF8 .\install.ps1); Install-AgWorker -Hub ... -Code ...
 #
+# Chuyển máy đã cài sang ổ / thư mục khác (giữ token, config, venv, model, log; xem Move-AgWorker):
+#   iwr https://<farm>/dist/install.ps1 -UseBasicParsing | iex; Move-AgWorker -To D:\ag-farm
+#
 # Tuỳ chọn:
-#   -InstallDir C:\ag-farm   thư mục cài (mặc định C:\ag-farm)
+#   -InstallDir D:\ag-farm   thư mục cài. Bỏ trống: chỗ máy đã cài (registry HKLM\SOFTWARE\ag-farm, task ag-farm-*),
+#                            chưa cài thì C:\ag-farm. Cập nhật / gỡ không cần truyền lại.
 #   -Model qwen2.5vl:7b      model Ollama cho máy quét (mặc định: danh sách hub cấu hình FARM_OLLAMA_MODELS)
 #   -ReconfigureSlots        tính lại machine.yaml theo cấu hình máy
 #   -SkipModels              máy render: không tải trước model giọng đọc / nhận dạng lời nói (tải ở job đầu)
@@ -27,6 +31,10 @@
 # cập nhật ở trên (giữ bản cũ ở <vai trò>\app.prev); bản mới không gửi heartbeat trong 3 phút thì quay về app.prev.
 # Kết quả ghi ở updater\result-<vai trò>.json (worker báo lên hub), log ở updater\updater.log.
 # Máy đang chạy render 0.8.1 / scan 0.3.5 trở về trước: chạy lệnh cập nhật ở trên một lần cuối bằng tay.
+#
+# Trang trên máy: config mỗi vai trò có `local_ui.port` (scan 47811, render 47812); worker có trang này mở
+# http://127.0.0.1:<port> (chỉ máy đó) để xem việc đang chạy và log. Script tạo shortcut "ag-farm" trên Desktop chung
+# khi trang đã chạy.
 
 function Get-AgMachineInfo {
   $cores = [int](Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
@@ -201,11 +209,13 @@ function Add-AgYamlBlock {
 #     nếu có, giữ danh sách cũ nếu không.
 #   - `-UpdaterDir`: thêm các khoá tự cập nhật còn thiếu (updater_task, updater_dir, update_check_minutes,
 #     update_drain_minutes); khoá đã có (người dùng sửa số phút) giữ nguyên.
+#   - `-LocalUiPort`: thêm `local_ui.port` nếu thiếu (trang xem việc và log trên máy); đã có (kể cả `local_ui: false`)
+#     thì giữ nguyên.
 function New-AgConfigYaml {
   param(
     [string]$Hub, $Node, [string]$RoleDir, [string]$CacheDir, [int]$CacheGb, [string]$MachineFile,
     [System.Collections.IDictionary]$Extra, [string]$Existing = '', [switch]$Enrolled, [switch]$OmitKinds,
-    [string]$UpdaterDir
+    [string]$UpdaterDir, [int]$LocalUiPort
   )
   $blocks = Split-AgYamlBlocks $Existing
   $fresh = -not ($blocks | Where-Object { $_.key })
@@ -234,6 +244,9 @@ function New-AgConfigYaml {
     $defaults['updater_dir'] = @("updater_dir: $(ConvertTo-AgYamlString $UpdaterDir)")
     $defaults['update_check_minutes'] = @('update_check_minutes: 15')
     $defaults['update_drain_minutes'] = @('# Co ban moi: cho viec dang chay xong toi da chung nay phut roi cap nhat', 'update_drain_minutes: 30')
+  }
+  if ($LocalUiPort -gt 0) {
+    $defaults['local_ui'] = @("# Trang xem viec dang chay va log tren may nay: http://127.0.0.1:$LocalUiPort (chi may nay mo duoc)", 'local_ui:', "  port: $LocalUiPort")
   }
 
   $result = New-Object System.Collections.ArrayList
@@ -282,6 +295,69 @@ $AgUpdaterTask = 'ag-farm-updater'
 # Slot dùng chung cho mọi worker trên máy (test đổi sang thư mục tạm).
 $AgMachineFile = 'C:\ProgramData\ag-farm\machine.yaml'
 $AgRolePackages = [ordered]@{ scan = 'ag-scan-worker'; render = 'ag-render-worker' }
+# Thư mục cài khi máy chưa cài ở đâu; đã cài thì Find-AgInstallDir tìm lại.
+$AgDefaultInstallDir = 'C:\ag-farm'
+# install.ps1 ghi thư mục cài ở đây để cập nhật, gỡ, chuyển ổ không phải truyền lại -InstallDir.
+$AgRegistryKey = 'HKLM:\SOFTWARE\ag-farm'
+# Trang xem việc và log trên máy (worker-sdk `local_ui`): mỗi vai trò một cổng, chỉ nghe 127.0.0.1.
+$AgLocalUiPorts = [ordered]@{ scan = 47811; render = 47812 }
+
+# Thư mục cài suy từ đối số của task worker (`/c "D:\ag-farm\render\app\run.cmd"`), $null nếu không khớp.
+function Get-AgInstallDirFromTaskArgs {
+  param([string]$Arguments)
+  if ("$Arguments" -match '([A-Za-z]:\\[^"]*?)\\(scan|render)\\app\\run\.cmd') { return $Matches[1] }
+  return $null
+}
+
+# Thư mục máy này đã cài worker: khoá registry install.ps1 ghi, không có (cài bằng bản cũ) thì đọc từ task
+# ag-farm-scan / ag-farm-render. $null nếu chưa cài.
+function Find-AgInstallDir {
+  try {
+    $dir = (Get-ItemProperty -Path $AgRegistryKey -Name InstallDir -ErrorAction Stop).InstallDir
+    if ($dir -and (Test-Path -LiteralPath $dir)) { return $dir }
+  } catch { }
+  foreach ($role in $AgRolePackages.Keys) {
+    $task = Get-ScheduledTask -TaskName "ag-farm-$role" -ErrorAction SilentlyContinue
+    foreach ($a in @($task.Actions)) {
+      $dir = Get-AgInstallDirFromTaskArgs $a.Arguments
+      if ($dir -and (Test-Path -LiteralPath $dir)) { return $dir }
+    }
+  }
+  return $null
+}
+
+function Set-AgInstallDirRecord {
+  param([string]$InstallDir)
+  if (-not (Test-Path -LiteralPath $AgRegistryKey)) { New-Item -Path $AgRegistryKey | Out-Null }
+  Set-ItemProperty -Path $AgRegistryKey -Name InstallDir -Value $InstallDir
+}
+
+# Kiểm và chuẩn hoá thư mục cài: đường dẫn đầy đủ có ổ đĩa và ít nhất một thư mục (D:\ag-farm), bỏ \ cuối.
+function ConvertTo-AgInstallDir {
+  param([string]$Path)
+  $p = "$Path".Trim().TrimEnd('\')
+  if ($p -notmatch '^[A-Za-z]:\\[^"*?<>|:]+$') { throw "Thu muc cai '$Path' khong hop le: can duong dan day du, vd D:\ag-farm" }
+  return $p
+}
+
+# Hai đường dẫn cùng một thư mục (không phân biệt hoa thường, bỏ \ cuối).
+function Test-AgSamePath {
+  param([string]$A, [string]$B)
+  return "$A".TrimEnd('\') -ieq "$B".TrimEnd('\')
+}
+
+# $Path nằm trong thư mục $Dir (hoặc chính nó).
+function Test-AgPathUnder {
+  param([string]$Path, [string]$Dir)
+  return "$($Path.TrimEnd('\'))\".StartsWith("$($Dir.TrimEnd('\'))\", [StringComparison]::OrdinalIgnoreCase)
+}
+
+# Render ưu tiên thường; quét dưới mức thường (worker quét còn tự hạ thêm).
+function Get-AgRolePriority {
+  param([string]$Role)
+  if ($Role -eq 'render') { return 4 }
+  return 7
+}
 
 # So hai phiên bản kiểu semver (1.2.3, 1.2.3-rc.1): âm nếu $A cũ hơn $B, 0 nếu bằng, dương nếu mới hơn. Bản -rc đứng
 # trước bản chính cùng số. Chuỗi không đọc được coi như cũ hơn mọi bản đọc được.
@@ -509,10 +585,17 @@ function Install-AgOllama {
     if (-not $exe) { throw 'Cai Ollama xong nhung khong tim thay ollama.exe. Mo PowerShell moi roi chay lai lenh.' }
   }
 
-  # Dùng lại model đã tải của người đang cài nếu có, khỏi tải lại vài GB.
+  # Model nằm trong thư mục cài (ổ người cài chọn). Người cài đã có model (~\.ollama\models) thì khỏi tải lại vài GB:
+  # cài ở ổ hệ thống thì dùng luôn thư mục đó, cài ở ổ khác thì chép sang (một lần, khi chỗ mới chưa có model).
   $userModels = Join-Path $env:USERPROFILE '.ollama\models'
-  if (Test-Path -LiteralPath (Join-Path $userModels 'manifests')) { $modelsDir = $userModels }
-  else { $modelsDir = Join-Path $InstallDir 'ollama\models' }
+  $modelsDir = Join-Path $InstallDir 'ollama\models'
+  if (Test-Path -LiteralPath (Join-Path $userModels 'manifests')) {
+    if ((Split-Path -Qualifier $InstallDir) -ieq $env:SystemDrive) { $modelsDir = $userModels }
+    elseif (-not (Test-Path -LiteralPath (Join-Path $modelsDir 'manifests'))) {
+      Write-Host "Chep model Ollama tu $userModels sang $modelsDir"
+      Copy-AgTree -From $userModels -To $modelsDir
+    }
+  }
   New-Item -ItemType Directory -Force -Path $modelsDir | Out-Null
   [Environment]::SetEnvironmentVariable('OLLAMA_MODELS', $modelsDir, 'Machine')
 
@@ -551,7 +634,10 @@ function Install-AgPackage {
   param([string]$Hub, $Latest, [string]$PackageName, [string]$RoleDir)
   $info = $Latest.packages.$PackageName
   if (-not $info) { throw "Hub chua co goi $PackageName (thieu trong /dist/latest.json)" }
-  $zip = Join-Path $env:TEMP $info.file
+  # Tải vào <InstallDir>\tmp (ổ cài), không vào TEMP trên ổ C
+  $tmpDir = Join-Path (Split-Path -Parent $RoleDir) 'tmp'
+  New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+  $zip = Join-Path $tmpDir $info.file
   Write-Host "Tai $($info.file) ($([Math]::Round($info.size_bytes / 1MB)) MB)"
   Invoke-WebRequest -Uri "$Hub/dist/$($info.file)" -OutFile $zip -UseBasicParsing
   $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLower()
@@ -635,13 +721,14 @@ function Get-AgRenderExtra {
   return $extra
 }
 
+# Hub thấy node gửi heartbeat trong 2 phút gần đây (-Since: và sau mốc đó, vd. lúc worker ở chỗ mới khởi động).
 function Wait-AgOnline {
-  param([string]$Hub, [string]$Token, [string]$Name, [int]$Seconds)
+  param([string]$Hub, [string]$Token, [string]$Name, [int]$Seconds, [datetime]$Since = [datetime]::MinValue)
   $deadline = (Get-Date).AddSeconds($Seconds)
   while ((Get-Date) -lt $deadline) {
     try {
       $me = Invoke-AgApi -Method Get -Url "$Hub/v1/worker/me" -Token $Token
-      if ($me.last_seen_at -and ((Get-Date) - [datetime]$me.last_seen_at).TotalSeconds -lt 120) { return $true }
+      if ($me.last_seen_at -and ((Get-Date) - [datetime]$me.last_seen_at).TotalSeconds -lt 120 -and [datetime]$me.last_seen_at -gt $Since) { return $true }
     } catch { }
     Start-Sleep -Seconds 3
   }
@@ -792,7 +879,8 @@ function Install-AgWorker {
   param(
     [Parameter(Mandatory = $true)][string]$Hub,
     [string]$Code,
-    [string]$InstallDir = 'C:\ag-farm',
+    # Bỏ trống: chỗ máy đã cài (Find-AgInstallDir), chưa cài thì C:\ag-farm.
+    [string]$InstallDir,
     [string]$Model,
     # Bỏ: máy render luôn chạy setup-render.ps1. Vẫn nhận để lệnh cũ không lỗi.
     [switch]$WithTts,
@@ -814,6 +902,19 @@ function Install-AgWorker {
   $Hub = $Hub.TrimEnd('/')
 
   if (-not (Test-AgAdmin)) { throw 'Hay mo PowerShell bang "Run as Administrator" roi chay lai lenh.' }
+
+  # Thư mục cài: bộ cập nhật luôn truyền; cài / cập nhật tay không truyền thì dùng chỗ máy đã cài.
+  $installedAt = $null
+  if (-not $Auto) { $installedAt = Find-AgInstallDir }
+  if (-not $InstallDir) {
+    if ($installedAt) { $InstallDir = $installedAt } else { $InstallDir = $AgDefaultInstallDir }
+  }
+  $InstallDir = ConvertTo-AgInstallDir $InstallDir
+  if ($installedAt -and -not (Test-AgSamePath $installedAt $InstallDir)) {
+    Write-Warning "May dang cai worker o $installedAt. Cai vao $InstallDir thi thu muc cu khong dung nua (muon mang theo venv, model, log thi dung: Move-AgWorker -To $InstallDir)."
+    if (-not (Confirm-AgStep "Van cai vao $InstallDir?" -Yes:$Yes)) { throw 'Da huy' }
+  }
+  Write-Host "Thu muc cai: $InstallDir"
 
   $machineInfo = Get-AgMachineInfo
   $gpuText = ($machineInfo.gpus | ForEach-Object { "$($_.name) $([Math]::Round($_.vram_mb / 1024)) GB" }) -join ', '
@@ -928,14 +1029,11 @@ function Install-AgWorker {
       }
       $yaml = New-AgConfigYaml -Hub $Hub -Node $node -RoleDir $roleDir -CacheDir (Join-Path $InstallDir "cache\$role") -CacheGb $cacheGb `
         -MachineFile $machineFile -Extra $extra -Existing $existing -Enrolled:([bool]$Code) -OmitKinds:(Test-AgKindsOptional -Package $package -Version $version) `
-        -UpdaterDir $updaterDir
+        -UpdaterDir $updaterDir -LocalUiPort $AgLocalUiPorts[$role]
       [IO.File]::WriteAllText($configPath, $yaml, (New-Object Text.UTF8Encoding($false)))
       $configWritten = $true
 
-      # Render ưu tiên thường; quét dưới mức thường (worker quét còn tự hạ thêm).
-      $priority = 7
-      if ($role -eq 'render') { $priority = 4 }
-      Register-AgTask -TaskName $taskName -CmdPath (Join-Path $roleDir 'app\run.cmd') -WorkDir (Join-Path $roleDir 'app') -Priority $priority
+      Register-AgTask -TaskName $taskName -CmdPath (Join-Path $roleDir 'app\run.cmd') -WorkDir (Join-Path $roleDir 'app') -Priority (Get-AgRolePriority $role)
 
       # Bộ cập nhật: bản mới phải gửi heartbeat (đúng phiên bản) trong 3 phút, không thì quay về bản cũ.
       if ($Auto -and -not (Wait-AgVersion -Hub $Hub -Token $node.token -Version $version -Seconds 180)) {
@@ -960,6 +1058,8 @@ function Install-AgWorker {
     }
   }
 
+  try { Set-AgInstallDirRecord $InstallDir } catch { Write-Warning "Khong ghi duoc thu muc cai vao registry ($($_.Exception.Message))" }
+
   # Bộ cập nhật: lưu bản installer mới nhất của hub cho lần sau; cài/cập nhật tay thì (đăng ký lại) task ag-farm-updater.
   try {
     Save-AgUpdater -Hub $Hub -InstallDir $InstallDir | Out-Null
@@ -967,7 +1067,10 @@ function Install-AgWorker {
   } catch {
     Write-Warning "Chua cai duoc bo tu cap nhat ($($_.Exception.Message)): may van chay, cap nhat bang lenh tay"
   }
-  if ($Auto) { return }
+  if ($Auto) {
+    Update-AgShortcut -InstallDir $InstallDir -Seconds 20 | Out-Null
+    return
+  }
 
   # 4. Chờ hub thấy từng máy
   $allOnline = $true
@@ -980,5 +1083,203 @@ function Install-AgWorker {
       Write-Warning "$($node.name) chua gui heartbeat sau 2 phut. Xem log: $InstallDir\$role\logs\worker.log"
     }
   }
+  $page = Update-AgShortcut -InstallDir $InstallDir -Seconds 30
+  if ($page) { Write-Host "Xem viec dang chay va log tren may nay: $page (shortcut ag-farm tren Desktop)" }
   if ($allOnline) { Write-Host 'Xong. May tu chay lai worker khi khoi dong hoac khi worker loi, va tu cap nhat khi hub co ban moi.' -ForegroundColor Green }
+}
+
+# Shortcut "ag-farm" trên Desktop chung, mở trang xem việc và log của worker (render trước, không có thì scan). Chỉ tạo
+# khi trang đã trả lời (gói cũ chưa có trang thì thôi, shortcut đang có giữ nguyên). Trả địa chỉ trang, $null nếu không có.
+function Update-AgShortcut {
+  param([string]$InstallDir, [int]$Seconds)
+  $urls = @(@('render', 'scan') | Where-Object { Test-Path -LiteralPath (Join-Path $InstallDir "$_\config.yaml") } |
+    ForEach-Object { "http://127.0.0.1:$($AgLocalUiPorts[$_])/" })
+  if ($urls.Count -eq 0) { return $null }
+  $deadline = (Get-Date).AddSeconds($Seconds)
+  do {
+    foreach ($url in $urls) {
+      try { Invoke-WebRequest -Uri "${url}api/status" -UseBasicParsing -TimeoutSec 3 | Out-Null } catch { continue }
+      try {
+        $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
+        [IO.File]::WriteAllText((Join-Path $desktop 'ag-farm.url'), "[InternetShortcut]`r`nURL=$url`r`n", [Text.Encoding]::ASCII)
+      } catch {
+        Write-Warning "Khong tao duoc shortcut tren Desktop ($($_.Exception.Message))"
+      }
+      return $url
+    }
+    Start-Sleep -Seconds 2
+  } while ((Get-Date) -lt $deadline)
+  return $null
+}
+
+# ---- Chuyển thư mục cài (Move-AgWorker) ----
+
+# Chép cây thư mục bằng robocopy (giữ giờ, thử lại khi file bận), bỏ các thư mục $Exclude (đường dẫn đầy đủ).
+function Copy-AgTree {
+  param([string]$From, [string]$To, [string[]]$Exclude = @())
+  $rcArgs = @($From, $To, '/E', '/COPY:DAT', '/DCOPY:T', '/R:2', '/W:2', '/MT:8', '/NP', '/NFL', '/NDL')
+  if ($Exclude.Count -gt 0) { $rcArgs += '/XD'; $rcArgs += $Exclude }
+  & robocopy.exe @rcArgs | Out-Host
+  # robocopy: 0-7 là xong (1 = có chép), từ 8 là lỗi
+  if ($LASTEXITCODE -ge 8) { throw "robocopy loi (ma $LASTEXITCODE) khi chep $From sang $To" }
+}
+
+# Tổng dung lượng file trong $Path, bỏ các thư mục $Exclude.
+function Get-AgDirSize {
+  param([string]$Path, [string[]]$Exclude = @())
+  $files = Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue |
+    Where-Object { $f = $_.FullName; -not ($Exclude | Where-Object { Test-AgPathUnder $f $_ }) }
+  return [long](($files | Measure-Object -Property Length -Sum).Sum)
+}
+
+# Thư mục không cần chép khi chuyển: việc dở (work), gói đang giải nén (staging), file tải tạm (tmp); cache tải lại được
+# nên chỉ chép khi -CopyCache.
+function Get-AgMoveExcludes {
+  param([string]$From, [string[]]$Roles, [switch]$CopyCache)
+  $out = @(Join-Path $From 'tmp')
+  foreach ($role in $Roles) { $out += (Join-Path $From "$role\work"); $out += (Join-Path $From "$role\staging") }
+  if (-not $CopyCache) { $out += (Join-Path $From 'cache') }
+  return , $out
+}
+
+# Đổi đường dẫn nằm trong thư mục cài cũ sang thư mục mới (config.yaml: work_dir, cache.dir, updater_dir, extra...).
+# Chỉ đổi đúng thư mục đó: chuyển C:\ag-farm không đụng C:\ag-farm2.
+function Convert-AgConfigPaths {
+  param([string]$Text, [string]$From, [string]$To)
+  $pattern = [regex]::Escape($From.TrimEnd('\')) + '(?=\\|''|"|\s|$)'
+  $options = [Text.RegularExpressions.RegexOptions]'IgnoreCase, Multiline'
+  return [regex]::Replace($Text, $pattern, $To.TrimEnd('\').Replace('$', '$$'), $options)
+}
+
+# Dừng mọi thứ của một thư mục cài: các task ag-farm-*, tiến trình chạy từ thư mục đó (node, cmd, python của venv,
+# ffmpeg...) và Ollama.
+function Stop-AgInstall {
+  param([string]$InstallDir)
+  foreach ($task in @($AgUpdaterTask, 'ag-farm-scan', 'ag-farm-render', 'ag-farm-ollama')) {
+    if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue }
+  }
+  $needle = "$($InstallDir.TrimEnd('\'))\"
+  $procs = Get-CimInstance Win32_Process | Where-Object {
+    $_.ProcessId -ne $PID -and (
+      "$($_.CommandLine)".IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+      "$($_.ExecutablePath)".IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+  }
+  foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+  Get-Process -Name 'ollama', 'ollama app' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 3
+}
+
+# venv chép sang chỗ mới: python.exe vẫn chạy (pyvenv.cfg trỏ Python gốc), nhưng các .exe trong Scripts (yt-dlp.exe)
+# ghi cứng python của venv cũ. Cài lại yt-dlp (không đụng gói khác) để pip viết lại launcher.
+function Repair-AgVenvLaunchers {
+  param([string]$InstallDir)
+  $py = Join-Path $InstallDir 'venv\Scripts\python.exe'
+  if (-not (Test-Path -LiteralPath $py)) { return }
+  Write-Host 'Viet lai yt-dlp.exe cho venv o cho moi'
+  & $py -m pip install --force-reinstall --no-deps --quiet yt-dlp | Out-Host
+  if ($LASTEXITCODE -ne 0) { Write-Warning 'Khong cai lai duoc yt-dlp trong venv moi (setup-render.ps1 se thu lai)' }
+}
+
+# Đăng ký lại task về một thư mục cài đã có (quay về chỗ cũ khi chuyển không thành).
+function Restore-AgInstallTasks {
+  param([string]$InstallDir, [string[]]$Roles, [string]$OllamaModels)
+  Set-AgInstallDirRecord $InstallDir
+  if ($OllamaModels) { [Environment]::SetEnvironmentVariable('OLLAMA_MODELS', $OllamaModels, 'Machine') }
+  $serve = Join-Path $InstallDir 'ollama\ollama-serve.cmd'
+  if (Test-Path -LiteralPath $serve) { Register-AgTask -TaskName 'ag-farm-ollama' -CmdPath $serve -WorkDir (Split-Path -Parent $serve) -Priority 6 }
+  foreach ($role in $Roles) {
+    $roleDir = Join-Path $InstallDir $role
+    Register-AgTask -TaskName "ag-farm-$role" -CmdPath (Join-Path $roleDir 'app\run.cmd') -WorkDir (Join-Path $roleDir 'app') -Priority (Get-AgRolePriority $role)
+  }
+  if (Test-Path -LiteralPath (Join-Path $InstallDir 'updater\update.ps1')) { Register-AgUpdaterTask -InstallDir $InstallDir }
+}
+
+# Chuyển máy đã cài sang thư mục khác (thường là ổ khác), giữ token, config, venv, model, log:
+#   iwr https://<farm>/dist/install.ps1 -UseBasicParsing | iex; Move-AgWorker -To D:\ag-farm
+# Dừng worker (việc đang chạy dở được hub giao lại khi hết lease), chép thư mục cài sang chỗ mới (bỏ work, staging, tmp;
+# cache chỉ chép khi -CopyCache), đổi đường dẫn trong config.yaml, rồi chạy Install-AgWorker ở chỗ mới (tải gói mới
+# nhất, setup-render.ps1, đăng ký lại task). Lỗi, hoặc worker ở chỗ mới không gửi heartbeat thì đăng ký task về chỗ cũ
+# (thư mục cũ chưa bị đụng). Xong thì hỏi xoá thư mục cũ (-Yes: xoá luôn).
+function Move-AgWorker {
+  param(
+    [Parameter(Mandatory = $true)][string]$To,
+    # Bỏ trống: chỗ máy đã cài (Find-AgInstallDir).
+    [string]$From,
+    # Bỏ trống: hub_url trong config.yaml.
+    [string]$Hub,
+    [switch]$CopyCache,
+    [switch]$Yes
+  )
+  $ErrorActionPreference = 'Stop'
+  try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+  $ProgressPreference = 'SilentlyContinue'
+  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+  if (-not (Test-AgAdmin)) { throw 'Hay mo PowerShell bang "Run as Administrator" roi chay lai lenh.' }
+
+  if (-not $From) { $From = Find-AgInstallDir }
+  if (-not $From) { throw 'Khong tim thay thu muc cai worker tren may nay (truyen -From <thu muc>)' }
+  $From = ConvertTo-AgInstallDir $From
+  $To = ConvertTo-AgInstallDir $To
+  if (Test-AgSamePath $From $To) { throw "Worker da o $To" }
+  if ((Test-AgPathUnder $To $From) -or (Test-AgPathUnder $From $To)) { throw "$From va $To khong duoc nam trong nhau" }
+  if ((Test-Path -LiteralPath $To) -and @(Get-ChildItem -Force -LiteralPath $To).Count -gt 0) { throw "$To da co file: chon thu muc trong hoac chua co" }
+
+  $roles = @($AgRolePackages.Keys | Where-Object { Test-Path -LiteralPath (Join-Path $From "$_\config.yaml") })
+  if ($roles.Count -eq 0) { throw "$From khong co worker nao (thieu <vai tro>\config.yaml)" }
+  if (-not $Hub) { $Hub = Read-AgConfigValue (Join-Path $From "$($roles[0])\config.yaml") 'hub_url' }
+  $Hub = $Hub.TrimEnd('/')
+
+  $exclude = Get-AgMoveExcludes -From $From -Roles $roles -CopyCache:$CopyCache
+  $need = Get-AgDirSize -Path $From -Exclude $exclude
+  $drive = (Split-Path -Qualifier $To).TrimEnd(':')
+  $free = (Get-PSDrive -Name $drive).Free
+  if ($free -lt $need + 20GB) {
+    throw "O $drive con $([Math]::Round($free / 1GB)) GB, can $([Math]::Round(($need + 20GB) / 1GB)) GB ($([Math]::Round($need / 1GB, 1)) GB can chep + 20 GB cho viec)"
+  }
+  Write-Host "Chuyen worker $($roles -join ', ') tu $From sang $To (chep $([Math]::Round($need / 1GB, 1)) GB)"
+  if (-not (Confirm-AgStep 'Worker se dung trong luc chuyen, viec dang chay do duoc hub giao lai sau khi het lease. Tiep tuc?' -Yes:$Yes)) { throw 'Da huy' }
+
+  $oldModels = [Environment]::GetEnvironmentVariable('OLLAMA_MODELS', 'Machine')
+  Stop-AgInstall -InstallDir $From
+  $moved = $false
+  try {
+    Copy-AgTree -From $From -To $To -Exclude $exclude
+    # Model Ollama nằm ngoài thư mục cài (thư mục của người cài trên ổ C): chép theo để khỏi tải lại.
+    if ($roles -contains 'scan' -and $oldModels -and -not (Test-AgPathUnder $oldModels $From) -and (Test-Path -LiteralPath (Join-Path $oldModels 'manifests'))) {
+      Copy-AgTree -From $oldModels -To (Join-Path $To 'ollama\models')
+    }
+    foreach ($role in $roles) {
+      $cfg = Join-Path $To "$role\config.yaml"
+      $text = Get-Content -Raw -Encoding UTF8 -LiteralPath $cfg
+      [IO.File]::WriteAllText($cfg, (Convert-AgConfigPaths -Text $text -From $From -To $To), (New-Object Text.UTF8Encoding($false)))
+    }
+    Repair-AgVenvLaunchers -InstallDir $To
+    # Install-AgWorker tìm thư mục cài ở registry: trỏ sang chỗ mới trước để nó không hỏi "máy đang cài ở chỗ khác".
+    Set-AgInstallDirRecord $To
+    $startedAt = Get-Date
+    Install-AgWorker -Hub $Hub -InstallDir $To -Yes
+
+    $moved = $true
+    foreach ($role in $roles) {
+      $token = Read-AgConfigValue (Join-Path $To "$role\config.yaml") 'token'
+      if (-not (Wait-AgOnline -Hub $Hub -Token $token -Seconds 60 -Since $startedAt)) {
+        Write-Warning "$role chua gui heartbeat tu $To"
+        $moved = $false
+      }
+    }
+    if (-not $moved) { throw "Worker o $To chua chay (xem $To\<vai tro>\logs\worker.log)" }
+  } catch {
+    Write-Warning "Chuyen loi: $($_.Exception.Message). Dang ky lai worker o $From"
+    Stop-AgInstall -InstallDir $To
+    Restore-AgInstallTasks -InstallDir $From -Roles $roles -OllamaModels $oldModels
+    Write-Warning "Worker chay lai o $From. Thu muc $To giu nguyen de xem log; xoa tay roi chay lai Move-AgWorker."
+    throw
+  }
+
+  Write-Host "Worker da chay o $To" -ForegroundColor Green
+  if (Confirm-AgStep "Xoa thu muc cu $From?" -Yes:$Yes) {
+    Remove-Item -Recurse -Force -LiteralPath $From -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $From) { Write-Warning "Con file trong $From chua xoa duoc (dang bi khoa): xoa tay sau khi khoi dong lai may" }
+    else { Write-Host "Da xoa $From" }
+  }
 }

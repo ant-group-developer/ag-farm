@@ -37,6 +37,8 @@ import {
   writeUpdateRequest,
 } from './self-update';
 import type { SelfUpdaterDeps } from './self-update';
+import { LocalStatusBoard, startLocalUi } from './local-ui';
+import type { LocalJobOutcome } from './local-ui';
 import { SlotAllocator, loadMachineConfig } from './machine';
 import { MachineSampler } from './metrics';
 import { collectLogs, defaultLogDirs } from './node-logs';
@@ -165,6 +167,10 @@ export interface RunWorkerOptions {
    * nhóm. Config `exclusive_kinds` ghi đè.
    */
   exclusiveKinds?: JobType[];
+  /** Trang trên máy: ghi đè `local_ui` của config (tests: `{ port: 0 }` lấy cổng trống, `false` tắt). */
+  localUi?: { port: number } | false;
+  /** Gọi khi trang trên máy đã mở, với địa chỉ của nó (tests). */
+  onLocalUi?: (url: string) => void;
 }
 
 // ---- Runner ----
@@ -237,8 +243,11 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
 
   let running = true;
   let claimEnabled = true;
+  const startedAt = new Date().toISOString();
 
   const activeJobs = new Map<string, AbortController>();
+  // Trang trên máy (http://127.0.0.1:<port>): việc đang chạy / vừa xong và log, cho người ngồi ở máy.
+  const board = new LocalStatusBoard();
   /** Per running job: hands it back to the hub (`fail` retryable) and stops it, when the worker must update. */
   const releasers = new Map<string, (reason: string) => Promise<void>>();
 
@@ -290,6 +299,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
         });
         res = await hub.heartbeat(base);
       }
+      board.heartbeat(true);
 
       if (res.status === 'disabled') {
         claimEnabled = false;
@@ -298,6 +308,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
         claimEnabled = !config.schedule || isWithinSchedule(config.schedule ?? []);
       }
     } catch (err) {
+      board.heartbeat(false, err);
       log.warn('Heartbeat failed', { err: String(err) });
     }
   };
@@ -353,10 +364,33 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     })();
   }
 
+  const uiConfig = options.localUi ?? config.local_ui;
+  const localUi = uiConfig
+    ? await startLocalUi({
+        port: uiConfig.port,
+        board,
+        name: config.name,
+        logDirs,
+        peersDir: join(dirname(machineFile), 'local-ui'),
+        log,
+        info: () => ({
+          name: config.name,
+          version,
+          pid: process.pid,
+          started_at: startedAt,
+          kinds,
+          free_slots: allocator.freeSlots(),
+          update: updater?.report ?? null,
+        }),
+      })
+    : null;
+  if (localUi) options.onLocalUi?.(localUi.url);
+
   // Claim loop
   while (running || activeJobs.size > 0) {
     if (!running) {
       // Waiting for running jobs to finish
+      board.claim = 'stopping';
       await sleep(200);
       continue;
     }
@@ -364,6 +398,13 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     // Kiểm lịch chạy
     const withinSchedule = !config.schedule || isWithinSchedule(config.schedule ?? []);
     if (!withinSchedule) claimEnabled = false;
+    board.claim = updater?.pausesClaims
+      ? 'updating'
+      : !withinSchedule
+        ? 'outside_schedule'
+        : !claimEnabled
+          ? 'disabled'
+          : 'claiming';
 
     // Đang chờ việc chạy xong để cập nhật, hoặc đã giao cho updater: không nhận việc mới.
     if (!claimEnabled || updater?.pausesClaims) {
@@ -441,6 +482,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
 
   allocator.setWanted(false);
   sampler?.stop();
+  await localUi?.close();
   log.info('Worker stopped');
 
   // ---- Tự cập nhật ----
@@ -536,6 +578,11 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
 
     const abortCtrl = new AbortController();
     activeJobs.set(job.id, abortCtrl);
+    board.jobStarted(job);
+    // Kết quả hiện ở trang trên máy; `handedBack`: job trả lại hub vì worker phải cập nhật.
+    let handedBack = false;
+    const finish = (outcome: LocalJobOutcome, error?: JobError): void =>
+      board.jobFinished(job.id, outcome, error ? { code: error.code, message: error.message } : undefined);
 
     // Slot hiện giữ; null trong lúc job batch đang nhường slot cho việc interactive.
     let slot: SlotHandle | null = initialSlot;
@@ -583,6 +630,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
         ...(percent !== undefined ? { percent } : latest.percent !== undefined ? { percent: latest.percent } : {}),
         ...(stage !== undefined ? { stage } : latest.stage !== undefined ? { stage: latest.stage } : {}),
       };
+      board.jobProgress(job.id, percent, stage);
       const wait = lastSentAt + progressMinGapMs - Date.now();
       if (wait <= 0) {
         void sendProgress();
@@ -607,6 +655,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
     releasers.set(job.id, async (reason) => {
       if (abortCtrl.signal.aborted) return;
       stopTimers();
+      handedBack = true;
       try {
         await hub.fail(job.id, { lease_token: leaseToken, error: { code: 'worker_updating', message: reason, retryable: true } });
         jobLog.warn('Job handed back to the hub', { reason });
@@ -666,11 +715,10 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
       activeJobs.delete(job.id);
       releasers.delete(job.id);
       releaseAll();
+      const invalid: JobError = { code: 'INVALID_PAYLOAD', message: payloadResult.error.message.slice(0, 2000), retryable: false };
+      finish('failed', invalid);
       try {
-        await hub.fail(job.id, {
-          lease_token: leaseToken,
-          error: { code: 'INVALID_PAYLOAD', message: payloadResult.error.message.slice(0, 2000), retryable: false },
-        });
+        await hub.fail(job.id, { lease_token: leaseToken, error: invalid });
       } catch { /* ignore */ }
       try { rmSync(workDir, { recursive: true, force: true }); } catch { /* ignore */ }
       return;
@@ -722,16 +770,21 @@ export async function runWorker(options: RunWorkerOptions): Promise<void> {
       if (!abortCtrl.signal.aborted) {
         await completeWithRetry(result);
         jobLog.info('Job completed', { manifest: result.manifest });
+        finish('completed');
+      } else {
+        finish(handedBack ? 'handed_back' : 'aborted');
       }
     } catch (err) {
       stopTimers();
 
       if (err instanceof LeaseLostError || abortCtrl.signal.aborted) {
         jobLog.warn('Job aborted', { reason: err instanceof LeaseLostError ? err.reason : 'signal' });
+        finish(handedBack ? 'handed_back' : 'aborted');
         // Không gọi fail: lease đã mất hoặc job bị cancel
       } else {
         const jobError = errorToJobError(err);
         jobLog.error('Job failed', { code: jobError.code, retryable: jobError.retryable });
+        finish('failed', jobError);
         try {
           await hub.fail(job.id, { lease_token: leaseToken, error: jobError });
         } catch (failErr) {

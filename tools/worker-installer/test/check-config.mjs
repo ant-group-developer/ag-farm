@@ -28,6 +28,7 @@ expect(noKinds.kinds === undefined, 'config without kinds loads (the worker comp
 expect(noKinds.extra.ollama_url === 'http://127.0.0.1:11434', 'config without kinds keeps extra');
 expect(noKinds.updater_task === 'ag-farm-updater' && noKinds.updater_dir === 'C:\\ag-farm\\updater', 'self-update keys load');
 expect(noKinds.update_check_minutes === 15 && noKinds.update_drain_minutes === 30, 'self-update minutes are numbers');
+expect(noKinds.local_ui?.port === 47811, 'local_ui.port loads as a number');
 expect(machine.cpu_slots === 4 && machine.gpu_slots === 1, 'machine slots');
 expect(machine.reserve_interactive.cpu === 1 && machine.reserve_interactive.gpu === 0, 'reserve_interactive');
 console.log('config do install.ps1 sinh ra hop le voi worker-sdk');

@@ -7,6 +7,7 @@ export { childEnvWithoutSecrets, runProcess } from './process';
 export type { ProcessResult, RunProcessOptions } from './process';
 export * from './hub-client';
 export * from './kinds';
+export * from './local-ui';
 export * from './logger';
 export * from './machine';
 export * from './metrics';
